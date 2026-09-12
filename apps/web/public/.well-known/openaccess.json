@@ -1,0 +1,29 @@
+{
+  "openaccess": "0.1",
+  "name": "Infernet Protocol",
+  "url": "https://infernetprotocol.com",
+  "operator": "https://logicsrc.com/.well-known/openprofile.md",
+  "redirect_uris": [
+    "https://infernetprotocol.com/api/v1/openaccess/callback"
+  ],
+  "jwks": {
+    "keys": [
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "kid": "LrIQXbJtHaBE",
+        "x": "ywON7G8QYYet_zu12vUYaueRWxm9xIDqCRpY6UQZovA",
+        "alg": "EdDSA",
+        "use": "sig"
+      }
+    ]
+  },
+  "scopes": {},
+  "honours": [
+    "profullstack.com/all-access"
+  ],
+  "webhooks": "https://infernetprotocol.com/api/v1/openaccess/events",
+  "hubs": [
+    "https://openaccess.logicsrc.com"
+  ]
+}
