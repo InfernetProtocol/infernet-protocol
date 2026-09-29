@@ -14,20 +14,20 @@
  *
  * Env:
  *   CRON_SECRET          the app's cron secret (from the vault)
- *   INFERNET_APP_URL     optional, default https://infernetprotocol.com
  */
 
-const base = (process.env.INFERNET_APP_URL || "https://infernetprotocol.com").replace(/\/+$/, "");
 const secret = process.env.CRON_SECRET;
 if (!secret) {
     console.error("CRON_SECRET is not set");
     process.exit(1);
 }
 
-const dryRun = process.argv.includes("--dry-run");
-const url = `${base}/api/cron/daily-stats${dryRun ? "?dry_run=1" : ""}`;
-
-const res = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${secret}` } });
+// Literal URLs on purpose: the target is always production, never taken
+// from the environment.
+const init = { method: "POST", headers: { Authorization: `Bearer ${secret}` } };
+const res = process.argv.includes("--dry-run")
+    ? await fetch("https://infernetprotocol.com/api/cron/daily-stats?dry_run=1", init)
+    : await fetch("https://infernetprotocol.com/api/cron/daily-stats", init);
 const body = await res.text();
 console.log(body);
 if (!res.ok) {
