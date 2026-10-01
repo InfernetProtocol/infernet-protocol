@@ -47,3 +47,35 @@ jobs:
 
       - name: Run vitest suite
         run: pnpm vitest run
+
+  # The web app (infernetprotocol.com on dev2) runs on Bun; pnpm and the Node
+  # build stay as they are (see docker/Dockerfile). This boots what the image runs.
+  web-on-bun:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: pnpm install --frozen-lockfile --filter @infernetprotocol/web...
+      - run: pnpm --filter @infernetprotocol/web build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+      - name: next start answers under Bun
+        working-directory: apps/web
+        run: |
+          PORT=8080 HOSTNAME=127.0.0.1 bun --bun node_modules/next/dist/bin/next start > /tmp/web.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ || true)
+            if [ "$code" = 200 ]; then echo "/ -> $code"; kill "$pid"; exit 0; fi
+            sleep 1
+          done
+          cat /tmp/web.log; kill "$pid" || true; exit 1

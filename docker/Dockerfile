@@ -62,26 +62,38 @@ COPY install.sh    ./install.sh
 RUN pnpm --filter @infernetprotocol/web build
 
 # ---------------------------------------------------------------------------
-# Production — minimal runtime image.
+# Production — runs on Bun.
 #
-# Future optimization: switch apps/web/next.config.js to
-# `output: 'standalone'` and copy only the standalone output. For now
-# we keep the workspace tree intact so `pnpm start` works directly.
+# pnpm stays the monorepo's package manager and Next builds on Node above:
+# the CLI, daemon, desktop and mobile apps and the npm release depend on
+# pnpm. What runs in production is `next start` for apps/web, and that runs
+# on Bun: alpine:3.24 (the Alpine node:lts-alpine is on) with Bun's musl
+# binary copied in, Next's own entry file run by Bun as one process.
+# The workspace tree is kept intact as before (non-standalone), so request-
+# time reads such as public/install.sh resolve exactly as they did.
 # ---------------------------------------------------------------------------
-FROM base AS production
+FROM oven/bun:1.4.0-alpine AS bun
+
+FROM alpine:3.24 AS production
+RUN apk add --no-cache libstdc++ libgcc ca-certificates
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+RUN addgroup -S -g 1000 bun && adduser -S -D -u 1000 -G bun -h /home/bun bun
+WORKDIR /app
 ENV NODE_ENV=production \
     PORT=8080 \
     HOSTNAME=0.0.0.0
 
-COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY --from=builder /app/pnpm-lock.yaml      ./pnpm-lock.yaml
-COPY --from=builder /app/package.json        ./package.json
-COPY --from=builder /app/apps/web            ./apps/web
-COPY --from=builder /app/packages            ./packages
-COPY --from=builder /app/node_modules        ./node_modules
+COPY --from=builder --chown=bun:bun /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=builder --chown=bun:bun /app/pnpm-lock.yaml      ./pnpm-lock.yaml
+COPY --from=builder --chown=bun:bun /app/package.json        ./package.json
+COPY --from=builder --chown=bun:bun /app/apps/web            ./apps/web
+COPY --from=builder --chown=bun:bun /app/packages            ./packages
+COPY --from=builder --chown=bun:bun /app/node_modules        ./node_modules
 
+USER bun
 EXPOSE 8080
 
-# pnpm --filter resolves the workspace and runs `next start` in
-# /app/apps/web with the right node_modules on PATH.
-CMD ["pnpm", "--filter", "@infernetprotocol/web", "start"]
+# `next start` in /app/apps/web, as `pnpm --filter @infernetprotocol/web start`
+# did, with Next's entry file run directly by Bun.
+WORKDIR /app/apps/web
+CMD ["bun", "--bun", "node_modules/next/dist/bin/next", "start"]

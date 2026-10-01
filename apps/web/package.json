@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "next dev -p 8080",
     "build": "next build",
-    "start": "next start",
+    "start": "bun --bun next start",
     "lint": "next lint",
     "predev": "node scripts/build-book-data.mjs && node scripts/sync-install-sh.mjs",
     "prebuild": "node scripts/build-book-data.mjs && node scripts/sync-install-sh.mjs",
