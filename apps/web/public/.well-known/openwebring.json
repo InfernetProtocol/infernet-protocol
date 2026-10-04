@@ -1,0 +1,6 @@
+{
+  "openwebring": "0.1",
+  "site": { "url": "https://infernetprotocol.com/", "name": "Infernet Protocol" },
+  "made_by": "both",
+  "rings": [{ "ring": "https://rssamplifier.com/ring/profullstack", "slug": "infernetprotocol-com" }]
+}

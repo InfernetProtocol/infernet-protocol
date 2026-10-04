@@ -81,6 +81,11 @@ export default function SiteFooter() {
 
             <div className="mt-10 flex flex-col gap-3 border-t border-white/10 pt-6 text-sm text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between">
                 <p>© {new Date().getFullYear()} Infernet Protocol — open source, MIT licensed.</p>
+                <nav className="webring flex items-center gap-2" aria-label="Profullstack webring">
+                    <a href="https://rssamplifier.com/ring/profullstack/previous?from=https%3A%2F%2Finfernetprotocol.com%2F" rel="prev" className="hover:text-white">{"<<"}</a>
+                    <a href="https://rssamplifier.com/ring/profullstack" className="hover:text-white">Profullstack</a>
+                    <a href="https://rssamplifier.com/ring/profullstack/next?from=https%3A%2F%2Finfernetprotocol.com%2F" rel="next" className="hover:text-white">{">>"}</a>
+                </nav>
                 <p>
                     <Link href="/auth/login" className="hover:text-white">
                         Sign in
