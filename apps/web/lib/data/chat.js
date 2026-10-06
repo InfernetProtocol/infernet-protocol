@@ -182,8 +182,8 @@ export function headroomScore(c) {
  *      via the NIM fallback. The SSE stream route detects this and
  *      streams from build.nvidia.com directly while mirroring events
  *      into job_events for a uniform audit trail.
- *   3. If neither is available, the job is left 'pending' and callers
- *      should warn the user that the network is idle.
+ *   3. If neither is available, the job is recorded as 'failed' with a
+ *      `no_provider:` error and callers answer 503.
  *
  * @param {Object} params
  * @param {Array<{role: string, content: string}>} params.messages
@@ -203,6 +203,16 @@ export function headroomScore(c) {
  * @param {number} [params.maxTokens]
  * @param {number} [params.temperature]
  */
+/**
+ * The error recorded on a chat job no provider could take. Starts with
+ * `no_provider:` so unmet demand can be counted apart from engine failures.
+ */
+export function noProviderError(modelName) {
+  return modelName
+    ? `no_provider: no live provider serves model "${modelName}" and the NVIDIA NIM fallback is not configured`
+    : "no_provider: no live provider and the NVIDIA NIM fallback is not configured";
+}
+
 export async function createChatJob({
   messages,
   encryptedMessages,
@@ -255,7 +265,12 @@ export async function createChatJob({
     ...(distributed ? { distributed: true } : {})
   };
 
-  const status = p2pProvider ? "assigned" : nimAvailable ? "running" : "pending";
+  // Nothing can serve this request. Nothing ever picks up an unassigned
+  // 'pending' chat job either (daemons poll for jobs assigned to them), so a
+  // pending row here just sat forever and inflated the pending count. Record
+  // it as failed instead: the row still shows the unmet demand (which model
+  // people asked for), and the caller answers 503.
+  const status = p2pProvider ? "assigned" : nimAvailable ? "running" : "failed";
 
   const insertRow = {
     title: modelName ? `chat:${modelName}` : "chat",
@@ -268,6 +283,10 @@ export async function createChatJob({
     assigned_at: p2pProvider || nimAvailable ? now : null,
     updated_at: now
   };
+  if (source === "none") {
+    insertRow.error = noProviderError(modelName);
+    insertRow.completed_at = now;
+  }
 
   if (e2e && clientPubkey) insertRow.client_pubkey = clientPubkey;
   if (e2e && modelPubkey) insertRow.model_pubkey = modelPubkey;
