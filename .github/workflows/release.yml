@@ -80,6 +80,11 @@ jobs:
           # "private": true in their package.json so pnpm publish skips
           # them by default; they're consumed via workspace:* inside the
           # monorepo and never need to be on npm.
+          #
+          # Every workspace dependency of @infernetprotocol/cli must be in
+          # this list, or `npm i -g @infernetprotocol/cli` fails with E404.
+          # rpc-adapter was missing from 0.1.45 to 0.1.53;
+          # tests/release-publish-list.test.js guards it now.
           pnpm publish \
             --filter "@infernetprotocol/cli" \
             --filter "@infernetprotocol/sdk" \
@@ -88,6 +93,7 @@ jobs:
             --filter "@infernetprotocol/deploy-providers" \
             --filter "@infernetprotocol/engine" \
             --filter "@infernetprotocol/gpu" \
+            --filter "@infernetprotocol/rpc-adapter" \
             --access public \
             --no-git-checks \
             --tag latest
