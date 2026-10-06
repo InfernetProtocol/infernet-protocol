@@ -120,6 +120,23 @@ describe("POST /api/cron/daily-stats", () => {
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it("counts the models live nodes serve, not the empty models table", async () => {
+        state.rows = {
+            providers: [
+                { specs: { served_models: ["qwen2.5:0.5b", "gemma3:4b"] } },
+                { specs: { served_models: ["qwen2.5:0.5b"] } },
+                { specs: {} }
+            ]
+        };
+        const res = await POST(req("/api/cron/daily-stats?dry_run=1"));
+        const body = await res.json();
+        expect(body.stats.models.served24h).toEqual(["gemma3:4b", "qwen2.5:0.5b"]);
+        expect(typeof body.stats.nodes.live).toBe("number");
+        const report = renderDailyStats(body.stats);
+        expect(report.text).toContain("Served by nodes seen in 24h: 2 (gemma3:4b, qwen2.5:0.5b)");
+        expect(report.html).toContain("gemma3:4b, qwen2.5:0.5b");
+    });
+
     it("a query error sends nothing (500)", async () => {
         vi.spyOn(console, "error").mockImplementation(() => {});
         state.fail = "node_commands";

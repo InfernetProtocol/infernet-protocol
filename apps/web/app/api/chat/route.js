@@ -73,7 +73,9 @@ export async function POST(request) {
       minTrustTier
     });
     if (source === "none") {
-      return err(503, "The Infernet network has no live providers and the NVIDIA NIM fallback is not configured.", {
+      return err(503, typeof modelName === "string" && modelName
+        ? `No live provider on the Infernet network serves "${modelName}" right now.`
+        : "The Infernet network has no live providers and the NVIDIA NIM fallback is not configured.", {
         hint: "Set NVIDIA_NIM_API_KEY on the control plane or wait for a provider to come online."
       });
     }

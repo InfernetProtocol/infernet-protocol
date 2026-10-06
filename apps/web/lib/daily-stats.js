@@ -50,6 +50,25 @@ async function count(supabase, table, { eq, gte } = {}) {
     return c;
 }
 
+/**
+ * The `models` table is a hand-curated catalog nothing writes, so it reads 0
+ * however many models the network serves. What providers actually serve is
+ * specs.served_models, refreshed by every heartbeat.
+ */
+async function servedModels(supabase, sinceIso) {
+    const { data, error } = await supabase
+        .from("providers")
+        .select("specs")
+        .gte("last_seen", sinceIso);
+    if (error) throw new DailyStatsQueryError("servedModels(providers)", errMessage(error));
+    const names = new Set();
+    for (const row of data ?? []) {
+        const served = row?.specs?.served_models;
+        if (Array.isArray(served)) for (const m of served) if (typeof m === "string" && m) names.add(m);
+    }
+    return [...names].sort();
+}
+
 async function recent(supabase, table, columns, limit) {
     const { data, error } = await supabase
         .from(table)
@@ -87,8 +106,8 @@ export async function collectDailyStats(supabase, now = new Date()) {
 
     const [
         users,
-        nodesTotal, nodesAvailable, nodesOffline, nodesSeen24h, nodesNew24h, nodesNew7d, recentNodes,
-        modelsTotal, modelsPublic, modelsNew7d,
+        nodesTotal, nodesAvailable, nodesLive, nodesOffline, nodesSeen24h, nodesNew24h, nodesNew7d, recentNodes,
+        modelsTotal, modelsPublic, modelsNew7d, served24h,
         jobsTotal, jobsPending, jobsAssigned, jobsRunning, jobsCompleted, jobsFailed, jobs24h, jobs7d, recentJobs,
         distTotal, dist24h,
         trainingTotal, training24h, shardsTotal, shardsCompleted,
@@ -101,6 +120,7 @@ export async function collectDailyStats(supabase, now = new Date()) {
         authUserStats(supabase, now),
         count(supabase, "providers"),
         count(supabase, "providers", { eq: { status: "available" } }),
+        count(supabase, "providers", { gte: ["last_seen", ago(1 / 6)] }),
         count(supabase, "providers", { eq: { status: "offline" } }),
         count(supabase, "providers", { gte: ["last_seen", d1] }),
         count(supabase, "providers", { gte: ["created_at", d1] }),
@@ -109,6 +129,7 @@ export async function collectDailyStats(supabase, now = new Date()) {
         count(supabase, "models"),
         count(supabase, "models", { eq: { visibility: "public" } }),
         count(supabase, "models", { gte: ["created_at", d7] }),
+        servedModels(supabase, d1),
         count(supabase, "jobs"),
         count(supabase, "jobs", { eq: { status: "pending" } }),
         count(supabase, "jobs", { eq: { status: "assigned" } }),
@@ -150,13 +171,14 @@ export async function collectDailyStats(supabase, now = new Date()) {
         nodes: {
             total: nodesTotal,
             available: nodesAvailable,
+            live: nodesLive,
             offline: nodesOffline,
             seen24h: nodesSeen24h,
             new24h: nodesNew24h,
             new7d: nodesNew7d
         },
         recentNodes,
-        models: { total: modelsTotal, public: modelsPublic, new7d: modelsNew7d },
+        models: { total: modelsTotal, public: modelsPublic, new7d: modelsNew7d, served24h },
         jobs: {
             total: jobsTotal,
             pending: jobsPending,
@@ -223,6 +245,7 @@ USERS (auth accounts)
 NODES (providers)
   Total: ${nodes.total}
   Available: ${nodes.available}
+  Live (heartbeat in last 10 min): ${nodes.live}
   Offline: ${nodes.offline}
   Seen (24h): ${nodes.seen24h}
   New (24h): ${nodes.new24h}
@@ -232,7 +255,8 @@ RECENT NODES
 ${s.recentNodes.map((n) => `  - ${n.name || "(unnamed)"} [${n.status}] ${n.gpu_model || ""} (${day(n.created_at)})`).join("\n") || "  (none)"}
 
 MODELS
-  Total: ${models.total}
+  Served by nodes seen in 24h: ${models.served24h.length}${models.served24h.length ? ` (${models.served24h.join(", ")})` : ""}
+  Catalog (models table): ${models.total}
   Public: ${models.public}
   New (7d): ${models.new7d}
 
@@ -314,6 +338,7 @@ LEGACY TABLES
     ${table([
         row("Total", nodes.total, " font-weight: bold;"),
         row("Available", nodes.available, " color: #16a34a;"),
+        row("Live (10 min)", nodes.live, " color: #16a34a;"),
         row("Offline", nodes.offline),
         row("Seen (24h)", nodes.seen24h),
         row("New (24h)", nodes.new24h, green(nodes.new24h)),
@@ -322,10 +347,12 @@ LEGACY TABLES
     ${list(s.recentNodes.map((n) => `<li style="margin-bottom: 4px;"><strong>${esc(n.name || "(unnamed)")}</strong> <span style="color: #999;">[${esc(n.status)}] ${esc(n.gpu_model)} · ${esc(day(n.created_at))}</span></li>`))}
     ${h2("🧩 Models")}
     ${table([
-        row("Total", models.total, " font-weight: bold;"),
+        row("Served by nodes seen (24h)", models.served24h.length, " font-weight: bold;"),
+        row("Catalog (models table)", models.total),
         row("Public", models.public),
         row("New (7d)", models.new7d)
     ])}
+    ${models.served24h.length ? `<p style="margin: 4px 0 12px; color: #666; font-size: 13px;">${esc(models.served24h.join(", "))}</p>` : ""}
     ${h2("⚙️ Inference Jobs")}
     ${table([
         row("Total", jobs.total, " font-weight: bold;"),

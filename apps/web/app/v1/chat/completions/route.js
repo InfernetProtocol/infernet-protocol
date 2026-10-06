@@ -102,7 +102,12 @@ export async function POST(request) {
     }
 
     if (jobBundle.source === "none") {
-        return err(503, "no live providers and no NIM fallback configured");
+        return err(
+            503,
+            typeof model === "string" && model
+                ? `no live provider serves model "${model}" right now; GET /v1/models lists the models the network serves`
+                : "no live providers and no NIM fallback configured"
+        );
     }
 
     const job = jobBundle.job;
