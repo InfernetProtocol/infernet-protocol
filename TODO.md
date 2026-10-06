@@ -4,6 +4,8 @@ All application data flows through **Supabase** — operators pick self-hosted (
 
 ## Next up
 
+- [ ] **Feature parity with the marketing (2026-10-06 audit):** see [docs/prd/TODO.md](docs/prd/TODO.md) (P0/P1/P2) and the PRDs in [docs/prd/](docs/prd/README.md).
+
 - [ ] IPIP-0026 Phase 3 — TEE attestation. Heartbeat carries `tee` block; control plane verifies attestation against vendor cert chain; chat UI surfaces "TEE-attested" tier.
 - [ ] IPIP-0028 Phase 3 — multi-node aggregator pattern (model key fan-out across providers). Phase 1 single-node is in.
 - [ ] IPIP-0006 Phase 3+ — NIP-78 capability publish/subscribe + libp2p Kademlia DHT for peer discovery.
