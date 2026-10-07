@@ -128,6 +128,10 @@ describe("model aliases", () => {
     it("picks the preferred served model, else the first served", () => {
         expect(aliasTargetFor({ specs: { served_models: ["qwen2.5:0.5b", "qwen2.5:7b"] } })).toBe("qwen2.5:7b");
         expect(aliasTargetFor({ specs: { served_models: ["mystery:1b", "other:2b"] } })).toBe("mystery:1b");
+        // cullen3 on 2026-10-07: qwen3:4b answered gpt-4o-mini with an empty reply.
+        expect(aliasTargetFor({ specs: { served_models: ["qwen3:4b", "qwen2.5:0.5b", "qwen2.5:3b", "gemma3:4b"] } })).toBe("gemma3:4b");
+        expect(aliasTargetFor({ specs: { served_models: ["qwen3:8b", "deepseek-r1:7b", "mistral:7b"] } })).toBe("mistral:7b");
+        expect(aliasTargetFor({ specs: { served_models: ["qwen3:8b"] } })).toBe("qwen3:8b");
         expect(aliasTargetFor({ specs: {} })).toBeNull();
         expect(aliasTargetFor(null)).toBeNull();
     });

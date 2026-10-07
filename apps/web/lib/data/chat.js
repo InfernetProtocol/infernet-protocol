@@ -234,13 +234,16 @@ export function isModelAlias(modelName) {
 }
 
 // What an alias resolves to, best first, when the picked node serves several.
-// General chat models that answer well at small sizes; anything else the node
-// serves comes after, in its own order.
+// Plain chat models that answer well at small sizes. Reasoning models come
+// last: a client that sent gpt-4o-mini with max_tokens 16 expects an answer,
+// and qwen3 spent the whole budget thinking, so the reply was empty (seen
+// live on 2026-10-07; the same prompt on gemma3:4b answered at once).
 const ALIAS_PREFERENCE = [
-  "qwen2.5:7b", "qwen3:8b", "llama3.1:8b", "qwen3:4b", "gemma3:4b",
+  "qwen2.5:7b", "llama3.1:8b", "gemma3:4b",
   "llama3.2:3b", "llama-3.2-3b:latest", "qwen2.5:3b",
   "llama3.2:1b", "llama-3.2-1b:latest", "qwen2.5:1.5b", "qwen2.5:0.5b"
 ];
+const REASONING_MODEL_RE = /^(?:qwen3|deepseek-r1|qwq|phi4-reasoning|magistral)|think/i;
 
 export function aliasTargetFor(provider) {
   const served = Array.isArray(provider?.specs?.served_models)
@@ -248,7 +251,7 @@ export function aliasTargetFor(provider) {
     : [];
   if (served.length === 0) return null;
   for (const m of ALIAS_PREFERENCE) if (served.includes(m)) return m;
-  return served[0];
+  return served.find((m) => !REASONING_MODEL_RE.test(m)) ?? served[0];
 }
 
 export async function createChatJob({
