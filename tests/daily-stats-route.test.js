@@ -137,6 +137,31 @@ describe("POST /api/cron/daily-stats", () => {
         expect(report.html).toContain("gemma3:4b, qwen2.5:0.5b");
     });
 
+    it("breaks job failures down by cause and lists unserved models", async () => {
+        state.rows = {
+            jobs: [
+                { model_name: "gpt-4o-mini", error: 'no_provider: no live provider serves model "gpt-4o-mini"' },
+                { model_name: "gpt-4o-mini", error: 'no_provider: no live provider serves model "gpt-4o-mini"' },
+                { model_name: "llama3.1:70b", error: 'no_provider: no live provider serves model "llama3.1:70b"' },
+                { model_name: "gemma3:4b", error: "expired: no provider finished this job within an hour" },
+                { model_name: "gemma3:4b", error: "daemon restarting for self-update" },
+                { model_name: "qwen2.5:7b", error: 'ollama HTTP 500: {"error":"model requires more system memory (8.3 GiB)"}' }
+            ]
+        };
+        const body = await (await POST(req("/api/cron/daily-stats?dry_run=1"))).json();
+        expect(body.stats.failures7d.total).toBe(6);
+        expect(body.stats.failures7d.byCause).toMatchObject({ no_provider: 3, expired: 1, self_update: 1, out_of_memory: 1, other: 0 });
+        expect(body.stats.failures7d.unservedModels).toEqual([
+            { model: "gpt-4o-mini", count: 2 },
+            { model: "llama3.1:70b", count: 1 }
+        ]);
+        const report = renderDailyStats(body.stats);
+        expect(report.text).toContain("no live node serves the model: 3");
+        expect(report.text).toContain("Models asked for that no live node serves: gpt-4o-mini x2, llama3.1:70b x1");
+        expect(report.text).not.toContain("Catalog (models table)");
+        expect(report.text).toContain("Failed (gave up after 8 tries)");
+    });
+
     it("a query error sends nothing (500)", async () => {
         vi.spyOn(console, "error").mockImplementation(() => {});
         state.fail = "node_commands";
@@ -157,7 +182,7 @@ describe("POST /api/cron/daily-stats", () => {
 
     it("a null count sends nothing (500)", async () => {
         vi.spyOn(console, "error").mockImplementation(() => {});
-        state.nullCount = "models";
+        state.nullCount = "cpr_receipts_queue";
         expect((await POST(req())).status).toBe(500);
         expect(fetchMock).not.toHaveBeenCalled();
     });

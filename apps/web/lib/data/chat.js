@@ -213,6 +213,44 @@ export function noProviderError(modelName) {
     : "no_provider: no live provider and the NVIDIA NIM fallback is not configured";
 }
 
+/**
+ * Names no Infernet node will ever serve: the defaults OpenAI-compatible
+ * clients send when the user never picked a model (gpt-4o-mini is the
+ * openai-python / LangChain / Cursor default), other hosted-API names, and
+ * routing placeholders like `auto` or `auto/best-fast`. In production these
+ * were the newest failures (chat:gpt-4o-mini, chat:gpt-5.2-mini,
+ * chat:auto/best-fast), each a 503 for someone trying the network.
+ *
+ * Such a request means "any good chat model", so it is served by whatever a
+ * live node runs, and the response reports the model that actually answered.
+ * A real open-model name nobody serves (llama3.1:70b, or gpt-oss, which is
+ * open weights) still fails, with the served list: substituting a different
+ * open model there would be a lie.
+ */
+const MODEL_ALIAS_RE = /^(?:auto(?:[/:-].*)?|default|any|gpt-(?!oss)[\w.:-]+|chatgpt[\w.:-]*|o[1-9](?:-[\w.:-]+)?|text-davinci[\w.:-]*|claude[\w.:-]*|gemini[\w.:-]*)$/i;
+
+export function isModelAlias(modelName) {
+  return typeof modelName === "string" && MODEL_ALIAS_RE.test(modelName.trim());
+}
+
+// What an alias resolves to, best first, when the picked node serves several.
+// General chat models that answer well at small sizes; anything else the node
+// serves comes after, in its own order.
+const ALIAS_PREFERENCE = [
+  "qwen2.5:7b", "qwen3:8b", "llama3.1:8b", "qwen3:4b", "gemma3:4b",
+  "llama3.2:3b", "llama-3.2-3b:latest", "qwen2.5:3b",
+  "llama3.2:1b", "llama-3.2-1b:latest", "qwen2.5:1.5b", "qwen2.5:0.5b"
+];
+
+export function aliasTargetFor(provider) {
+  const served = Array.isArray(provider?.specs?.served_models)
+    ? provider.specs.served_models.filter((m) => typeof m === "string" && m)
+    : [];
+  if (served.length === 0) return null;
+  for (const m of ALIAS_PREFERENCE) if (served.includes(m)) return m;
+  return served[0];
+}
+
 export async function createChatJob({
   messages,
   encryptedMessages,
@@ -248,12 +286,31 @@ export async function createChatJob({
     }
   }
 
+  // The model the job actually runs. Differs from modelName only when an
+  // alias (gpt-4o-mini, auto, ...) was resolved to a model a live node serves.
+  let servedModel = modelName;
+  let requestedModel = null;
+
   if (!p2pProvider) {
     p2pProvider = await pickChatProvider({ modelName, minTrustTier });
+    if (!p2pProvider && isModelAlias(modelName)) {
+      const anyProvider = await pickChatProvider({ minTrustTier });
+      const target = aliasTargetFor(anyProvider);
+      if (anyProvider && target) {
+        p2pProvider = anyProvider;
+        servedModel = target;
+        requestedModel = modelName;
+      }
+    }
   }
 
   const nimAvailable = !p2pProvider && isNimConfigured();
   const source = p2pProvider ? "p2p" : nimAvailable ? "nim" : "none";
+  if (nimAvailable && isModelAlias(modelName)) {
+    // NIM would 404 on "gpt-4o-mini" too; run its configured default instead.
+    servedModel = nimVirtualProvider().model;
+    requestedModel = modelName;
+  }
 
   const inputSpec = {
     ...(e2e
@@ -261,6 +318,7 @@ export async function createChatJob({
       : { messages }),
     max_tokens: maxTokens,
     temperature,
+    ...(requestedModel ? { requested_model: requestedModel } : {}),
     ...(nimAvailable ? { fallback: "nvidia-nim" } : {}),
     ...(distributed ? { distributed: true } : {})
   };
@@ -273,11 +331,11 @@ export async function createChatJob({
   const status = p2pProvider ? "assigned" : nimAvailable ? "running" : "failed";
 
   const insertRow = {
-    title: modelName ? `chat:${modelName}` : "chat",
+    title: servedModel ? `chat:${servedModel}` : "chat",
     type: "chat",
     status,
     provider_id: p2pProvider?.id ?? null,
-    model_name: modelName ?? null,
+    model_name: servedModel ?? null,
     input_spec: encryptJSON(inputSpec),
     payment_offer: 0,
     assigned_at: p2pProvider || nimAvailable ? now : null,
@@ -317,7 +375,7 @@ export async function createChatJob({
   if (error) throw error;
 
   const provider = p2pProvider ?? (nimAvailable ? nimVirtualProvider() : null);
-  return { job, provider, source };
+  return { job, provider, source, requestedModel };
 }
 
 function firstUserPrompt(messages) {
@@ -385,4 +443,17 @@ export async function listChatModels() {
     .order("name");
   if (mErr) throw mErr;
   return models ?? [];
+}
+
+/**
+ * Names of the models live nodes serve right now, for the 503 a caller gets
+ * when nothing serves what it asked for. Never throws: the error response
+ * must not turn into a 500 because this lookup failed.
+ */
+export async function liveModelNames() {
+  try {
+    return (await listChatModels()).map((m) => m.name).filter(Boolean);
+  } catch {
+    return [];
+  }
 }

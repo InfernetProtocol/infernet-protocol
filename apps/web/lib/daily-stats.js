@@ -69,6 +69,51 @@ async function servedModels(supabase, sinceIso) {
     return [...names].sort();
 }
 
+/**
+ * Why jobs failed, by cause. A bare "Failed: 133" read as "people try it and
+ * it breaks", when 92 of those were stale pending jobs the reaper closed in
+ * one sweep. The cause is the prefix the code that failed the job wrote.
+ */
+export const FAILURE_CAUSES = [
+    ["no_provider", "no live node serves the model", (e) => e.startsWith("no_provider:")],
+    ["expired", "expired: no node finished it within an hour", (e) => e.startsWith("expired:")],
+    ["self_update", "node restarted to self-update mid-job", (e) => e.includes("self-update")],
+    ["out_of_memory", "model too big for the node's memory", (e) => /requires more system memory|out of memory|won't fit/i.test(e)],
+    ["engine", "engine error on the node", (e) => /^(ollama|vllm|llama|fetch failed|the operation timed out)/i.test(e)],
+    ["other", "other", () => true]
+];
+
+export function classifyJobFailure(error) {
+    const e = String(error ?? "");
+    return FAILURE_CAUSES.find(([, , test]) => test(e))[0];
+}
+
+async function failedJobs(supabase, sinceIso) {
+    const { data, error } = await supabase
+        .from("jobs")
+        .select("model_name, error")
+        .eq("status", "failed")
+        .gte("created_at", sinceIso);
+    if (error) throw new DailyStatsQueryError("failedJobs(jobs)", errMessage(error));
+    const byCause = Object.fromEntries(FAILURE_CAUSES.map(([key]) => [key, 0]));
+    const unserved = new Map();
+    for (const row of data ?? []) {
+        const cause = classifyJobFailure(row?.error);
+        byCause[cause] += 1;
+        if (cause === "no_provider") {
+            const m = row?.model_name || "(no model named)";
+            unserved.set(m, (unserved.get(m) ?? 0) + 1);
+        }
+    }
+    return {
+        total: (data ?? []).length,
+        byCause,
+        unservedModels: [...unserved.entries()]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([model, count]) => ({ model, count }))
+    };
+}
+
 async function recent(supabase, table, columns, limit) {
     const { data, error } = await supabase
         .from(table)
@@ -107,8 +152,8 @@ export async function collectDailyStats(supabase, now = new Date()) {
     const [
         users,
         nodesTotal, nodesAvailable, nodesLive, nodesOffline, nodesSeen24h, nodesNew24h, nodesNew7d, recentNodes,
-        modelsTotal, modelsPublic, modelsNew7d, served24h,
-        jobsTotal, jobsPending, jobsAssigned, jobsRunning, jobsCompleted, jobsFailed, jobs24h, jobs7d, recentJobs,
+        served24h, servedLive,
+        jobsTotal, jobsPending, jobsAssigned, jobsRunning, jobsCompleted, jobsFailed, jobs24h, jobs7d, recentJobs, failures7d,
         distTotal, dist24h,
         trainingTotal, training24h, shardsTotal, shardsCompleted,
         cprPending, cprSent, cprFailed, cprPermFail,
@@ -126,10 +171,8 @@ export async function collectDailyStats(supabase, now = new Date()) {
         count(supabase, "providers", { gte: ["created_at", d1] }),
         count(supabase, "providers", { gte: ["created_at", d7] }),
         recent(supabase, "providers", "name, status, gpu_model, created_at", 5),
-        count(supabase, "models"),
-        count(supabase, "models", { eq: { visibility: "public" } }),
-        count(supabase, "models", { gte: ["created_at", d7] }),
         servedModels(supabase, d1),
+        servedModels(supabase, ago(1 / 6)),
         count(supabase, "jobs"),
         count(supabase, "jobs", { eq: { status: "pending" } }),
         count(supabase, "jobs", { eq: { status: "assigned" } }),
@@ -139,6 +182,7 @@ export async function collectDailyStats(supabase, now = new Date()) {
         count(supabase, "jobs", { gte: ["created_at", d1] }),
         count(supabase, "jobs", { gte: ["created_at", d7] }),
         recent(supabase, "jobs", "title, status, model_name, created_at", 5),
+        failedJobs(supabase, d7),
         count(supabase, "distributed_jobs"),
         count(supabase, "distributed_jobs", { gte: ["created_at", d1] }),
         count(supabase, "training_jobs"),
@@ -178,7 +222,7 @@ export async function collectDailyStats(supabase, now = new Date()) {
             new7d: nodesNew7d
         },
         recentNodes,
-        models: { total: modelsTotal, public: modelsPublic, new7d: modelsNew7d, served24h },
+        models: { served24h, servedLive },
         jobs: {
             total: jobsTotal,
             pending: jobsPending,
@@ -190,6 +234,7 @@ export async function collectDailyStats(supabase, now = new Date()) {
             new7d: jobs7d
         },
         recentJobs,
+        failures7d,
         distributed: { total: distTotal, new24h: dist24h },
         training: { jobs: trainingTotal, new24h: training24h, shards: shardsTotal, shardsCompleted },
         cpr: { pending: cprPending, sent: cprSent, failed: cprFailed, permanentFail: cprPermFail },
@@ -230,7 +275,11 @@ export function esc(s) {
 const day = (ts) => (typeof ts === "string" ? ts.slice(0, 10) : "");
 
 export function renderDailyStats(s) {
-    const { users, nodes, models, jobs, distributed, training, cpr, commands, auth, payments, legacy } = s;
+    const { users, nodes, models, jobs, failures7d, distributed, training, cpr, commands, auth, payments, legacy } = s;
+    const causeRows = FAILURE_CAUSES
+        .map(([key, label]) => [label, failures7d.byCause[key]])
+        .filter(([, n]) => n > 0);
+    const unserved = failures7d.unservedModels.map(({ model, count: n }) => `${model} x${n}`);
 
     const text = `
 Infernet Protocol Daily Report - ${s.date}
@@ -255,10 +304,8 @@ RECENT NODES
 ${s.recentNodes.map((n) => `  - ${n.name || "(unnamed)"} [${n.status}] ${n.gpu_model || ""} (${day(n.created_at)})`).join("\n") || "  (none)"}
 
 MODELS
+  Served by live nodes now: ${models.servedLive.length}${models.servedLive.length ? ` (${models.servedLive.join(", ")})` : ""}
   Served by nodes seen in 24h: ${models.served24h.length}${models.served24h.length ? ` (${models.served24h.join(", ")})` : ""}
-  Catalog (models table): ${models.total}
-  Public: ${models.public}
-  New (7d): ${models.new7d}
 
 INFERENCE JOBS
   Total: ${jobs.total}
@@ -273,6 +320,10 @@ INFERENCE JOBS
 RECENT JOBS
 ${s.recentJobs.map((j) => `  - ${j.title || "(untitled)"} [${j.status}] ${j.model_name || "?"} (${day(j.created_at)})`).join("\n") || "  (none)"}
 
+JOB FAILURES (7d): ${failures7d.total}
+${causeRows.map(([label, n]) => `  ${label}: ${n}`).join("\n") || "  (none)"}
+  Models asked for that no live node serves: ${unserved.join(", ") || "none"}
+
 DISTRIBUTED JOBS
   Total: ${distributed.total} (+${distributed.new24h} 24h)
 
@@ -283,7 +334,7 @@ TRAINING MARKET
 CPR RECEIPTS QUEUE
   Pending: ${cpr.pending}
   Sent: ${cpr.sent}
-  Failed (retrying): ${cpr.failed}
+  Failed (gave up after 8 tries): ${cpr.failed}
   Permanent fail: ${cpr.permanentFail}
 
 NODE COMMANDS
@@ -347,11 +398,9 @@ LEGACY TABLES
     ${list(s.recentNodes.map((n) => `<li style="margin-bottom: 4px;"><strong>${esc(n.name || "(unnamed)")}</strong> <span style="color: #999;">[${esc(n.status)}] ${esc(n.gpu_model)} · ${esc(day(n.created_at))}</span></li>`))}
     ${h2("🧩 Models")}
     ${table([
-        row("Served by nodes seen (24h)", models.served24h.length, " font-weight: bold;"),
-        row("Catalog (models table)", models.total),
-        row("Public", models.public),
-        row("New (7d)", models.new7d)
-    ])}
+        row("Served by live nodes now", models.servedLive.length, " font-weight: bold;"),
+        row("Served by nodes seen (24h)", models.served24h.length)
+    ], 12)}
     ${models.served24h.length ? `<p style="margin: 4px 0 12px; color: #666; font-size: 13px;">${esc(models.served24h.join(", "))}</p>` : ""}
     ${h2("⚙️ Inference Jobs")}
     ${table([
@@ -365,6 +414,9 @@ LEGACY TABLES
         row("New (7d)", jobs.new7d)
     ], 12)}
     ${list(s.recentJobs.map((j) => `<li style="margin-bottom: 4px;"><strong>${esc(j.title || "(untitled)")}</strong> <span style="color: #999;">[${esc(j.status)}] ${esc(j.model_name || "?")} · ${esc(day(j.created_at))}</span></li>`))}
+    ${h2(`🧯 Job Failures (7d): ${failures7d.total}`)}
+    ${table(causeRows.length ? causeRows.map(([label, n]) => row(esc(label), n)) : [row("(none)", "")], 8)}
+    <p style="margin: 0 0 20px; color: #666; font-size: 13px;">Models asked for that no live node serves: ${esc(unserved.join(", ") || "none")}</p>
     ${h2("🪜 Distributed & Training")}
     ${table([
         row("Distributed jobs", plus(distributed.total, distributed.new24h), " font-weight: bold;"),
@@ -376,7 +428,7 @@ LEGACY TABLES
     ${table([
         row("Pending", cpr.pending, warn(cpr.pending, "#d97706")),
         row("Sent", cpr.sent, " color: #16a34a;"),
-        row("Failed (retrying)", cpr.failed, warn(cpr.failed, "#d97706")),
+        row("Failed (gave up after 8 tries)", cpr.failed, warn(cpr.failed, "#d97706")),
         row("Permanent fail", cpr.permanentFail, warn(cpr.permanentFail, "#dc2626"))
     ])}
     ${h2("📡 Node Commands")}

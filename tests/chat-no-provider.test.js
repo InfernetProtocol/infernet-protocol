@@ -29,7 +29,7 @@ function fakeClient() {
 vi.mock("@/lib/supabase/server", () => ({ getSupabaseServerClient: () => fakeClient() }));
 vi.mock("@/lib/encrypt", () => ({ encryptJSON: (v) => v, decryptJSON: (v) => v }));
 
-const { createChatJob, noProviderError } = await import("@/lib/data/chat");
+const { createChatJob, noProviderError, isModelAlias, aliasTargetFor } = await import("@/lib/data/chat");
 
 const messages = [{ role: "user", content: "hi" }];
 
@@ -55,11 +55,42 @@ describe("createChatJob with nothing to serve the request", () => {
         expect(job.model_name).toBe("gpt-4o-mini");
     });
 
-    it("a live provider serving another model does not take the job", async () => {
+    it("a live provider serving another open model does not take a named open model", async () => {
         state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:0.5b"] } }];
+        const { job, source } = await createChatJob({ messages, modelName: "llama3.1:70b" });
+        expect(source).toBe("none");
+        expect(job.status).toBe("failed");
+        expect(job.model_name).toBe("llama3.1:70b");
+    });
+
+    it.each(["gpt-4o-mini", "gpt-5.2-mini", "auto/best-fast", "auto", "o3-mini", "claude-3-5-sonnet"])(
+        "a client default like %s runs on a model a live node serves",
+        async (alias) => {
+            state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:0.5b", "gemma3:4b"] } }];
+            const { job, source, requestedModel } = await createChatJob({ messages, modelName: alias });
+            expect(source).toBe("p2p");
+            expect(job.status).toBe("assigned");
+            expect(job.provider_id).toBe("p1");
+            expect(job.model_name).toBe("gemma3:4b");
+            expect(job.title).toBe("chat:gemma3:4b");
+            expect(job.input_spec.requested_model).toBe(alias);
+            expect(requestedModel).toBe(alias);
+        }
+    );
+
+    it("an alias with no live node at all still fails cleanly", async () => {
         const { job, source } = await createChatJob({ messages, modelName: "gpt-4o-mini" });
         expect(source).toBe("none");
         expect(job.status).toBe("failed");
+        expect(job.model_name).toBe("gpt-4o-mini");
+    });
+
+    it("the NIM fallback gets its own default model for an alias, never gpt-4o-mini", async () => {
+        process.env.NVIDIA_NIM_API_KEY = "nvapi-test";
+        const { job, source, requestedModel } = await createChatJob({ messages, modelName: "gpt-4o-mini" });
+        expect(source).toBe("nim");
+        expect(job.model_name).not.toBe("gpt-4o-mini");
+        expect(requestedModel).toBe("gpt-4o-mini");
     });
 
     it("a live provider serving the model gets it assigned", async () => {
@@ -81,5 +112,23 @@ describe("createChatJob with nothing to serve the request", () => {
 
     it("no model named still gets a readable error", () => {
         expect(noProviderError()).toMatch(/^no_provider: no live provider/);
+    });
+});
+
+describe("model aliases", () => {
+    it("recognises client defaults and placeholders, not open model names", () => {
+        for (const m of ["gpt-4o-mini", "GPT-4o", "gpt-3.5-turbo", "chatgpt-4o-latest", "o1", "o3-mini", "auto", "auto/best-fast", "default", "claude-3-haiku", "gemini-1.5-flash"]) {
+            expect(isModelAlias(m), m).toBe(true);
+        }
+        for (const m of ["qwen2.5:7b", "llama3.2:1b", "gemma3:4b", "gpt-oss:20b", "gpt-oss:120b", "autoencoder:1b", "", undefined, null]) {
+            expect(isModelAlias(m), String(m)).toBe(false);
+        }
+    });
+
+    it("picks the preferred served model, else the first served", () => {
+        expect(aliasTargetFor({ specs: { served_models: ["qwen2.5:0.5b", "qwen2.5:7b"] } })).toBe("qwen2.5:7b");
+        expect(aliasTargetFor({ specs: { served_models: ["mystery:1b", "other:2b"] } })).toBe("mystery:1b");
+        expect(aliasTargetFor({ specs: {} })).toBeNull();
+        expect(aliasTargetFor(null)).toBeNull();
     });
 });
