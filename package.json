@@ -40,7 +40,8 @@
       "fast-xml-parser": "5.7.0",
       "@xmldom/xmldom": "0.8.13",
       "uuid": "14.0.0",
-      "ip": "2.0.1"
+      "ip": "2.0.1",
+      "shell-quote": "1.11.0"
     }
   }
 }
