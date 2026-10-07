@@ -3,20 +3,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // createChatJob with no live provider and no NIM fallback. Nothing ever picks
 // up an unassigned 'pending' chat job, so it must be recorded as failed with a
 // no_provider error instead of sitting pending forever.
-const state = { providers: [], inserted: [] };
+const state = { providers: [], inserted: [], fallbackToday: 0, countError: false };
 
 function fakeClient() {
     return {
         from(table) {
             let insertRow = null;
+            let head = false;
             const q = {
-                select() { return q; },
+                select(_c, opts) { head = Boolean(opts?.head); return q; },
+                is() { return q; },
+                not() { return q; },
                 eq() { return q; },
                 gte() { return q; },
                 insert(row) { insertRow = row; state.inserted.push(row); return q; },
                 maybeSingle() { return Promise.resolve({ data: null, error: null }); },
                 single() { return Promise.resolve({ data: { id: "job-1", ...insertRow }, error: null }); },
                 then(resolve, reject) {
+                    if (head) {
+                        const res = state.countError ? { count: null, error: { message: "boom" } } : { count: state.fallbackToday, error: null };
+                        return Promise.resolve(res).then(resolve, reject);
+                    }
                     const data = table === "providers" ? state.providers : [];
                     return Promise.resolve({ data, error: null }).then(resolve, reject);
                 }
@@ -29,14 +36,18 @@ function fakeClient() {
 vi.mock("@/lib/supabase/server", () => ({ getSupabaseServerClient: () => fakeClient() }));
 vi.mock("@/lib/encrypt", () => ({ encryptJSON: (v) => v, decryptJSON: (v) => v }));
 
-const { createChatJob, noProviderError, isModelAlias, aliasTargetFor } = await import("@/lib/data/chat");
+const { createChatJob, noProviderError, isModelAlias, aliasTargetFor, hostedFallbackDailyLimit } = await import("@/lib/data/chat");
 
 const messages = [{ role: "user", content: "hi" }];
 
 beforeEach(() => {
     state.providers = [];
     state.inserted = [];
+    state.fallbackToday = 0;
+    state.countError = false;
     delete process.env.NVIDIA_NIM_API_KEY;
+    delete process.env.NVIDIA_NIM_DEFAULT_MODEL;
+    delete process.env.HOSTED_FALLBACK_DAILY_LIMIT;
 });
 
 afterEach(() => {
@@ -134,5 +145,41 @@ describe("model aliases", () => {
         expect(aliasTargetFor({ specs: { served_models: ["qwen3:8b"] } })).toBe("qwen3:8b");
         expect(aliasTargetFor({ specs: {} })).toBeNull();
         expect(aliasTargetFor(null)).toBeNull();
+    });
+});
+
+describe("hosted fallback", () => {
+    it("runs its configured model, never the name the caller sent", async () => {
+        process.env.NVIDIA_NIM_API_KEY = "k";
+        process.env.NVIDIA_NIM_DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+        const { job, source, requestedModel } = await createChatJob({ messages, modelName: "qwen2.5:7b" });
+        expect(source).toBe("nim");
+        expect(job.model_name).toBe("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+        expect(job.input_spec.requested_model).toBe("qwen2.5:7b");
+        expect(requestedModel).toBe("qwen2.5:7b");
+    });
+
+    it("stops at the daily cap and answers like no node is live", async () => {
+        process.env.NVIDIA_NIM_API_KEY = "k";
+        process.env.HOSTED_FALLBACK_DAILY_LIMIT = "5";
+        state.fallbackToday = 5;
+        const { job, source } = await createChatJob({ messages, modelName: "gpt-4o-mini" });
+        expect(source).toBe("none");
+        expect(job.status).toBe("failed");
+        state.fallbackToday = 4;
+        expect((await createChatJob({ messages })).source).toBe("nim");
+    });
+
+    it("a failed count query means no fallback", async () => {
+        process.env.NVIDIA_NIM_API_KEY = "k";
+        state.countError = true;
+        expect((await createChatJob({ messages })).source).toBe("none");
+    });
+
+    it("limit 0 turns it off; junk falls back to the default", () => {
+        expect(hostedFallbackDailyLimit({ HOSTED_FALLBACK_DAILY_LIMIT: "0" })).toBe(0);
+        expect(hostedFallbackDailyLimit({})).toBe(300);
+        expect(hostedFallbackDailyLimit({ HOSTED_FALLBACK_DAILY_LIMIT: "abc" })).toBe(300);
+        expect(hostedFallbackDailyLimit({ HOSTED_FALLBACK_DAILY_LIMIT: "50" })).toBe(50);
     });
 });

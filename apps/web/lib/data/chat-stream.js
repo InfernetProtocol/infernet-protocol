@@ -1,7 +1,7 @@
 import "server-only";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getJobWithEvents } from "@/lib/data/chat";
-import { streamChatCompletion } from "@infernetprotocol/nim-adapter";
+import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapter";
 import { makeStreamSanitizer, sanitizeText } from "@/lib/sanitize-stream";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 
@@ -144,7 +144,7 @@ async function* runNimFallback({ supabase, job }) {
 
     const persistedMeta = await insertJobEvent(supabase, job.id, "meta", {
         provider_node_id: "nvidia-nim",
-        provider_name: "NVIDIA NIM (fallback)",
+        provider_name: fallbackName(),
         model: model ?? null,
         started_at: new Date().toISOString()
     });

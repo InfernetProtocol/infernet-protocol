@@ -1,6 +1,6 @@
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getJobWithEvents } from "@/lib/data/chat";
-import { streamChatCompletion } from "@infernetprotocol/nim-adapter";
+import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapter";
 import { MIN_RPC_PEERS, MAX_RPC_PEERS, ENGINE_ID as RPC_ENGINE_ID } from "@infernetprotocol/rpc-adapter/constants";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 import {
@@ -446,7 +446,7 @@ async function runNimFallback({ supabase, job, safeEnqueue, sseFrame }) {
   let finalPersisted = false;
   const persistedMeta = await insertJobEvent(supabase, job.id, "meta", {
     provider_node_id: "nvidia-nim",
-    provider_name: "NVIDIA NIM (fallback)",
+    provider_name: fallbackName(),
     model: model ?? null,
     started_at: new Date().toISOString()
   });

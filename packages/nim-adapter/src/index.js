@@ -10,6 +10,14 @@
  *   NVIDIA_NIM_API_KEY        required to enable the adapter
  *   NVIDIA_NIM_API_URL        default https://integrate.api.nvidia.com/v1
  *   NVIDIA_NIM_DEFAULT_MODEL  default meta/llama-3.3-70b-instruct
+ *   HOSTED_FALLBACK_NAME      what users see as the provider, default
+ *                             "NVIDIA NIM (fallback)"
+ *
+ * Any OpenAI-compatible endpoint works with the same three variables, e.g.
+ * Cloudflare Workers AI:
+ *   NVIDIA_NIM_API_URL=https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1
+ *   NVIDIA_NIM_DEFAULT_MODEL=@cf/meta/llama-3.3-70b-instruct-fp8-fast
+ *   HOSTED_FALLBACK_NAME="Cloudflare Workers AI (fallback)"
  *
  * OpenAI-compatible schema: we can reuse this adapter for any future
  * OpenAI-shaped endpoint by just swapping the base URL + key.
@@ -20,6 +28,10 @@ const DEFAULT_MODEL = "meta/llama-3.3-70b-instruct";
 
 export function isNimConfigured() {
     return typeof process.env.NVIDIA_NIM_API_KEY === "string" && process.env.NVIDIA_NIM_API_KEY.length > 0;
+}
+
+export function fallbackName() {
+    return process.env.HOSTED_FALLBACK_NAME || "NVIDIA NIM (fallback)";
 }
 
 export function nimDefaults() {
@@ -101,7 +113,10 @@ export async function* streamChatCompletion(opts = {}) {
     try {
         for await (const frame of parseOpenAiSseFrames(res.body)) {
             if (frame === "[DONE]") break;
-            const delta = frame?.choices?.[0]?.delta?.content;
+            // Workers AI sends a token that is a bare number as a JSON number
+            // ({"content":1}), so a string-only check dropped every digit.
+            const raw = frame?.choices?.[0]?.delta?.content;
+            const delta = typeof raw === "number" ? String(raw) : raw;
             if (typeof delta === "string" && delta.length > 0) {
                 fullText += delta;
                 yield { type: "token", data: { text: delta } };
@@ -127,8 +142,8 @@ export function nimVirtualProvider() {
     return {
         id: null,
         node_id: "nvidia-nim",
-        name: "NVIDIA NIM (fallback)",
-        gpu_model: "NVIDIA (hosted)",
+        name: fallbackName(),
+        gpu_model: "hosted",
         model
     };
 }
