@@ -82,6 +82,7 @@ live queries (see \`infernet status\`, \`infernet stats\`, \`infernet logs\`).
 const DEFAULT_HEARTBEAT_MS = 30_000;
 const DEFAULT_POLL_MS = 15_000;
 const UPDATE_CHECK_MS = 5 * 60 * 1000; // 5 minutes
+const UPDATE_DRAIN_MS = 10 * 60 * 1000; // wait for in-flight jobs before restarting
 
 async function writePidFile(pid) {
     const p = getDaemonPidPath();
@@ -189,7 +190,10 @@ async function runDaemon(args, ctx) {
         lastPollAt: null,
         pollsOk: 0,
         pollsFailed: 0,
-        activeJobIds: new Set()
+        activeJobIds: new Set(),
+        // Set while a self-update waits for in-flight jobs to finish: the
+        // poll loop takes no new jobs, so the restart can happen.
+        draining: false
     };
 
     const pidPath = await writePidFile(process.pid);
@@ -513,6 +517,7 @@ async function runDaemon(args, ctx) {
             stats.pollsOk += 1;
             return;
         }
+        if (stats.draining) return;
         try {
             const result = await client.pollJobs({ limit: 5 });
             stats.pollsOk += 1;
@@ -1544,6 +1549,8 @@ async function runDaemon(args, ctx) {
     let isUpgrading = false;
     const updateTimer = setInterval(async () => {
         if (shuttingDown || isUpgrading) return;
+        // Never start an upgrade under a running job; the next check retries.
+        if (stats.activeJobIds.size > 0) return;
         const latest = await fetchLatestVersion();
         if (!latest || !isNewerVersion(CURRENT_VERSION, latest)) return;
         isUpgrading = true;
@@ -1568,7 +1575,16 @@ async function runDaemon(args, ctx) {
             process.stderr.write(`[update] post-upgrade setup: ${err?.message ?? err}\n`);
         }
 
-        // Release any in-flight jobs before we close ports.
+        // Jobs that arrived while the installer ran get to finish: stop taking
+        // new ones and wait. Restarting under them used to fail every one
+        // ("daemon restarting for self-update", 23 jobs on 2026-09-30).
+        stats.draining = true;
+        const drainUntil = Date.now() + UPDATE_DRAIN_MS;
+        while (stats.activeJobIds.size > 0 && Date.now() < drainUntil) {
+            await new Promise((r) => setTimeout(r, 1000));
+        }
+
+        // Release whatever is still running after the drain window.
         for (const jobId of stats.activeJobIds) {
             try {
                 await client.failJob(jobId, 'daemon restarting for self-update');

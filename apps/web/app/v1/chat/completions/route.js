@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
-import { createChatJob } from "@/lib/data/chat";
+import { createChatJob, liveModelNames } from "@/lib/data/chat";
 import { streamJobEvents } from "@/lib/data/chat-stream";
 
 export const runtime = "nodejs";
@@ -29,10 +29,10 @@ export const dynamic = "force-dynamic";
  */
 const limit = rateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
 
-function err(status, message) {
+function err(status, message, extra) {
     // OpenAI-shaped error envelope so SDKs surface a useful message.
     return NextResponse.json(
-        { error: { message, type: "infernet_error", code: status } },
+        { error: { message, type: "infernet_error", code: status, ...extra } },
         { status }
     );
 }
@@ -102,12 +102,13 @@ export async function POST(request) {
     }
 
     if (jobBundle.source === "none") {
-        return err(
-            503,
-            typeof model === "string" && model
-                ? `no live provider serves model "${model}" right now; GET /v1/models lists the models the network serves`
-                : "no live providers and no NIM fallback configured"
-        );
+        const available = await liveModelNames();
+        const message = available.length === 0
+            ? "no Infernet node is online right now; try again later"
+            : typeof model === "string" && model
+                ? `no live node serves model "${model}"; pick one of: ${available.join(", ")}`
+                : "no live node could take this request; try again shortly";
+        return err(503, message, { available_models: available });
     }
 
     const job = jobBundle.job;

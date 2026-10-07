@@ -8,17 +8,19 @@ From the PRDs in this folder. P0 = a claim that is false today or a number that 
 - [x] Stop inserting `pending` jobs nobody can serve; record `failed` + `no_provider:` (PR #26) - PRD 02
 - [x] Reaper cron for jobs (1 h), node commands (24 h), silent providers (10 min) (PR #26, dev2 crontab `*/5`) - PRD 02, 04, 14
 - [x] Daily report: served models from live nodes, live node count (PR #26) - PRD 03, 14
-- [ ] Daily report: fix CPR "Failed (retrying)" label; add no_provider demand (top unserved models) - PRD 14
+- [x] Daily report: fix CPR "Failed (retrying)" label; add no_provider demand (top unserved models); failures by cause; drop the never-written models-catalog rows - PRD 14
 - [ ] /status and `/api/overview`: live-only counts, real job total (not the LIMIT) - PRD 01, 14
 - [ ] `/api/models` and `/v1/models` from heartbeats; drop or repurpose the `models` table - PRD 03
 
 ### Supply
 - [ ] Decide NIM fallback (open decision) and/or stand up 2 house nodes serving the quickstart model - PRD 01
 - [ ] Alert when live nodes = 0 for 15 min - PRD 01, 14
-- [ ] Model aliasing: `gpt-4o-mini` and friends map to a served model or 404 with the served list - PRD 02
-- [ ] NIM: never forward unknown model names - PRD 01
+- [x] Model aliasing: `gpt-4o-mini`, `auto*`, other hosted-API names run on a served model; real open-model names 503 with the served list - PRD 02
+- [ ] NIM: never forward unknown model names (aliases now get the NIM default; unknown open names still forwarded) - PRD 01
 
 ### CPR
+- [x] One receipt per job: node job completion is idempotent (3,353 receipts were queued for 695 jobs; one job had 353) - PRD 05
+- [ ] Receipts as queued can never be accepted by CoinPay: no `signatures.escrow_sig`, null `currency`/`escrow_tx`/`sla`/`artifact_hash` fail its zod schema, and `amount: 0` is under its 0.01 minimum. Sign + drop nulls before turning the drain on - PRD 05
 - [ ] Register Infernet as a CoinPay CPR issuer; put `CPR_ISSUER_API_KEY` in vault + prod env - PRD 05
 - [ ] Remove the wrong `CPR_API_BASE_URL=https://coinpayportal.com/api/cpr` from prod env (404; code default `/api/reputation` is right) - PRD 05
 - [ ] Decide the 3,351 backlog, then add `/api/cron/cpr` to the dev2 crontab - PRD 05
@@ -35,7 +37,7 @@ From the PRDs in this folder. P0 = a claim that is false today or a number that 
 - [ ] Make the GHCR provider image public; fix `ghcr.io/profullstack` on /protocol; drop the service-role key from release notes - PRD 09
 
 ### Job reliability
-- [ ] Daemon must not self-update mid-job (23 of 39 failures) - PRD 02
+- [x] Daemon must not self-update mid-job (23 of 39 failures): skips the check while busy, drains up to 10 min - PRD 02
 - [ ] Do not advertise models that do not fit RAM/VRAM (7 OOM failures) - PRD 02
 
 ## P1: activation and growth
@@ -47,7 +49,8 @@ From the PRDs in this folder. P0 = a claim that is false today or a number that 
 - [ ] Return real `usage` tokens - PRD 02, 07
 - [ ] Build or delete `/api/v1/jobs`, `/api/v1/jobs/batch` (book, FAQ) - PRD 07
 - [ ] Re-assign `assigned` jobs not picked up in 30 s - PRD 02
-- [ ] Node commands: refuse to offline nodes, server-side fit check, strip ANSI, install `huggingface_hub` - PRD 04
+- [x] Node commands: refuse to offline nodes (409), strip ANSI from stored errors - PRD 04
+- [ ] Node commands: server-side fit check, install `huggingface_hub` - PRD 04
 - [ ] Owner email when their node is silent 24 h - PRD 01
 - [ ] Delete-account flow - PRD 08
 - [ ] Sanitize heartbeat specs like register does - PRD 08

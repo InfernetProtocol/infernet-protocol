@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createChatJob } from "@/lib/data/chat";
+import { createChatJob, liveModelNames } from "@/lib/data/chat";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -56,7 +56,7 @@ export async function POST(request) {
   }
 
   try {
-    const { job, provider, source } = await createChatJob({
+    const { job, provider, source, requestedModel } = await createChatJob({
       messages: hasPlain ? messages : undefined,
       encryptedMessages: hasEncrypted ? encryptedMessages : undefined,
       clientPubkey: typeof clientPubkey === "string" ? clientPubkey : undefined,
@@ -73,16 +73,21 @@ export async function POST(request) {
       minTrustTier
     });
     if (source === "none") {
-      return err(503, typeof modelName === "string" && modelName
-        ? `No live provider on the Infernet network serves "${modelName}" right now.`
-        : "The Infernet network has no live providers and the NVIDIA NIM fallback is not configured.", {
-        hint: "Set NVIDIA_NIM_API_KEY on the control plane or wait for a provider to come online."
+      const available = await liveModelNames();
+      return err(503, available.length === 0
+        ? "No Infernet node is online right now. Try again later."
+        : typeof modelName === "string" && modelName
+          ? `No live node serves "${modelName}". Pick one of: ${available.join(", ")}.`
+          : "No live node could take this request. Try again shortly.", {
+        availableModels: available
       });
     }
     return NextResponse.json({
       jobId: job.id,
       status: job.status,
       source,
+      model: job.model_name ?? null,
+      ...(requestedModel ? { requestedModel } : {}),
       provider: provider
         ? {
             id: provider.id,

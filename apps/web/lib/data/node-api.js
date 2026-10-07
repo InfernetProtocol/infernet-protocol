@@ -264,6 +264,9 @@ export async function pollJobsForNode({ pubkey, limit = 5 }) {
     return { provider_id: provider.id, jobs };
 }
 
+// Statuses a job can be completed (or failed) from by its node.
+export const COMPLETABLE_JOB_STATUSES = ["pending", "assigned", "running"];
+
 export async function completeJobForNode({ pubkey, jobId, body }) {
     if (!jobId) throw withStatus("jobId is required", 400);
     const supabase = getSupabaseServerClient();
@@ -295,8 +298,22 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
     if (!failed && body.result !== undefined) patch.result = encryptJSON(body.result);
     if (failed && typeof body.error === "string") patch.error = body.error.slice(0, 1024);
 
-    const { error: markErr } = await supabase.from("jobs").update(patch).eq("id", job.id);
+    // Only a job still in flight can be completed. Daemons retry this call
+    // when the response is slow or lost, and every retry used to re-mark the
+    // job and queue another CPR receipt (and, on paid jobs, another payout
+    // row): one job in August has 353 receipts, and 3,353 receipts were queued
+    // for 695 jobs. A repeat now answers with the status already recorded and
+    // writes nothing else.
+    const { data: marked, error: markErr } = await supabase
+        .from("jobs")
+        .update(patch)
+        .eq("id", job.id)
+        .in("status", COMPLETABLE_JOB_STATUSES)
+        .select("id");
     if (markErr) throw withStatus(markErr.message, 500);
+    if (!marked || marked.length === 0) {
+        return { id: job.id, status: job.status, noop: true };
+    }
 
     if (!failed) {
         const amount = Number.parseFloat(job.payment_offer ?? 0) || 0;

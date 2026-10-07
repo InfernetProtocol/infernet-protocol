@@ -9,6 +9,58 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 const KNOWN_COMMANDS = new Set(["model_install", "model_remove", "train_shard"]);
 const MAX_POLL_LIMIT = 10;
+// Same liveness window as the daily report's "live" count and the reaper.
+const NODE_LIVE_MS = 10 * 60 * 1000;
+const MAX_ERROR_CHARS = 2000;
+
+/**
+ * Turn a daemon's error output into something a dashboard can show. Ollama
+ * and hf write progress spinners and cursor codes to the same stream as the
+ * error, so the stored text was mostly `\x1B[?25l pulling manifest ⠋ ...`
+ * with the actual cause at the end, often cut off. Strip the terminal
+ * control sequences, keep the last line of each carriage-return redraw, and
+ * keep the tail, where the cause is.
+ */
+export function cleanCommandError(text) {
+    if (typeof text !== "string") return text;
+    const cleaned = text
+        // CSI (colours, cursor show/hide, ?2026h sync) and OSC sequences.
+        .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
+        .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, "")
+        .replace(/\x1B[@-Z\\-_]/g, "")
+        // A spinner redraws one line with \r; only the last frame matters.
+        .split("\n")
+        .map((line) => line.split("\r").filter((part) => part.trim()).pop() ?? "")
+        .map((line) => line.trimEnd())
+        .filter((line, i, all) => line || (i > 0 && all[i - 1]))
+        .join("\n")
+        .trim();
+    return cleaned.length > MAX_ERROR_CHARS ? "…" + cleaned.slice(-MAX_ERROR_CHARS) : cleaned;
+}
+
+/**
+ * Throw 409 unless the node behind `pubkey` has sent a heartbeat recently.
+ * Commands are delivered by the daemon's own poll, so one queued for a node
+ * that is not running just sat until the 24 h reaper failed it: 21 of the 60
+ * failed commands in production were exactly that.
+ */
+export async function assertNodeLive(pubkey, now = Date.now()) {
+    const supabase = getSupabaseServerClient();
+    const { data, error } = await supabase
+        .from("providers")
+        .select("last_seen")
+        .eq("public_key", pubkey)
+        .maybeSingle();
+    if (error) throw new Error(error.message);
+    const seen = data?.last_seen ? Date.parse(data.last_seen) : NaN;
+    if (Number.isFinite(seen) && now - seen <= NODE_LIVE_MS) return;
+    const when = Number.isFinite(seen) ? `last heartbeat ${new Date(seen).toISOString()}` : "it has never sent a heartbeat";
+    const err = new Error(
+        `this node is offline (${when}); start it with \`infernet start\` and send the command again`
+    );
+    err.status = 409;
+    throw err;
+}
 
 export function isValidCommand(verb) {
     return KNOWN_COMMANDS.has(verb);
@@ -40,6 +92,7 @@ export async function issueCommand({ userId, pubkey, command, args }) {
         err.status = 400;
         throw err;
     }
+    await assertNodeLive(pubkey);
     const supabase = getSupabaseServerClient();
     const { data, error } = await supabase
         .from("node_commands")
@@ -208,7 +261,7 @@ export async function completeCommandForNode({ pubkey, commandId, status, result
         status,
         completed_at: new Date().toISOString(),
         ...(result !== undefined ? { result } : {}),
-        ...(errorMessage ? { error: errorMessage } : {})
+        ...(errorMessage ? { error: cleanCommandError(errorMessage) } : {})
     };
     const { error: upErr } = await supabase
         .from("node_commands")
