@@ -254,6 +254,40 @@ export function aliasTargetFor(provider) {
   return served.find((m) => !REASONING_MODEL_RE.test(m)) ?? served[0];
 }
 
+// Hosted fallback requests per UTC day. The fallback is a paid API once its
+// free allowance runs out, and the public chat endpoints are anonymous, so the
+// spend has a ceiling: past it, requests get the usual "no live node" 503.
+// 0 turns the fallback off; unset means 300.
+const DEFAULT_FALLBACK_DAILY_LIMIT = 300;
+
+export function hostedFallbackDailyLimit(env = process.env) {
+  const raw = env.HOSTED_FALLBACK_DAILY_LIMIT;
+  if (raw === undefined || raw === "") return DEFAULT_FALLBACK_DAILY_LIMIT;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_FALLBACK_DAILY_LIMIT;
+}
+
+/**
+ * True while today's hosted-fallback jobs are under the cap. A fallback job is
+ * one with no provider that was still assigned (no_provider failures are never
+ * assigned). A failed count query means no fallback: an unbounded bill is worse
+ * than a 503.
+ */
+export async function hostedFallbackUnderDailyCap(now = new Date()) {
+  const limit = hostedFallbackDailyLimit();
+  if (limit === 0) return false;
+  const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+  const supabase = getSupabaseServerClient();
+  const { count, error } = await supabase
+    .from("jobs")
+    .select("id", { count: "exact", head: true })
+    .is("provider_id", null)
+    .not("assigned_at", "is", null)
+    .gte("created_at", midnight);
+  if (error || typeof count !== "number") return false;
+  return count < limit;
+}
+
 export async function createChatJob({
   messages,
   encryptedMessages,
@@ -307,12 +341,14 @@ export async function createChatJob({
     }
   }
 
-  const nimAvailable = !p2pProvider && isNimConfigured();
+  const nimAvailable = !p2pProvider && isNimConfigured() && (await hostedFallbackUnderDailyCap());
   const source = p2pProvider ? "p2p" : nimAvailable ? "nim" : "none";
-  if (nimAvailable && isModelAlias(modelName)) {
-    // NIM would 404 on "gpt-4o-mini" too; run its configured default instead.
-    servedModel = nimVirtualProvider().model;
-    requestedModel = modelName;
+  if (nimAvailable) {
+    // The hosted fallback serves one configured model. Forwarding the name the
+    // caller asked for ("gpt-4o-mini", "qwen2.5:7b") only earned a 404 there.
+    const fallbackModel = nimVirtualProvider().model;
+    if (modelName && modelName !== fallbackModel) requestedModel = modelName;
+    servedModel = fallbackModel;
   }
 
   const inputSpec = {
