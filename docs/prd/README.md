@@ -36,6 +36,7 @@ Full claim tables with file and live evidence: [audit/claims-site.md](audit/clai
 | [13](13-decentralization.md) | Decentralization | P2 | c0mpute P2P discovery claimed, not present |
 | [14](14-stats-and-observability.md) | Stats and observability | P0 | every misleading report number, alerts |
 | [15](15-docs-accuracy.md) | Docs accuracy | P1 | IPIPs marked Final without code, stale pages |
+| [16](16-managed-endpoints.md) | Managed endpoints / reservations | P1 (built 2026-10-09) | one identified operator + exact models by the hour for resellers; keys, limits, per-minute availability proof, post-paid invoice data |
 
 Prioritized work list: [TODO.md](TODO.md). Earlier PRD: [../prds/infernet-train-prd.md](../prds/infernet-train-prd.md).
 
@@ -46,3 +47,4 @@ Prioritized work list: [TODO.md](TODO.md). Earlier PRD: [../prds/infernet-train-
 4. What to do with the 3,351 unsent CPR receipts once the issuer key exists: send all, or skip old ones (PRD 05).
 5. House supply budget: how many always-on nodes we run (PRD 01).
 6. /careers sales roles while nothing is billable (PRD 15).
+7. Managed endpoints (PRD 16): accept post-paid / no-minimum terms, price per reserved hour, which operator + model to commit, and the SLA threshold (minutes per hour).

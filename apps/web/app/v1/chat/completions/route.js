@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { createChatJob, liveModelNames } from "@/lib/data/chat";
 import { streamJobEvents } from "@/lib/data/chat-stream";
+import { bearerFrom, isReservationKey } from "@/lib/reservations/core";
+import { serveChatCompletion } from "@/lib/reservations/serve";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +59,11 @@ function chunkFrame({ id, model, deltaContent = null, finishReason = null, role 
 }
 
 export async function POST(request) {
+    // Managed reservation keys (ifr_res_...) go to their pinned operator only,
+    // under the reservation's own limits — never the open-market path below.
+    const presented = bearerFrom(request.headers.get("authorization"));
+    if (isReservationKey(presented)) return serveChatCompletion(request, presented);
+
     const ip = getClientIp(request);
     const r = limit.check(ip);
     if (!r.ok) return err(429, "Rate limit exceeded — try again later");

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { listChatModels } from "@/lib/data/chat";
+import { bearerFrom, isReservationKey } from "@/lib/reservations/core";
+import { serveModels } from "@/lib/reservations/serve";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +18,11 @@ export const dynamic = "force-dynamic";
  * track per-provider ownership in the model identity here — model
  * routing happens server-side at job-creation time.
  */
-export async function GET() {
+export async function GET(request) {
+    // A reservation key sees exactly its reserved models.
+    const presented = bearerFrom(request?.headers?.get("authorization"));
+    if (isReservationKey(presented)) return serveModels(presented);
+
     let models;
     try {
         models = await listChatModels();

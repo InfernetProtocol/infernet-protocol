@@ -298,7 +298,10 @@ export async function createChatJob({
   maxTokens = 512,
   temperature = 0.7,
   distributed = false,
-  minTrustTier
+  minTrustTier,
+  // Managed reservations: serve on providerId or not at all. No re-pick, no
+  // alias rewrite, no hosted fallback (docs/prd/16-managed-endpoints.md).
+  pinned = false
 }) {
   const supabase = getSupabaseServerClient();
   const now = new Date().toISOString();
@@ -328,7 +331,7 @@ export async function createChatJob({
   let servedModel = modelName;
   let requestedModel = null;
 
-  if (!p2pProvider) {
+  if (!p2pProvider && !pinned) {
     p2pProvider = await pickChatProvider({ modelName, minTrustTier });
     if (!p2pProvider && isModelAlias(modelName)) {
       const anyProvider = await pickChatProvider({ minTrustTier });
@@ -341,7 +344,7 @@ export async function createChatJob({
     }
   }
 
-  const nimAvailable = !p2pProvider && isNimConfigured() && (await hostedFallbackUnderDailyCap());
+  const nimAvailable = !p2pProvider && !pinned && isNimConfigured() && (await hostedFallbackUnderDailyCap());
   const source = p2pProvider ? "p2p" : nimAvailable ? "nim" : "none";
   if (nimAvailable) {
     // The hosted fallback serves one configured model. Forwarding the name the
