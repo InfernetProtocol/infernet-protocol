@@ -41,6 +41,11 @@ Payments:
   payout       Manage payout coin/address
   payments     Show recent payment transactions
 
+Managed endpoints:
+  reservation  Book a pinned operator + exact model by the hour; keys, limits,
+               per-minute availability report, post-paid invoice data
+  mcp          MCP server (stdio) exposing the reservation tools
+
 Other:
   help         Show this help
 

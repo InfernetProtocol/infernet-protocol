@@ -691,10 +691,19 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
                         ["/api/v1/node/jobs/poll",         "POST", "X-Infernet-Auth", "Pull assigned jobs"],
                         ["/api/v1/node/jobs/[id]/events",  "POST", "X-Infernet-Auth", "Stream tokens back"],
                         ["/api/v1/node/jobs/[id]/complete","POST", "X-Infernet-Auth", "Mark completed; triggers receipt"],
+                        ["/api/v1/reservations/*",         "admin / buyer token", "Managed endpoints: reservations, keys, availability report, invoice data"],
+                        ["/v1/chat/completions (ifr_res_ key)", "POST", "reservation key", "Inference pinned to one operator + exact model"],
                         ["/api/auth/{signup,login,callback,logout,reset-password,update-password}",
                                                           "POST/GET", "cookie session", "Dashboard auth flows"]
                     ]}
                 />
+                <p>
+                    Reselling capacity? A reservation pins one identified operator and exact models for whole hours,
+                    with your own keys, agreed limits and a per-minute availability record. See{" "}
+                    <Link href="/docs/managed-endpoints" className="text-[var(--accent)] hover:underline">
+                        Managed endpoints
+                    </Link>.
+                </p>
                 <p>Submit a chat job (anonymous, IP-rate-limited):</p>
                 <CodeBlock>
 {`curl -sS -X POST https://infernetprotocol.com/api/chat \\
