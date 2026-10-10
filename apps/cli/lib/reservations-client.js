@@ -48,6 +48,7 @@ export function createReservationsClient({ baseUrl, adminToken, buyerToken, fetc
 
     return {
         list: () => call('GET', '/api/v1/reservations'),
+        pricing: () => call('GET', '/api/v1/reservations/pricing'),
         create: (input) => call('POST', '/api/v1/reservations', { body: input }),
         get: (id) => call('GET', `/api/v1/reservations/${enc(id)}`, { asBuyer: reader() }),
         update: (id, patch) => call('PATCH', `/api/v1/reservations/${enc(id)}`, { body: patch }),
@@ -82,6 +83,8 @@ export function createBodyFromFlags(get) {
         required_minutes_per_hour: num('required-minutes'),
         probe_completion: get('probe-completion') === true || get('probe-completion') === 'true' ? true : undefined,
         price_per_hour: get('price-per-hour'),
+        gpu_class: get('gpu-class'),
+        setup_fee: get('setup-fee'),
         currency: get('currency'),
         notes: get('notes')
     };
@@ -118,7 +121,7 @@ export function renderInvoice(inv) {
     const lines = [
         `invoice data for reservation ${inv.reservation_id}${inv.buyer ? ` (buyer ${inv.buyer})` : ''}`,
         `operator ${inv.operator_name}  models ${inv.models.join(', ')}`,
-        `price per hour ${money(inv.price_per_hour)}  final=${inv.final}`,
+        `price per hour ${money(inv.price_per_hour)}${inv.gpu_class ? ` (${inv.gpu_class})` : ''}  setup fee ${money(inv.setup_fee)}  final=${inv.final}`,
         `hours: ${inv.hours_reserved} reserved, ${inv.hours_compliant} compliant, ${inv.hours_non_compliant} non-compliant, ${inv.hours_open} open`,
         ''
     ];

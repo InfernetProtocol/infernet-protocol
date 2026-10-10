@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { priceList } from "@/lib/reservations/pricing";
 
 export const metadata = {
     title: "Managed endpoints for resellers",
@@ -72,12 +73,25 @@ export default function ManagedEndpointsPage() {
                     ["per_key_rps / per_key_concurrency", "Limits on each key you issue."],
                     ["shared_rps / shared_concurrency", "Limits across all keys on the reservation together."],
                     ["required_minutes_per_hour", "How many of an hour's 60 minutes must be confirmed for that hour to be compliant. 60 means every minute."],
-                    ["price_per_hour + currency", "Post-paid price per compliant hour, agreed per reservation. Unset means no price agreed yet."]
+                    ["gpu_class", "The GPU tier the reservation is priced from (see Pricing). Sets price_per_hour and setup_fee."],
+                    ["price_per_hour + currency", "Post-paid price per compliant hour. Defaults to the gpu_class list price; never below it."],
+                    ["setup_fee", "Charged once, when the reservation delivers its first compliant hour. Covers warming the GPU."]
                 ]}
             />
+            <H2 id="pricing">Pricing</H2>
             <P>
-                Prices, the operator, the models and the SLA threshold are agreed per reservation before it is
-                booked. Write to{" "}
+                Priced by the dedicated GPU your models need, per compliant hour, post-paid. Non-compliant hours
+                cost nothing. Machine-readable at <code>GET /api/v1/reservations/pricing</code>.
+            </P>
+            <Table
+                columns={["gpu_class", "GPU", "Fits", "Per hour", "Setup fee"]}
+                rows={priceList().tiers.map((t) => [
+                    t.gpu_class, t.label, t.fits, `$${t.price_per_hour.toFixed(2)}`, `$${t.setup_fee.toFixed(2)}`
+                ])}
+            />
+            <P>
+                The setup fee is {priceList().setup_fee}. The operator, the models and the SLA threshold are agreed
+                per reservation before it is booked. Write to{" "}
                 <a className="text-[var(--accent)] hover:underline" href="mailto:hello@infernetprotocol.com">hello@infernetprotocol.com</a>.
             </P>
 
@@ -160,7 +174,7 @@ INFERNET_BUYER_TOKEN=ifr_buy_... infernet reservation watch <id>    # live view`
             <H2 id="billing">Post-paid billing</H2>
             <P>
                 Nothing is charged up front and nothing is charged by this system. The invoice view lists each
-                reserved hour with its status and computes <code>amount_due = compliant hours × price_per_hour</code>.
+                reserved hour with its status and computes <code>amount_due = compliant hours × price_per_hour + setup_fee</code> (the setup fee only once an hour is compliant).
                 Non-compliant and cancelled hours are owed nothing. The figure is <code>final</code> only once every
                 hour has ended. You verify it against the report, then pay as agreed.
             </P>
