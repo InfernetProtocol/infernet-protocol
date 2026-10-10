@@ -52,7 +52,7 @@ A minute is **confirmed** when its probe is ok and no real request failed upstre
 
 `GET /api/v1/reservations/:id/report[?minutes=1]` — per hour: status, confirmed/failed/unconfirmed minutes, failure reasons, avg probe latency, requests, ok vs upstream errors, prompt/completion tokens (flagged estimated where the upstream did not report usage), limit hits by type; plus totals and the rule text. `?minutes=1` adds every raw probe record so the buyer can recompute verdicts.
 
-`GET /api/v1/reservations/:id/invoice` — lines per hour and `amount_due = compliant hours × price_per_hour`; `final` only once all hours ended; `amount_due: null` while unpriced. **No payment is requested or executed** (no Stripe, no CoinPay call).
+`GET /api/v1/reservations/:id/invoice` — lines per hour and `amount_due = compliant hours × price_per_hour + setup_fee` (setup fee only once an hour is compliant); `final` only once all hours ended; `amount_due: null` while unpriced. **No payment is requested or executed** (no Stripe, no CoinPay call).
 
 ## Ops
 
@@ -67,3 +67,7 @@ Whether to accept post-paid with no minimum; price per reserved hour; which oper
 ## Later
 
 Redis-backed limiter for multi-process; per-reservation latency SLO (p95) in the verdict; signed (Ed25519/Nostr) report snapshots so a buyer can hold proof offline; buyer dashboard page; overage pricing beyond included tokens.
+
+## Pricing (2026-10-10)
+
+Price list in `apps/web/lib/reservations/pricing.js`, public at `GET /api/v1/reservations/pricing` and `infernet reservation pricing`. Booking with `gpu_class` (l40s $1.35, a100 $1.89, h100 $3.99, h100x2 $7.99 per compliant hour) sets `price_per_hour` and `setup_fee` ($5 + one hour, for GPU warm-up); a lower `price_per_hour` is refused. Prices = dedicated-GPU cost (RunPod on-demand, Sep 2026) ÷ 0.79 (20% margin + ~1% payment fee) × 1.05 (only compliant hours are paid). Platform overhead is under 1¢/hour. Migration `20261010000000_reservation_pricing.sql` adds `gpu_class` and `setup_fee`.

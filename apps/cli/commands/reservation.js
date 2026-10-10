@@ -21,7 +21,10 @@ Usage:
         --start 2026-10-12T15:00:00Z --hours 1 --included-tokens 2000000
         --per-key-rps 2 --per-key-concurrency 2 --shared-rps 10 --shared-concurrency 8
         [--buyer KAI] [--required-minutes 60] [--probe-completion]
-        [--price-per-hour 0] [--currency USD] [--notes "..."]
+        [--gpu-class l40s|a100|h100|h100x2] [--price-per-hour X] [--setup-fee X]
+        [--currency USD] [--notes "..."]
+        (--gpu-class prices it from the list; a lower --price-per-hour is refused)
+  infernet reservation pricing                  the price list by GPU class
   infernet reservation show <id>
   infernet reservation price <id> --price-per-hour X [--currency USD]
   infernet reservation cancel <id>
@@ -98,6 +101,15 @@ export default async function reservation(args) {
             process.stdout.write(`created ${summary(created.reservation)}\n`);
             process.stdout.write(`buyer token (shown once — give it to the buyer):\n  ${created.buyer_token}\n`);
             process.stdout.write(`next: infernet reservation key-issue ${created.reservation.id} --label <customer>\n`);
+            return 0;
+        }
+        case 'pricing': {
+            const list = await client.pricing();
+            if (json) return out(list), 0;
+            process.stdout.write(`${list.currency} ${list.basis}\nsetup fee: ${list.setup_fee}\n\n`);
+            for (const t of list.tiers) {
+                process.stdout.write(`${t.gpu_class.padEnd(7)} ${t.label.padEnd(13)} $${t.price_per_hour.toFixed(2)}/hr  setup $${t.setup_fee.toFixed(2)}  ${t.fits}\n`);
+            }
             return 0;
         }
         case 'show': {

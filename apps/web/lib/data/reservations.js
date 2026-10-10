@@ -13,7 +13,7 @@ import {
  * key or the buyer's buyer token (checked by the route handlers).
  */
 
-const COLUMNS = "id, name, buyer, operator_name, target_kind, provider_id, endpoint_url, endpoint_secret, models, start_at, hours, included_tokens, per_key_rps, per_key_concurrency, shared_rps, shared_concurrency, required_minutes_per_hour, probe_completion, currency, price_per_hour, status, buyer_token_hash, tokens_used, created_by, notes, created_at, updated_at";
+const COLUMNS = "id, name, buyer, operator_name, target_kind, provider_id, endpoint_url, endpoint_secret, models, start_at, hours, included_tokens, per_key_rps, per_key_concurrency, shared_rps, shared_concurrency, required_minutes_per_hour, probe_completion, currency, price_per_hour, gpu_class, setup_fee, status, buyer_token_hash, tokens_used, created_by, notes, created_at, updated_at";
 
 function db() {
     return getSupabaseServerClient();
@@ -25,7 +25,8 @@ function normalize(row) {
         ...row,
         included_tokens: Number(row.included_tokens ?? 0),
         tokens_used: Number(row.tokens_used ?? 0),
-        price_per_hour: row.price_per_hour === null || row.price_per_hour === undefined ? null : Number(row.price_per_hour)
+        price_per_hour: row.price_per_hour === null || row.price_per_hour === undefined ? null : Number(row.price_per_hour),
+        setup_fee: row.setup_fee === null || row.setup_fee === undefined ? null : Number(row.setup_fee)
     };
 }
 
@@ -60,6 +61,8 @@ export async function createReservation(value, { createdBy } = {}) {
         probe_completion: value.probe_completion,
         currency: value.currency,
         price_per_hour: value.price_per_hour,
+        gpu_class: value.gpu_class ?? null,
+        setup_fee: value.setup_fee ?? null,
         notes: value.notes,
         buyer_token_hash: report.hash,
         created_by: createdBy ?? null
@@ -84,7 +87,7 @@ export async function getReservation(id) {
 }
 
 /** Fields that may change after creation. Window, target and models are fixed. */
-const MUTABLE = new Set(["name", "buyer", "notes", "price_per_hour", "currency", "status"]);
+const MUTABLE = new Set(["name", "buyer", "notes", "price_per_hour", "setup_fee", "currency", "status"]);
 
 export async function updateReservation(id, patch) {
     const row = {};
@@ -94,14 +97,15 @@ export async function updateReservation(id, patch) {
         e.status = 400;
         throw e;
     }
-    if ("price_per_hour" in row && row.price_per_hour !== null) {
-        const p = Number(row.price_per_hour);
+    for (const k of ["price_per_hour", "setup_fee"]) {
+        if (!(k in row) || row[k] === null) continue;
+        const p = Number(row[k]);
         if (!Number.isFinite(p) || p < 0) {
-            const e = new Error("price_per_hour must be a non-negative number or null");
+            const e = new Error(`${k} must be a non-negative number or null`);
             e.status = 400;
             throw e;
         }
-        row.price_per_hour = p;
+        row[k] = p;
     }
     if (Object.keys(row).length === 0) return getReservation(id);
     row.updated_at = new Date().toISOString();

@@ -6,6 +6,7 @@
  * refused) can be unit-tested and read in one place.
  */
 import { createHash, randomBytes } from "node:crypto";
+import { tierOf, floorPrice, setupFeeFor } from "./pricing.js";
 
 export const KEY_PREFIX = "ifr_res_";
 export const BUYER_TOKEN_PREFIX = "ifr_buy_";
@@ -123,6 +124,28 @@ export function validateReservationInput(body) {
         const p = Number(b.price_per_hour);
         if (!Number.isFinite(p) || p < 0) errors.push("price_per_hour must be a non-negative number");
         value.price_per_hour = Number.isFinite(p) ? p : null;
+    }
+    if (b.gpu_class === undefined || b.gpu_class === null || b.gpu_class === "") {
+        value.gpu_class = null;
+    } else {
+        const tier = tierOf(b.gpu_class);
+        if (!tier) {
+            errors.push("gpu_class must be one of l40s, a100, h100, h100x2");
+            value.gpu_class = null;
+        } else {
+            value.gpu_class = String(b.gpu_class).trim().toLowerCase();
+            if (value.price_per_hour === null) value.price_per_hour = tier.price_per_hour;
+            else if (value.price_per_hour < floorPrice(tier.cost_per_hour)) {
+                errors.push(`price_per_hour ${value.price_per_hour} is below the ${value.gpu_class} margin floor of ${floorPrice(tier.cost_per_hour)}`);
+            }
+        }
+    }
+    if (b.setup_fee === undefined || b.setup_fee === null || b.setup_fee === "") {
+        value.setup_fee = value.gpu_class && value.price_per_hour !== null ? setupFeeFor(value.price_per_hour) : null;
+    } else {
+        const f = Number(b.setup_fee);
+        if (!Number.isFinite(f) || f < 0) errors.push("setup_fee must be a non-negative number");
+        value.setup_fee = Number.isFinite(f) ? f : null;
     }
     value.notes = typeof b.notes === "string" ? b.notes : null;
 
@@ -350,20 +373,26 @@ export function buildInvoice(res, report) {
     const open = report.hours.filter((h) => h.status === "upcoming" || h.status === "in_progress").length;
     const priced = res.price_per_hour !== null && res.price_per_hour !== undefined;
     const price = priced ? Number(res.price_per_hour) : null;
+    // The setup fee covers warming the GPU, so it is owed once the
+    // reservation has delivered at least one compliant hour.
+    const setupFee = priced && res.setup_fee !== null && res.setup_fee !== undefined && compliant > 0
+        ? Number(res.setup_fee) : 0;
     return {
         reservation_id: res.id,
         buyer: res.buyer ?? null,
         operator_name: res.operator_name,
         models: res.models,
         currency: res.currency ?? "USD",
+        gpu_class: res.gpu_class ?? null,
         price_per_hour: price,
+        setup_fee: priced ? setupFee : null,
         priced,
         final: open === 0,
         hours_reserved: res.hours,
         hours_compliant: compliant,
         hours_non_compliant: nonCompliant,
         hours_open: open,
-        amount_due: priced ? Math.round(compliant * price * 100) / 100 : null,
+        amount_due: priced ? Math.round((compliant * price + setupFee) * 100) / 100 : null,
         lines: report.hours.map((h) => ({
             hour: h.hour,
             start: h.start,

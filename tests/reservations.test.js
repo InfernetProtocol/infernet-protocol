@@ -6,6 +6,7 @@ import {
 import { judgeNode } from "../apps/web/lib/data/reservation-upstream.js";
 import { handleMessage, TOOLS } from "../apps/cli/commands/mcp.js";
 import { createReservationsClient, createBodyFromFlags, renderReport, renderInvoice } from "../apps/cli/lib/reservations-client.js";
+import { GPU_TIERS, floorPrice, priceList, PAYMENT_FEE, COMPLIANCE_BUFFER } from "../apps/web/lib/reservations/pricing.js";
 
 const START = "2026-10-12T15:00:00.000Z";
 const T0 = Date.parse(START);
@@ -305,5 +306,49 @@ describe("CLI client + MCP", () => {
         expect(bad.error.code).toBe(-32602);
         expect(await handleMessage({ jsonrpc: "2.0", method: "notifications/initialized" }, client)).toBeNull();
         expect(TOOLS.length).toBeGreaterThan(5);
+    });
+});
+
+describe("pricing", () => {
+    const base = {
+        name: "kai-pilot", operator_name: "op-1", models: ["qwen2.5:7b"],
+        endpoint_url: "https://op.example/v1", start_at: START, hours: 1
+    };
+
+    it("every list price clears the 20% margin after fees and the compliance buffer", () => {
+        for (const t of Object.values(GPU_TIERS)) {
+            expect(t.price_per_hour).toBeGreaterThanOrEqual(floorPrice(t.cost_per_hour));
+            const margin = (t.price_per_hour * (1 - PAYMENT_FEE) / (1 + COMPLIANCE_BUFFER) - t.cost_per_hour) / t.price_per_hour;
+            expect(margin).toBeGreaterThanOrEqual(0.19);
+        }
+    });
+
+    it("gpu_class prices the reservation and sets the setup fee", () => {
+        const v = validateReservationInput({ ...base, gpu_class: "H100" });
+        expect(v.ok).toBe(true);
+        expect(v.value.gpu_class).toBe("h100");
+        expect(v.value.price_per_hour).toBe(3.99);
+        expect(v.value.setup_fee).toBe(8.99);
+    });
+
+    it("refuses a price under the tier's margin floor and an unknown class", () => {
+        expect(validateReservationInput({ ...base, gpu_class: "l40s", price_per_hour: 1 }).ok).toBe(false);
+        expect(validateReservationInput({ ...base, gpu_class: "l40s", price_per_hour: 2 }).ok).toBe(true);
+        expect(validateReservationInput({ ...base, gpu_class: "tpu" }).ok).toBe(false);
+    });
+
+    it("bills the setup fee once, only after a compliant hour", () => {
+        const r = res({ hours: 2, price_per_hour: 1.35, setup_fee: 6.35, gpu_class: "l40s" });
+        const paid = buildInvoice(r, buildReport(r, [...allMinutes(0), ...allMinutes(1)], [], T0 + 3 * HOUR));
+        expect(paid.amount_due).toBe(9.05);
+        const failed = buildInvoice(r, buildReport(r, [], [], T0 + 3 * HOUR));
+        expect(failed.amount_due).toBe(0);
+        expect(failed.setup_fee).toBe(0);
+    });
+
+    it("publishes the list with setup fees", () => {
+        const l = priceList();
+        expect(l.tiers.map((t) => t.gpu_class)).toEqual(["l40s", "a100", "h100", "h100x2"]);
+        expect(l.tiers[0].setup_fee).toBe(6.35);
     });
 });

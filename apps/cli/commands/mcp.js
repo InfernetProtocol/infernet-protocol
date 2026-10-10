@@ -27,7 +27,7 @@ export const TOOLS = [
     },
     {
         name: 'reservation_create',
-        description: 'Book a managed endpoint: exact model ids on one named operator target (provider_id of an Infernet node, or an OpenAI-compatible endpoint_url), starting at a whole UTC hour for N hours, with included tokens and per-key/shared rps + concurrency limits. Returns the reservation and a one-time buyer token. Does not set or agree a price unless price_per_hour is passed.',
+        description: 'Book a managed endpoint: exact model ids on one named operator target (provider_id of an Infernet node, or an OpenAI-compatible endpoint_url), starting at a whole UTC hour for N hours, with included tokens and per-key/shared rps + concurrency limits. Returns the reservation and a one-time buyer token. Unpriced unless gpu_class or price_per_hour is passed.',
         inputSchema: {
             type: 'object',
             required: ['name', 'operator_name', 'models', 'start_at', 'hours'],
@@ -48,7 +48,9 @@ export const TOOLS = [
                 shared_concurrency: { type: 'integer', minimum: 1 },
                 required_minutes_per_hour: { type: 'integer', minimum: 1, maximum: 60 },
                 probe_completion: { type: 'boolean' },
+                gpu_class: { type: 'string', enum: ['l40s', 'a100', 'h100', 'h100x2'], description: 'Prices the reservation from the list (GET /api/v1/reservations/pricing); a lower price_per_hour is refused.' },
                 price_per_hour: { type: 'number', minimum: 0 },
+                setup_fee: { type: 'number', minimum: 0 },
                 currency: { type: 'string' },
                 notes: { type: 'string' }
             }
