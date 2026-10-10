@@ -189,6 +189,9 @@ importers:
       '@profullstack/favicon-generator':
         specifier: ^1.1.4
         version: 1.1.4
+      '@profullstack/footer':
+        specifier: latest
+        version: 0.2.1(react@19.2.5)
       '@profullstack/form-guard':
         specifier: ^0.1.0
         version: 0.1.0
@@ -1198,7 +1201,7 @@ packages:
 
   '@expo/bunyan@4.0.1':
     resolution: {integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==}
-    engines: {'0': node >=0.10.0}
+    engines: {node: '>=0.10.0'}
 
   '@expo/cli@0.17.13':
     resolution: {integrity: sha512-n13yxOmI3I0JidzMdFCH68tYKGDtK4XlDFk1vysZX7AIRKeDVRsSbHhma5jCla2bDt25RKmJBHA9KtzielwzAA==}
@@ -1789,6 +1792,16 @@ packages:
     resolution: {integrity: sha512-94GFhuTDcZHdEsd17buuRcdaiwg8jf9oVTOhp2j4eArr9t+aF+W34RqgrHh1F6YWMNXQH5T+9skx0UGnkEP75A==}
     engines: {node: '>=20.0.0'}
     hasBin: true
+
+  '@profullstack/footer@0.2.1':
+    resolution: {integrity: sha512-KHmKVwrlzCBrSAAJ4zobNFCxTg8VF0gvNMeAut00dX3+gbWCtk6eOwIR2AaqEC7smj6Aio6cIexzt/dUnv1McA==}
+    engines: {node: '>=18'}
+    hasBin: true
+    peerDependencies:
+      react: '>=18'
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   '@profullstack/form-guard@0.1.0':
     resolution: {integrity: sha512-2BeyeKCuOmSgVvLY+/GdS30a724VLnlLA5s26rANFWet8IeXFzoiQG5dTWFjo9Xq15ZxxkPK0gYLHH4x0CYTLg==}
@@ -8370,6 +8383,10 @@ snapshots:
     dependencies:
       inquirer: 10.2.2
       sharp: 0.33.5
+
+  '@profullstack/footer@0.2.1(react@19.2.5)':
+    optionalDependencies:
+      react: 19.2.5
 
   '@profullstack/form-guard@0.1.0': {}
 
