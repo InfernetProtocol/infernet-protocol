@@ -261,6 +261,7 @@ infernet --json "ping"`}
                 <p>Manage the models your node has on disk and which one is the active default.</p>
                 <CodeBlock>
 {`infernet model list                  # show pulled models + which is active
+infernet model list --node <id>      # models a remote public node advertises
 infernet model pull qwen2.5:7b       # pull (Ollama progress bar inline)
 infernet model use qwen2.5:7b        # set as engine.model in config
 infernet model show                  # current backend, host, active model

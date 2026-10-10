@@ -7,6 +7,7 @@
  * the engine uses by default.
  *
  *   infernet model list
+ *   infernet model list --node <id>      a remote node's advertised models
  *   infernet model pull <name>           Ollama name or hf:org/repo
  *   infernet model remove <name>
  *   infernet model use <name>
@@ -26,11 +27,16 @@ import {
     downloadHfModel,
 } from "../lib/hf-model.js";
 import { recommendModels } from "../lib/recommender.js";
+import { resolveClientOptions } from "../lib/reservations-client.js";
+import { fetchNodeModels, formatNodeModels } from "../lib/node-models.js";
 
 const HELP = `infernet model — manage models served by this node
 
 Usage:
   infernet model list                    List models pulled locally.
+  infernet model list --node <id>        List the models a remote node advertises
+                                         (node id or row id, public nodes only).
+                                           --url <control-plane>   default infernetprotocol.com
   infernet model recommend [flags]       Recommend models for your hardware.
                                            --use-case <chat|coding|study|agents|uncensored|vision>
                                            --uncensored
@@ -154,6 +160,21 @@ async function cmdList(host) {
 
     if (active) {
         process.stdout.write(`\nactive: ${active}\n`);
+    }
+    return 0;
+}
+
+async function cmdListNode(nodeId, args) {
+    if (!nodeId || nodeId === true) {
+        process.stderr.write("error: --node needs a node id\n");
+        return 2;
+    }
+    const { baseUrl } = await resolveClientOptions({ url: args.get("url") });
+    const node = await fetchNodeModels({ baseUrl, nodeId: String(nodeId) });
+    if (args.has("json")) {
+        process.stdout.write(JSON.stringify(node, null, 2) + "\n");
+    } else {
+        process.stdout.write(formatNodeModels(node));
     }
     return 0;
 }
@@ -562,6 +583,7 @@ export default async function model(args) {
         switch (sub) {
             case "list":
             case "ls":
+                if (args.has("node")) return await cmdListNode(args.get("node"), args);
                 return await cmdList(host);
             case "info":
             case "inspect":
