@@ -209,6 +209,42 @@ export async function getBootstrapPeers({ limit } = {}) {
     });
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * One provider's advertised models (specs.served_models), looked up by
+ * row id or node_id. Honors is_public: a private node returns null, the
+ * same as a missing one, so existence isn't leaked.
+ */
+export async function getPublicNodeModels(idOrNodeId) {
+  const key = String(idOrNodeId ?? "").trim();
+  if (!key) return null;
+  const supabase = getSupabaseServerClient();
+  // id is a uuid column: comparing it to a non-uuid string is a Postgres error.
+  const columns = UUID_RE.test(key) ? ["id", "node_id"] : ["node_id"];
+  for (const column of columns) {
+    const { data, error } = await supabase
+      .from("providers")
+      .select("id,node_id,name,status,last_seen,specs")
+      .eq(column, key)
+      .eq("is_public", true)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data) {
+      const served = Array.isArray(data?.specs?.served_models) ? data.specs.served_models : [];
+      return {
+        id: data.id,
+        node_id: data.node_id ?? null,
+        name: data.name ?? null,
+        status: data.status ?? null,
+        last_seen: data.last_seen ?? null,
+        served_models: served.filter((m) => typeof m === "string" && m)
+      };
+    }
+  }
+  return null;
+}
+
 export async function getJobs({ limit, status, pubkey } = {}) {
   const supabase = getSupabaseServerClient();
   let query = supabase
