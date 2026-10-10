@@ -85,6 +85,7 @@ export default function SiteFooter() {
                     <a href="https://rssamplifier.com/ring/profullstack/previous?from=https%3A%2F%2Finfernetprotocol.com%2F" rel="prev" className="hover:text-white">{"<<"}</a>
                     <a href="https://rssamplifier.com/ring/profullstack" className="hover:text-white">Profullstack</a>
                     <a href="https://rssamplifier.com/ring/profullstack/next?from=https%3A%2F%2Finfernetprotocol.com%2F" rel="next" className="hover:text-white">{">>"}</a>
+                    <a href="https://rssamplifier.com/ring/profullstack/random?from=https%3A%2F%2Finfernetprotocol.com%2F" title="Random site" aria-label="Random site" className="hover:text-white">{"⚄"}</a>
                 </nav>
                 <p>
                     <Link href="/auth/login" className="hover:text-white">
