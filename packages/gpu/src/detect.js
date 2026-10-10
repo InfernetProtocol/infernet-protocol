@@ -248,17 +248,37 @@ async function detectLspciFallback() {
             lastDiagnostics.lspci = 'lspci ran but no VGA/3D/Display devices found';
             return [];
         }
-        return lines.map((line, i) => parseLspciLine(line, i));
+        return parseLspciLines(lines);
     }
     const lines = result.stdout.split('\n').filter((l) => l.trim().length > 0);
     if (lines.length === 0) {
         lastDiagnostics.lspci = 'lspci ran but reported no VGA devices';
         return [];
     }
-    return lines.map((line, i) => parseLspciLine(line, i));
+    return parseLspciLines(lines);
 }
 
-function parseLspciLine(line, index) {
+// Display adapters that are never an inference GPU: hypervisor-emulated VGA
+// (QEMU std-vga 1234, Cirrus 1013, VMware 15ad, VirtualBox 80ee, virtio 1af4,
+// QXL 1b36, Hyper-V 1414) and server BMC framebuffers (ASPEED 1a03, Matrox
+// G200 102b). Matched by PCI vendor id (-nn) or vendor name (-mm).
+const NON_COMPUTE_VGA_IDS = /\[(1234|1013|15ad|80ee|1af4|1b36|1414|1a03|102b):[0-9a-f]{4}\]/i;
+const NON_COMPUTE_VGA_NAMES = /\b(vendor 1234|qemu|bochs|cirrus logic|vmware|virtualbox|innotek|virtio|qxl|hyper-v|aspeed|matrox)\b/i;
+
+export function isNonComputeDisplay(line) {
+    return NON_COMPUTE_VGA_IDS.test(line) || NON_COMPUTE_VGA_NAMES.test(line);
+}
+
+export function parseLspciLines(lines) {
+    const real = lines.filter((l) => !isNonComputeDisplay(l));
+    if (real.length === 0) {
+        lastDiagnostics.lspci = 'lspci found only virtual/BMC display adapters (no compute GPU)';
+        return [];
+    }
+    return real.map((line, i) => parseLspciLine(line, i));
+}
+
+export function parseLspciLine(line, index) {
     // -mm output: BDF "Vendor" "Device" "Subsys" ...
     // -nn output: BDF Class: Vendor Device [vendor:dev]
     let vendor = null;
@@ -267,10 +287,10 @@ function parseLspciLine(line, index) {
     if (lower.includes('nvidia')) vendor = 'nvidia';
     else if (lower.includes('amd') || lower.includes('ati ')) vendor = 'amd';
     else if (lower.includes('intel')) vendor = 'intel';
-    // Best-effort model extraction: take whatever's between the first
-    // and second double-quote (works for -mm format).
-    const m = line.match(/"([^"]+)"\s+"([^"]+)"/);
-    if (m) model = `${m[1]} ${m[2]}`.trim();
+    // -mm format: the quoted fields are class, vendor, device — the model
+    // is vendor + device, not the class name.
+    const q = [...line.matchAll(/"([^"]*)"/g)].map((x) => x[1]);
+    if (q.length >= 3) model = `${q[1]} ${q[2]}`.trim();
     return {
         vendor: vendor ?? 'unknown',
         index,
