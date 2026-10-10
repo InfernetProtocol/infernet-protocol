@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Footer as ProfullstackFooter } from "@profullstack/footer/react";
 
 const PRODUCT = [
     { href: "/getting-started", label: "Get started" },
@@ -31,7 +32,8 @@ const BOOK_DOWNLOADS = [
 
 export default function SiteFooter() {
     return (
-        <footer className="mx-auto w-full max-w-6xl px-6 py-12 lg:px-10">
+        <div className="mx-auto w-full max-w-6xl px-6 pt-12 pb-6 lg:px-10">
+            <footer>
             <div className="grid gap-10 border-t border-white/10 pt-10 sm:grid-cols-[1.4fr_1fr_1fr_auto]">
                 <div className="space-y-3">
                     <Link href="/" aria-label="Infernet Protocol home" className="inline-flex">
@@ -79,21 +81,17 @@ export default function SiteFooter() {
                 </div>
             </div>
 
-            <div className="mt-10 flex flex-col gap-3 border-t border-white/10 pt-6 text-sm text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between">
-                <p>© {new Date().getFullYear()} Infernet Protocol — open source, MIT licensed.</p>
-                <nav className="webring flex items-center gap-2" aria-label="Profullstack webring">
-                    <a href="https://rssamplifier.com/ring/profullstack/previous?from=https%3A%2F%2Finfernetprotocol.com%2F" rel="prev" className="hover:text-white">{"<<"}</a>
-                    <a href="https://rssamplifier.com/ring/profullstack" className="hover:text-white">Profullstack</a>
-                    <a href="https://rssamplifier.com/ring/profullstack/next?from=https%3A%2F%2Finfernetprotocol.com%2F" rel="next" className="hover:text-white">{">>"}</a>
-                    <a href="https://rssamplifier.com/ring/profullstack/random?from=https%3A%2F%2Finfernetprotocol.com%2F" title="Random site" aria-label="Random site" className="hover:text-white">{"⚄"}</a>
-                </nav>
-                <p>
-                    <Link href="/auth/login" className="hover:text-white">
-                        Sign in
-                    </Link>
-                </p>
+            </footer>
+            {/* Copyright + Profullstack ring nav, rendered server-side from the shared @latest template. */}
+            <div className="mt-10 text-[var(--muted)]">
+                <ProfullstackFooter
+                    site="https://infernetprotocol.com/"
+                    owner={{ name: "Infernet Protocol", url: "https://infernetprotocol.com/" }}
+                    tagline="open source, MIT licensed."
+                    links={[{ label: "Sign in", href: "/auth/login" }]}
+                />
             </div>
-        </footer>
+        </div>
     );
 }
 
