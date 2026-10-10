@@ -33,7 +33,7 @@
     "overrides": {
       "postcss": "8.5.10",
       "tmp": "0.2.4",
-      "tar": "7.5.11",
+      "tar": "7.5.21",
       "@tootallnate/once": "3.0.1",
       "send": "0.19.0",
       "semver": "7.7.3",
