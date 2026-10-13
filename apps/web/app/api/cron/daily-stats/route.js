@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Cron: the Infernet Protocol daily stats email (08:00 UTC, to
- * anthony@profullstack.com). Called by the DigitalOcean droplet's crontab:
+ * anthony@ and preshy@profullstack.com). Called by the DigitalOcean droplet's crontab:
  *
  *   curl -fsS -X POST https://infernetprotocol.com/api/cron/daily-stats \
  *        -H 'Authorization: Bearer $CRON_SECRET'

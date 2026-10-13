@@ -29,7 +29,7 @@ export class DailyStatsQueryError extends Error {
     }
 }
 
-export const DAILY_STATS_TO = "anthony@profullstack.com";
+export const DAILY_STATS_TO = ["anthony@profullstack.com", "preshy@profullstack.com"];
 export const DAILY_STATS_FROM = "Infernet Stats <stats@infernetprotocol.com>";
 
 const HOUR = 3600_000;
@@ -476,7 +476,7 @@ export async function sendDailyStatsEmail(report, { apiKey, to, from, fetchImpl 
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
         body: JSON.stringify({
             from: from ?? process.env.STATS_FROM_EMAIL ?? DAILY_STATS_FROM,
-            to: [to ?? DAILY_STATS_TO],
+            to: [to ?? DAILY_STATS_TO].flat(),
             subject: report.subject,
             html: report.html,
             text: report.text
