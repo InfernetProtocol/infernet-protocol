@@ -95,7 +95,7 @@ describe("POST /api/cron/daily-stats", () => {
         expect(res.status).toBe(200);
     });
 
-    it("sends the real counts to anthony@profullstack.com", async () => {
+    it("sends the real counts to anthony@ and preshy@profullstack.com", async () => {
         const res = await POST(req());
         expect(res.status).toBe(200);
         const body = await res.json();
@@ -105,7 +105,7 @@ describe("POST /api/cron/daily-stats", () => {
         const [url, init] = fetchMock.mock.calls[0];
         expect(url).toBe("https://api.resend.com/emails");
         const payload = JSON.parse(init.body);
-        expect(payload.to).toEqual(["anthony@profullstack.com"]);
+        expect(payload.to).toEqual(["anthony@profullstack.com", "preshy@profullstack.com"]);
         expect(payload.from).toContain("infernetprotocol.com");
         expect(payload.text).toContain("Total: 739");
     });
