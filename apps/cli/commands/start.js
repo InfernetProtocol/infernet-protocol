@@ -83,6 +83,16 @@ const DEFAULT_HEARTBEAT_MS = 30_000;
 const DEFAULT_POLL_MS = 15_000;
 const UPDATE_CHECK_MS = 5 * 60 * 1000; // 5 minutes
 const UPDATE_DRAIN_MS = 10 * 60 * 1000; // wait for in-flight jobs before restarting
+const SHUTDOWN_DEADLINE_MS = 5_000; // hard exit: a half-shut daemon must never outlive its pidfile
+const OFFLINE_HEARTBEAT_TIMEOUT_MS = 3_000;
+
+function withTimeout(promise, ms, what) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 async function writePidFile(pid) {
     const p = getDaemonPidPath();
@@ -1349,10 +1359,16 @@ async function runDaemon(args, ctx) {
         if (shuttingDown) return;
         shuttingDown = true;
         process.stdout.write(`\nReceived ${signal}; shutting down...\n`);
+        // Exit no matter what hangs below. A daemon that has released its socket and pidfile but
+        // is still alive is invisible to `infernet start`, so every restart stacked another one.
+        setTimeout(() => {
+            process.stderr.write(`shutdown did not finish in ${SHUTDOWN_DEADLINE_MS} ms; exiting anyway\n`);
+            process.exit(0);
+        }, SHUTDOWN_DEADLINE_MS);
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         if (pollTimer) clearInterval(pollTimer);
         try {
-            await client.heartbeat({ status: 'offline' });
+            await withTimeout(client.heartbeat({ status: 'offline' }), OFFLINE_HEARTBEAT_TIMEOUT_MS, 'offline heartbeat');
         } catch (err) {
             process.stderr.write(`offline heartbeat failed: ${err?.message ?? err}\n`);
         }
@@ -1602,7 +1618,7 @@ async function runDaemon(args, ctx) {
         if (ipcServer)    try { ipcServer.close();    } catch {}
         if (p2pServer)    try { p2pServer.close();    } catch {}
         if (healthServer) try { healthServer.close(); } catch {}
-        try { await shutdownEngine(); } catch {}
+        try { await withTimeout(shutdownEngine(), SHUTDOWN_DEADLINE_MS, 'engine shutdown'); } catch {}
         removeSocketFile();
         await removePidFile();
 
