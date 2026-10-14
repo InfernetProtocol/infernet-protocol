@@ -108,6 +108,18 @@ function removeSocketFile() {
     try { unlinkSync(getDaemonSocketPath()); } catch { /* ignore */ }
 }
 
+// Exit paths clean up only what is still ours: when another daemon has since started, the pidfile
+// holds its pid and the socket is its listener. Deleting them made that daemon unreachable.
+function ownsPidFile() {
+    try { return readFileSync(getDaemonPidPath(), 'utf8').trim() === String(process.pid); } catch { return false; }
+}
+
+async function removeOwnPidAndSocket() {
+    if (!ownsPidFile()) return;
+    removeSocketFile();
+    await removePidFile();
+}
+
 // ---------------------------------------------------------------------------
 // Entry point — branch between "spawn detached" and "run foreground loop".
 // ---------------------------------------------------------------------------
@@ -1376,8 +1388,7 @@ async function runDaemon(args, ctx) {
         if (p2pServer) { try { p2pServer.close(); } catch {} }
         if (healthServer) { try { healthServer.close(); } catch {} }
         try { await shutdownEngine(); } catch {}
-        removeSocketFile();
-        await removePidFile();
+        await removeOwnPidAndSocket();
         process.stdout.write('bye\n');
         process.exit(0);
     };
@@ -1519,8 +1530,7 @@ async function runDaemon(args, ctx) {
         if (ipcServer) { try { ipcServer.close(); } catch {} }
         if (p2pServer) { try { p2pServer.close(); } catch {} }
         if (healthServer) { try { healthServer.close(); } catch {} }
-        removeSocketFile();
-        await removePidFile();
+        await removeOwnPidAndSocket();
         return 0;
     }
 
@@ -1619,8 +1629,7 @@ async function runDaemon(args, ctx) {
         if (p2pServer)    try { p2pServer.close();    } catch {}
         if (healthServer) try { healthServer.close(); } catch {}
         try { await withTimeout(shutdownEngine(), SHUTDOWN_DEADLINE_MS, 'engine shutdown'); } catch {}
-        removeSocketFile();
-        await removePidFile();
+        await removeOwnPidAndSocket();
 
         // Small grace period so OS reclaims the ports before the new process binds.
         await new Promise((r) => setTimeout(r, 500));
