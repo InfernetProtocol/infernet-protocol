@@ -3161,7 +3161,7 @@ class="sourceCode ini"><code class="sourceCode ini"><span id="cb117-1"><a href="
 <p>MAX has strong support for: - Qwen2, Qwen2.5 family - Llama 3, Llama
 3.1, Llama 3.2 - Mistral, Mixtral - Phi-3, Phi-3.5 - Gemma 2</p>
 <p>Check the <a
-href="https://docs.modular.com/max/model-formats/">Modular docs</a> for
+href="https://docs.modular.com/max/">Modular docs</a> for
 the current supported model list. For models not yet natively supported,
 MAX can often serve them via HuggingFace Transformers compatibility mode
 (slower but still works).</p>
@@ -5404,7 +5404,7 @@ locally.</p>
 <hr />
 <h2 id="following-development">Following Development</h2>
 <p>Watch the <a
-href="https://github.com/infernetprotocol/infernet">Infernet GitHub</a>
+href="https://github.com/InfernetProtocol/infernet-protocol">Infernet GitHub</a>
 for training-related issues and PRs. The IPIP (Infernet Protocol
 Improvement Proposals) repository tracks protocol design decisions,
 including the distributed training spec.</p>
@@ -5684,7 +5684,7 @@ href="https://supabase.com">supabase.com</a></li>
 <li>Run the Infernet schema migrations:</li>
 </ol>
 <div class="sourceCode" id="cb236"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb236-1"><a href="#cb236-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/infernetprotocol/infernet</span>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb236-1"><a href="#cb236-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/InfernetProtocol/infernet-protocol</span>
 <span id="cb236-2"><a href="#cb236-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> infernet/control-plane</span>
 <span id="cb236-3"><a href="#cb236-3" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb236-4"><a href="#cb236-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Install Supabase CLI</span></span>
@@ -5939,8 +5939,7 @@ override with <code>--llama-cpp-path</code>). Emits
 <code>Modelfile</code> with the ChatML template and sane defaults
 (<code>temperature=0.7</code>, <code>top_p=0.9</code>).</li>
 <li><strong>Ollama push</strong> — <code>ollama create</code> +
-<code>ollama push</code> so it lands at <a
-href="https://ollama.com/infernet/svelte5-coder">ollama.com/infernet/svelte5-coder</a>.
+<code>ollama push</code> so it lands at <code>ollama.com/infernet/svelte5-coder</code>.
 Run <code>ollama signin</code> once before the first publish.</li>
 </ol>
 <p>After this, anyone with Ollama can pull your model:</p>

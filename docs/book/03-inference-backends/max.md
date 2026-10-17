@@ -181,4 +181,4 @@ MAX has strong support for:
 - Phi-3, Phi-3.5
 - Gemma 2
 
-Check the [Modular docs](https://docs.modular.com/max/model-formats/) for the current supported model list. For models not yet natively supported, MAX can often serve them via HuggingFace Transformers compatibility mode (slower but still works).
+Check the [Modular docs](https://docs.modular.com/max/) for the current supported model list. For models not yet natively supported, MAX can often serve them via HuggingFace Transformers compatibility mode (slower but still works).

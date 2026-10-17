@@ -214,7 +214,7 @@ Status key: **SHIPPED** = works as claimed · **PARTIAL** = code exists but is i
 
 | URL | Where referenced | Result |
 |---|---|---|
-| https://github.com/infernetprotocol/infernet-protocol/pkgs/container/infernet-provider | /protocol "Container image" | 404 |
+| https://github.com/orgs/InfernetProtocol/packages | /protocol "Container image" | 404 |
 | `ghcr.io/profullstack/infernet-provider:latest` | /protocol "Start here" | not pullable (anonymous token refused; wrong owner) |
 | `ghcr.io/InfernetProtocol/infernet-provider:0.1.53` | GitHub release v0.1.53 | not pullable anonymously |
 | https://infernetprotocol.com/api/cpr | `/.well-known/did.json` CPRIssuer service | 404 |

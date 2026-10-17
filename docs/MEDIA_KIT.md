@@ -8,7 +8,7 @@ Infernet Protocol is an open-source decentralized GPU inference marketplace. GPU
 - Protocol landing page: https://infernetprotocol.com/protocol
 - GitHub repository: https://github.com/infernetprotocol/infernet-protocol
 - Releases: https://github.com/infernetprotocol/infernet-protocol/releases
-- Docker provider image: https://github.com/infernetprotocol/infernet-protocol/pkgs/container/infernet-provider
+- Docker provider image: https://github.com/orgs/InfernetProtocol/packages
 - Protocol spec: https://github.com/infernetprotocol/infernet-protocol/blob/master/INFERNET-PROTOCOL.md
 - Architecture: https://github.com/infernetprotocol/infernet-protocol/blob/master/INFERNET-ARCHITECTURE.md
 - IPIPs: https://github.com/infernetprotocol/infernet-protocol/tree/master/ipips

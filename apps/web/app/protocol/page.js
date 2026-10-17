@@ -38,7 +38,7 @@ const canonicalLinks = [
   },
   {
     label: "Container image",
-    href: "https://github.com/infernetprotocol/infernet-protocol/pkgs/container/infernet-provider",
+    href: "https://github.com/orgs/InfernetProtocol/packages",
     description: "GHCR provider image for booting an Infernet GPU node."
   }
 ];
