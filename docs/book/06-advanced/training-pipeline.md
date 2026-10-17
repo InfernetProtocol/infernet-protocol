@@ -129,7 +129,7 @@ What this does:
 3. **Modelfile generation** — writes a `Modelfile` with the ChatML
    template and sane defaults (`temperature=0.7`, `top_p=0.9`).
 4. **Ollama push** — `ollama create` + `ollama push` so it lands at
-   [ollama.com/infernet/svelte5-coder](https://ollama.com/infernet/svelte5-coder).
+   `ollama.com/infernet/svelte5-coder`.
    Run `ollama signin` once before the first publish.
 
 After this, anyone with Ollama can pull your model:

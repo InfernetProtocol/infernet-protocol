@@ -36,7 +36,7 @@ This is the easiest path. Use Supabase's hosted service for the database and dep
 3. Run the Infernet schema migrations:
 
 ```bash
-git clone https://github.com/infernetprotocol/infernet
+git clone https://github.com/InfernetProtocol/infernet-protocol
 cd infernet/control-plane
 
 # Install Supabase CLI

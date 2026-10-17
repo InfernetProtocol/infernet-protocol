@@ -130,4 +130,4 @@ When distributed training ships on the network, you'll be able to submit these j
 
 ## Following Development
 
-Watch the [Infernet GitHub](https://github.com/infernetprotocol/infernet) for training-related issues and PRs. The IPIP (Infernet Protocol Improvement Proposals) repository tracks protocol design decisions, including the distributed training spec.
+Watch the [Infernet GitHub](https://github.com/InfernetProtocol/infernet-protocol) for training-related issues and PRs. The IPIP (Infernet Protocol Improvement Proposals) repository tracks protocol design decisions, including the distributed training spec.
