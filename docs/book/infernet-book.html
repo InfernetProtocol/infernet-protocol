@@ -3160,11 +3160,10 @@ class="sourceCode ini"><code class="sourceCode ini"><span id="cb117-1"><a href="
 <h2 id="model-support">Model Support</h2>
 <p>MAX has strong support for: - Qwen2, Qwen2.5 family - Llama 3, Llama
 3.1, Llama 3.2 - Mistral, Mixtral - Phi-3, Phi-3.5 - Gemma 2</p>
-<p>Check the <a
-href="https://docs.modular.com/max/">Modular docs</a> for
-the current supported model list. For models not yet natively supported,
-MAX can often serve them via HuggingFace Transformers compatibility mode
-(slower but still works).</p>
+<p>Check the <a href="https://docs.modular.com/max/">Modular docs</a>
+for the current supported model list. For models not yet natively
+supported, MAX can often serve them via HuggingFace Transformers
+compatibility mode (slower but still works).</p>
 <hr />
 <p><a id="ollama"></a></p>
 <h1 id="ollama">Ollama</h1>
@@ -5404,10 +5403,10 @@ locally.</p>
 <hr />
 <h2 id="following-development">Following Development</h2>
 <p>Watch the <a
-href="https://github.com/InfernetProtocol/infernet-protocol">Infernet GitHub</a>
-for training-related issues and PRs. The IPIP (Infernet Protocol
-Improvement Proposals) repository tracks protocol design decisions,
-including the distributed training spec.</p>
+href="https://github.com/InfernetProtocol/infernet-protocol">Infernet
+GitHub</a> for training-related issues and PRs. The IPIP (Infernet
+Protocol Improvement Proposals) repository tracks protocol design
+decisions, including the distributed training spec.</p>
 <hr />
 <p><a id="multi-gpu"></a></p>
 <h1 id="multi-gpu-inference">Multi-GPU Inference</h1>
@@ -5939,8 +5938,9 @@ override with <code>--llama-cpp-path</code>). Emits
 <code>Modelfile</code> with the ChatML template and sane defaults
 (<code>temperature=0.7</code>, <code>top_p=0.9</code>).</li>
 <li><strong>Ollama push</strong> — <code>ollama create</code> +
-<code>ollama push</code> so it lands at <code>ollama.com/infernet/svelte5-coder</code>.
-Run <code>ollama signin</code> once before the first publish.</li>
+<code>ollama push</code> so it lands at
+<code>ollama.com/infernet/svelte5-coder</code>. Run
+<code>ollama signin</code> once before the first publish.</li>
 </ol>
 <p>After this, anyone with Ollama can pull your model:</p>
 <div class="sourceCode" id="cb261"><pre
