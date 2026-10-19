@@ -37,3 +37,15 @@ a {
 ::selection {
   background: rgba(102, 217, 192, 0.28);
 }
+
+/* CrawlProof ad unit (components/ad-unit.js): no box until ad.js fills it, so an
+   unsold or blocked slot leaves no hole. */
+.cp-ad {
+    height: 0;
+    overflow: hidden;
+}
+.cp-ad[data-cp-filled] {
+    height: auto;
+    overflow: visible;
+    margin: 2.5rem 0;
+}
