@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Footer as ProfullstackFooter } from "@profullstack/footer/react";
 
 const LINKS = [
     { href: "/docs", label: "Docs" },
@@ -13,38 +14,48 @@ const LINKS = [
 
 export default function SiteFooter() {
     return (
-        <footer className="mx-auto w-full max-w-6xl px-6 pt-12 pb-6 lg:px-10">
-            <div className="flex flex-col gap-3 border-t border-white/10 pt-6 text-sm text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between">
-                <p>
-                    &copy; {new Date().getFullYear()} Infernet Protocol &middot; MIT licensed &middot;{" "}
-                    <a href="mailto:hello@infernetprotocol.com" className="hover:text-white">
-                        hello@infernetprotocol.com
-                    </a>
-                </p>
-                <nav className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                    {LINKS.map((item) => (
-                        <Link
-                            key={item.href}
-                            href={item.href}
+        <div className="mx-auto w-full max-w-6xl px-6 pt-12 pb-6 lg:px-10">
+            <footer>
+                <div className="flex flex-col gap-3 border-t border-white/10 pt-6 text-sm text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between">
+                    <p>
+                        <a href="mailto:hello@infernetprotocol.com" className="hover:text-white">
+                            hello@infernetprotocol.com
+                        </a>
+                    </p>
+                    <nav className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                        {LINKS.map((item) => (
+                            <Link
+                                key={item.href}
+                                href={item.href}
+                                className="hover:text-white"
+                                target={item.external ? "_blank" : undefined}
+                                rel={item.external ? "noreferrer" : undefined}
+                            >
+                                {item.label}
+                            </Link>
+                        ))}
+                        <a
+                            href="https://discord.gg/w5nHdzpQ29"
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label="Join our Discord"
                             className="hover:text-white"
-                            target={item.external ? "_blank" : undefined}
-                            rel={item.external ? "noreferrer" : undefined}
                         >
-                            {item.label}
-                        </Link>
-                    ))}
-                    <a
-                        href="https://discord.gg/w5nHdzpQ29"
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label="Join our Discord"
-                        className="hover:text-white"
-                    >
-                        <DiscordIcon />
-                    </a>
-                </nav>
+                            <DiscordIcon />
+                        </a>
+                    </nav>
+                </div>
+            </footer>
+            {/* Profullstack webring row + the one copyright line, server-rendered
+                from the shared @latest template (the ring verifier reads raw HTML). */}
+            <div className="mt-6 text-[var(--muted)]">
+                <ProfullstackFooter
+                    site="https://infernetprotocol.com/"
+                    owner={{ name: "Infernet Protocol", url: "https://infernetprotocol.com/" }}
+                    tagline="open source, MIT licensed."
+                />
             </div>
-        </footer>
+        </div>
     );
 }
 
