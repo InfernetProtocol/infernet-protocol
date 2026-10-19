@@ -2,6 +2,7 @@ import "./globals.css";
 import Script from "next/script";
 import SiteHeader from "@/components/site-header";
 import SiteFooter from "@/components/site-footer";
+import PitFooter from "@/components/pit-footer";
 
 export const metadata = {
     metadataBase: new URL(
@@ -156,6 +157,7 @@ export default function RootLayout({ children }) {
                     data-site="a5ab20bb-34d5-4799-9c08-8620647ce772"
                     strategy="afterInteractive"
                 />
+                <PitFooter />
             </body>
         </html>
     );
