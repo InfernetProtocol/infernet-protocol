@@ -1,6 +1,6 @@
 {
   "name": "@infernetprotocol/web",
-  "version": "2.1.7",
+  "version": "2.1.8",
   "private": true,
   "description": "Infernet Protocol control plane — Next.js + Supabase web app",
   "type": "module",
@@ -25,7 +25,6 @@
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
     "@profullstack/favicon-generator": "^1.1.4",
-    "@profullstack/footer": "latest",
     "@profullstack/form-guard": "^0.1.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.49.8",
