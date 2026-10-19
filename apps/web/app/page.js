@@ -54,6 +54,8 @@ export default function HomePage() {
         </div>
       </section>
 
+      <AdUnit />
+
       {/* What it is */}
       <section className="border-b border-white/10">
         <div className="mx-auto grid w-full max-w-6xl gap-10 px-6 py-20 lg:grid-cols-3 lg:px-10">
@@ -201,7 +203,6 @@ infernet "what is 2+2?"   # default verb is chat`}
         </div>
       </section>
 
-      <AdUnit />
       </main>
     </>
   );
