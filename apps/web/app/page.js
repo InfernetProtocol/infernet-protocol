@@ -1,6 +1,7 @@
 import Link from "next/link";
 import CopyButton from "@/components/copy-button";
 import ProviderLogos from "@/components/provider-logos";
+import AdUnit from "@/components/ad-unit";
 
 export const metadata = {
   title: "Infernet Protocol — Decentralized GPU compute",
@@ -200,6 +201,7 @@ infernet "what is 2+2?"   # default verb is chat`}
         </div>
       </section>
 
+      <AdUnit />
       </main>
     </>
   );
