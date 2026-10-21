@@ -45,8 +45,19 @@ export function pageToText(markdown) {
         .replace(/[*_`>|]+/g, " ")
         .split("\n")
         .map((l) => l.replace(/\s+/g, " ").trim())
-        .filter((l) => l.length >= MIN_LINE_CHARS)
+        // The relay appends a JSON status line: {"engine":"chromium","url":...}
+        .filter((l) => l.length >= MIN_LINE_CHARS && !/^\{"engine":/.test(l))
         .join("\n");
+}
+
+// A bot check served instead of the page ("verifies you are not a bot",
+// Cloudflare's "Just a moment"). Its text would only mislead the model.
+const INTERSTITIAL = /(not a (ro)?bot|verify(ing)? you are human|just a moment|enable javascript and cookies|attention required)/i;
+
+/** Page text worth showing the model, or "" for an interstitial. */
+export function usablePageText(markdown) {
+    const text = pageToText(markdown);
+    return INTERSTITIAL.test(text.slice(0, 600)) ? "" : text;
 }
 
 /** @returns {Promise<Array<{ title: string, url: string, snippet: string }>>} */
@@ -91,7 +102,7 @@ export async function buildWebContext(query, { now = new Date(), fetchImpl = fet
         results.slice(0, PAGES).map((r) => fetchPageText(r.url, { fetchImpl }))
     );
     const sources = results.map((r, i) => {
-        const page = pages[i]?.status === "fulfilled" ? clip(pageToText(pages[i].value), PAGE_CHARS) : "";
+        const page = pages[i]?.status === "fulfilled" ? clip(usablePageText(pages[i].value), PAGE_CHARS) : "";
         return { n: i + 1, title: clip(r.title, 120), url: r.url, snippet: clip(r.snippet, SNIPPET_CHARS), text: page, read: Boolean(page) };
     });
     const day = now.toISOString().slice(0, 10);

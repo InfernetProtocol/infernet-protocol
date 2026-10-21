@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { buildWebContext, pageToText, TRON_MCP_URL } = await import("@/lib/web-search");
+const { buildWebContext, pageToText, usablePageText, TRON_MCP_URL } = await import("@/lib/web-search");
 
 function fakeFetch({ results, pages, searchStatus = 200 }) {
     const calls = [];
@@ -79,6 +79,13 @@ describe("web search for chat", () => {
     it("keeps the words of a markdown page and drops images, link targets and short nav lines", () => {
         expect(pageToText("## Title\nHome\n![a](b.png) see the [docs](https://x) for **everything** you need here"))
             .toBe("see the docs for everything you need here");
+    });
+
+    it("drops bot-check pages and the relay's JSON status line", () => {
+        const npmWall = "This website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\n{\"engine\":\"chromium\",\"url\":\"https://www.npmjs.com/package/node\",\"ms\":2030}";
+        expect(usablePageText(npmWall)).toBe("");
+        expect(usablePageText("A long enough paragraph of real article content goes here.\n{\"engine\":\"obscura\",\"ms\":12,\"chars\":900}"))
+            .toBe("A long enough paragraph of real article content goes here.");
     });
 
     it("asks Google for English results", async () => {
