@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { gate } from "@/lib/crawl-gateway";
 
 /**
  * Refreshes the Supabase auth session cookie on every request.
@@ -26,6 +27,12 @@ export async function proxy(request) {
         const search = request.nextUrl.search || "";
         return NextResponse.redirect(`https://${apexHost}${path}${search}`, 308);
     }
+
+    // Crawl gateway: AI training crawlers get 402 Payment Required (or the
+    // pass page at /crawl) unless they present a paid pass. People, Googlebot
+    // and AI chat fetchers fall through to everything below.
+    const answer = await gate(request);
+    if (answer) return answer;
 
     const response = NextResponse.next({ request });
 

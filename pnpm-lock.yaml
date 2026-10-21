@@ -191,10 +191,13 @@ importers:
         version: 1.1.4
       '@profullstack/footer':
         specifier: latest
-        version: 0.2.1(react@19.2.5)
+        version: 0.2.5(react@19.2.5)
       '@profullstack/form-guard':
         specifier: ^0.1.0
         version: 0.1.0
+      '@profullstack/x402-gateway':
+        specifier: ^0.11.0
+        version: 0.11.0
       '@supabase/ssr':
         specifier: ^0.10.2
         version: 0.10.2(@supabase/supabase-js@2.103.3)
@@ -1793,8 +1796,8 @@ packages:
     engines: {node: '>=20.0.0'}
     hasBin: true
 
-  '@profullstack/footer@0.2.1':
-    resolution: {integrity: sha512-KHmKVwrlzCBrSAAJ4zobNFCxTg8VF0gvNMeAut00dX3+gbWCtk6eOwIR2AaqEC7smj6Aio6cIexzt/dUnv1McA==}
+  '@profullstack/footer@0.2.5':
+    resolution: {integrity: sha512-/CKwFP3m+qM0ZFTC9Rj11fgClutJzeYliX44Qp4qwrv2JgA/1k4tVOB3mhkPhaeckUhnfg5UyESDI1uoWr9c2w==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -1806,6 +1809,14 @@ packages:
   '@profullstack/form-guard@0.1.0':
     resolution: {integrity: sha512-2BeyeKCuOmSgVvLY+/GdS30a724VLnlLA5s26rANFWet8IeXFzoiQG5dTWFjo9Xq15ZxxkPK0gYLHH4x0CYTLg==}
     engines: {node: '>=20'}
+
+  '@profullstack/keys@0.1.0':
+    resolution: {integrity: sha512-Vys47LvS5ivhdZu4SYOxh9Le3DEmWhjP0+CtrU45RhXAbY0ZFG/2Dk9V1bIIUGDp8UWMJqctvUD21JrNjfh04w==}
+    engines: {node: '>=20.11'}
+
+  '@profullstack/x402-gateway@0.11.0':
+    resolution: {integrity: sha512-Lfrz+SRTwQZfcoCaVtaaMNPJx74Lp/5oyS7vJJAEuJmH1TjBzhE7dWquISkj1p42oc+VW5I9xH9p7YhEKqmr4Q==}
+    engines: {node: '>=20.11'}
 
   '@react-native-async-storage/async-storage@1.21.0':
     resolution: {integrity: sha512-JL0w36KuFHFCvnbOXRekqVAUplmOyT/OuCQkogo6X98MtpSaJOKEAeZnYO8JB0U/RIEixZaGI5px73YbRm/oag==}
@@ -8384,11 +8395,17 @@ snapshots:
       inquirer: 10.2.2
       sharp: 0.33.5
 
-  '@profullstack/footer@0.2.1(react@19.2.5)':
+  '@profullstack/footer@0.2.5(react@19.2.5)':
     optionalDependencies:
       react: 19.2.5
 
   '@profullstack/form-guard@0.1.0': {}
+
+  '@profullstack/keys@0.1.0': {}
+
+  '@profullstack/x402-gateway@0.11.0':
+    dependencies:
+      '@profullstack/keys': 0.1.0
 
   '@react-native-async-storage/async-storage@1.21.0(react-native@0.73.4(@babel/core@7.29.0)(@babel/preset-env@7.29.2(@babel/core@7.29.0))(react@18.2.0))':
     dependencies:
