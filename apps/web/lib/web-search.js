@@ -12,7 +12,8 @@ import "server-only";
  * search query reaches the server, and only when the user turned search on.
  */
 
-const SEARCH_TIMEOUT_MS = 10_000;
+// ValueSERP runs a live Google query: ~10.5 s measured from dev2 (2026-10-21).
+const SEARCH_TIMEOUT_MS = 25_000;
 const PAGE_TIMEOUT_MS = 20_000;
 const RESULTS = 5;
 const PAGES = 3;
@@ -42,7 +43,7 @@ export function pageToText(markdown) {
 /** @returns {Promise<Array<{ title: string, url: string, snippet: string }>>} */
 export async function searchWeb(query, { apiKey = process.env.VALUESERP_API_KEY, fetchImpl = fetch } = {}) {
     if (!apiKey) throw new Error("web search is not configured (VALUESERP_API_KEY)");
-    const params = new URLSearchParams({ api_key: apiKey, q: query, num: String(RESULTS + 3) });
+    const params = new URLSearchParams({ api_key: apiKey, q: query, num: String(RESULTS + 1) });
     const res = await fetchImpl(`https://api.valueserp.com/search?${params}`, {
         signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
         cache: "no-store"
