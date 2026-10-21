@@ -36,6 +36,16 @@ export default function ChatView({ initialModels = [] }) {
   const [streaming, setStreaming] = useState(false);
   const [modelName, setModelName] = useState(initialModels[0]?.name ?? "");
   const [distributed, setDistributed] = useState(false);
+  // Web search (lib/web-search.js): the server searches and reads the top
+  // pages through TronBrowser; we prepend the result as a system message.
+  const [webSearch, setWebSearch] = useState(false);
+  useEffect(() => {
+    try { setWebSearch(localStorage.getItem("infernet.chat.web") === "1"); } catch { /* storage blocked */ }
+  }, []);
+  function toggleWebSearch(on) {
+    setWebSearch(on);
+    try { localStorage.setItem("infernet.chat.web", on ? "1" : "0"); } catch { /* storage blocked */ }
+  }
   const [error, setError] = useState(null);
   const [provider, setProvider] = useState(null);
   const [e2eActive, setE2eActive] = useState(false);
@@ -132,7 +142,32 @@ export default function ChatView({ initialModels = [] }) {
     setMessages((prev) => [...prev, nextUser, pendingAssistant]);
     setStreaming(true);
 
-    const outgoingMessages = [...messages, nextUser].map((m) => ({ role: m.role, content: m.content }));
+    let webContext = null;
+    if (webSearch) {
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: "Searching the web…" })));
+      try {
+        const wr = await fetch("/api/chat/web", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: text })
+        });
+        const wd = await wr.json().catch(() => null);
+        if (wr.ok && wd?.context) {
+          webContext = wd.context;
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, sources: wd.sources ?? [] })));
+        } else {
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, webNote: wd?.error ?? "Web search failed; answering without it." })));
+        }
+      } catch {
+        setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, webNote: "Web search failed; answering without it." })));
+      }
+    }
+
+    const history = [...messages, nextUser].map((m) => ({ role: m.role, content: m.content }));
+    // Results ride as a system message just before the question, for this turn only.
+    const outgoingMessages = webContext
+      ? [...history.slice(0, -1), { role: "system", content: webContext }, history[history.length - 1]]
+      : history;
 
     // Attempt E2E encryption: pre-select a provider and get their pubkey.
     let postBody = { messages: outgoingMessages, modelName, maxTokens: 512, temperature: 0.7, distributed };
@@ -380,6 +415,19 @@ export default function ChatView({ initialModels = [] }) {
               onChange={(v) => setDistributed(v)}
               census={rpcCensus}
             />
+            <label
+              className="flex items-center gap-2 text-xs text-[var(--muted)]"
+              title="Searches the web and reads the top pages with TronBrowser, then gives the results to the model with numbered sources. Only your question is sent to the search, never the rest of the chat."
+            >
+              <input
+                type="checkbox"
+                checked={webSearch}
+                disabled={streaming}
+                onChange={(e) => toggleWebSearch(e.target.checked)}
+                className="accent-[var(--accent)]"
+              />
+              Search the web
+            </label>
           </div>
         </header>
 
@@ -683,7 +731,7 @@ function CopyButton({ text }) {
 }
 
 function Bubble({ message }) {
-  const { role, content, provider, pending, failed } = message;
+  const { role, content, provider, pending, failed, status, sources, webNote } = message;
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -700,8 +748,22 @@ function Bubble({ message }) {
             {provider.name ?? provider.nodeId}{provider.model ? ` · ${provider.model}` : ""}
           </p>
         ) : null}
-        {content || (pending ? <TypingDots /> : null)}
+        {content || (pending ? (status ? <span className="text-xs text-[var(--muted)]">{status}</span> : <TypingDots />) : null)}
         {failed ? <span className="ml-2 text-xs text-[var(--warn)]">failed</span> : null}
+        {!isUser && webNote ? <p className="mt-2 text-xs text-[var(--warn)]">{webNote}</p> : null}
+        {!isUser && sources?.length ? (
+          <ol className="mt-3 space-y-1 border-t border-white/10 pt-2 text-xs text-[var(--muted)]">
+            {sources.map((s) => (
+              <li key={s.n} className="truncate">
+                [{s.n}]{" "}
+                <a href={s.url} target="_blank" rel="noopener noreferrer nofollow" className="text-[var(--accent)] hover:underline">
+                  {s.title}
+                </a>
+                {s.read ? null : <span title="Only the search snippet was used"> · snippet</span>}
+              </li>
+            ))}
+          </ol>
+        ) : null}
         {!isUser && content && !pending ? (
           <div className="mt-2 flex justify-end">
             <CopyButton text={content} />
