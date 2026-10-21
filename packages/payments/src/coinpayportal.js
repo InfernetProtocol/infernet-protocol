@@ -244,6 +244,21 @@ export async function listPaymentMethods() {
 }
 
 /**
+ * The customer fields a checkout session requires. CoinPay refuses a session
+ * without customer_email or account_id (400), but SDK and CLI callers pay for
+ * a job with only its id, so a missing email falls back to a stable per-account
+ * address on our own domain and a missing account to the order.
+ */
+export function sessionCustomer({ accountId = null, email = null, orderId }) {
+    const account = accountId ? String(accountId) : `order:${orderId}`;
+    const mail =
+        typeof email === "string" && email.trim()
+            ? email.trim()
+            : `${account.replace(/[^A-Za-z0-9._-]/g, "-")}@users.${PROPERTY}`;
+    return { accountId: account, email: mail };
+}
+
+/**
  * Create a CoinPay checkout.
  *
  * @param {object} p
@@ -291,6 +306,7 @@ export async function createCheckout({
     const idem = idempotencyKey ? { "idempotency-key": String(idempotencyKey) } : {};
 
     if (allowHosted && (await sessionsAvailable())) {
+        const session = sessionCustomer({ accountId, email, orderId });
         const res = await raw("/api/checkout/sessions", {
             method: "POST",
             headers: idem,
@@ -298,8 +314,8 @@ export async function createCheckout({
                 amount,
                 currency: "USD",
                 description,
-                customer_email: email ?? undefined,
-                account_id: accountId ?? null,
+                customer_email: session.email,
+                account_id: session.accountId,
                 property: PROPERTY,
                 metadata: meta,
                 success_url: successUrl,

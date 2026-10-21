@@ -149,6 +149,27 @@ describe("CoinPay client", () => {
       property: "infernetprotocol.com",
       expires_in_minutes: 60
     });
+    // SDK/CLI callers send no email; CoinPay requires one, so it falls back.
+    expect(sent.customer_email).toBe("client_1@users.infernetprotocol.com");
+  });
+
+  it("gives a session an account and an email even when the caller has neither", async () => {
+    let sent;
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch({
+        "/api/checkout/sessions": (body) => {
+          if (!body || Object.keys(body).length === 0) return [400, { error: "amount is required" }];
+          sent = body;
+          return [201, { id: "cs_2", url: "https://coinpayportal.com/checkout/cs_2" }];
+        }
+      })
+    );
+    await createCheckout({ amountUsd: 1, orderId: "job-9" });
+    expect(sent.account_id).toBe("order:job-9");
+    expect(sent.customer_email).toBe("order-job-9@users.infernetprotocol.com");
+    await createCheckout({ amountUsd: 1, orderId: "job-9", accountId: "c", email: " a@b.co " });
+    expect(sent).toMatchObject({ account_id: "c", customer_email: "a@b.co" });
   });
 });
 
