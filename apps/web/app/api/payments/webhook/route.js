@@ -15,10 +15,17 @@ function errorResponse(status, error, detail) {
   return NextResponse.json(body, { status });
 }
 
+/**
+ * POST /api/payments/webhook  (CoinPay business webhook)
+ *
+ * Verifies X-CoinPay-Signature over the raw body, then settles the job the
+ * payment belongs to: by the CoinPay id stored at checkout first (crypto
+ * confirmations and PayPal events carry only that), then metadata.order_id.
+ * A confirmed job is never moved back to pending or failed by a later event.
+ */
 export async function POST(request) {
-  // Always read the raw body — signature verification depends on byte-exact input.
+  // Always read the raw body: signature verification depends on byte-exact input.
   const rawBody = await request.text();
-
   const signature = request.headers.get(WEBHOOK_SIGNATURE_HEADER);
 
   let valid = false;
@@ -38,50 +45,67 @@ export async function POST(request) {
     return errorResponse(400, "Malformed webhook payload", err.message);
   }
 
-  if (!event.invoiceId) {
-    return errorResponse(400, "Webhook payload missing invoice id");
-  }
-
   const supabase = getSupabaseServerClient();
 
-  // 1. Update the payment_transactions ledger row for this invoice.
-  const txUpdate = {
-    status: event.status
-  };
-  if (event.txHash) txUpdate.tx_hash = event.txHash;
-  if (event.status === "confirmed") {
-    txUpdate.confirmed_at = new Date().toISOString();
+  // 1. Find the job.
+  const refs = [event.paymentId, event.checkoutSessionId].filter(Boolean).map(String);
+  let job = null;
+  if (refs.length > 0) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .select("id, payment_status, payment_invoice")
+      .in("payment_invoice", refs)
+      .limit(1)
+      .maybeSingle();
+    if (error) return errorResponse(500, "Failed to look up job", error.message);
+    job = data;
+  }
+  if (!job && event.orderId) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .select("id, payment_status, payment_invoice")
+      .eq("id", String(event.orderId))
+      .maybeSingle();
+    if (error) return errorResponse(500, "Failed to look up job", error.message);
+    job = data;
+  }
+  if (!job) {
+    // Not ours (or a test event): acknowledge so CoinPay stops retrying.
+    return NextResponse.json({ ok: true, settled: false, reason: "unknown payment" });
   }
 
-  const { error: txErr } = await supabase
-    .from("payment_transactions")
-    .update(txUpdate)
-    .eq("invoice_id", event.invoiceId);
-
-  if (txErr) {
-    return errorResponse(
-      500,
-      "Failed to update payment transaction",
-      txErr.message
-    );
+  if (job.payment_status === "confirmed" && event.status !== "confirmed") {
+    return NextResponse.json({ ok: true, settled: false, reason: "already confirmed" });
+  }
+  if (event.status === "pending") {
+    return NextResponse.json({ ok: true, settled: false, reason: `status ${event.providerStatus || "pending"}` });
   }
 
-  // 2. Mirror status on the jobs row (matched by payment_invoice).
-  const jobUpdate = {
-    payment_status: event.status
-  };
-  if (event.status === "confirmed" && event.txHash) {
-    jobUpdate.payment_tx_hash = event.txHash;
+  const invoiceId = job.payment_invoice ?? refs[0] ?? null;
+  const now = new Date().toISOString();
+
+  // 2. Ledger row for this checkout.
+  if (invoiceId) {
+    const txUpdate = { status: event.status };
+    if (event.txHash) txUpdate.tx_hash = event.txHash;
+    if (event.status === "confirmed") txUpdate.confirmed_at = now;
+    const { error: txErr } = await supabase
+      .from("payment_transactions")
+      .update(txUpdate)
+      .eq("invoice_id", invoiceId)
+      .neq("status", "confirmed");
+    if (txErr) {
+      return errorResponse(500, "Failed to update payment transaction", txErr.message);
+    }
   }
 
-  const { error: jobErr } = await supabase
-    .from("jobs")
-    .update(jobUpdate)
-    .eq("payment_invoice", event.invoiceId);
-
+  // 3. The job itself: this is the fulfilment.
+  const jobUpdate = { payment_status: event.status };
+  if (event.status === "confirmed" && event.txHash) jobUpdate.payment_tx_hash = event.txHash;
+  const { error: jobErr } = await supabase.from("jobs").update(jobUpdate).eq("id", job.id);
   if (jobErr) {
     return errorResponse(500, "Failed to update job payment status", jobErr.message);
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, settled: event.status === "confirmed", jobId: job.id });
 }

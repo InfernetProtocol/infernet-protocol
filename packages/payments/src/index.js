@@ -1,18 +1,21 @@
 /**
- * Payments façade.
+ * Payments facade.
  *
  * Re-exports the single active gateway (CoinPayPortal) behind a stable
- * surface so route handlers and the CLI can `import { createInvoice } from
- * "@infernetprotocol/payments"` without caring which provider is wired up.
- *
- * When we add more gateways later (e.g. Coinbase Commerce, NOWPayments),
- * this file becomes the router / feature-flag switch.
+ * surface so route handlers and the CLI can import from
+ * "@infernetprotocol/payments" without caring how CoinPay is called.
  */
 
 export {
-  createInvoice,
-  getInvoice,
+  createCheckout,
+  listPaymentMethods,
+  getPayment,
+  toCoinpayMethod,
   verifyWebhookSignature,
+  signWebhookPayload,
   parseWebhookPayload,
-  WEBHOOK_SIGNATURE_HEADER
+  apiOrigin,
+  WEBHOOK_SIGNATURE_HEADER,
+  PAYPAL_METHOD,
+  PROPERTY
 } from "./coinpayportal.js";
