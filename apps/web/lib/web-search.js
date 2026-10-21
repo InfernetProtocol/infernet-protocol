@@ -17,7 +17,8 @@ const SEARCH_TIMEOUT_MS = 25_000;
 const PAGE_TIMEOUT_MS = 20_000;
 const RESULTS = 5;
 const PAGES = 3;
-const PAGE_CHARS = 1_200;
+const PAGE_CHARS = 900;
+const MIN_LINE_CHARS = 40;
 const SNIPPET_CHARS = 300;
 export const QUERY_MAX_LEN = 300;
 
@@ -31,19 +32,28 @@ function clip(text, max) {
     return (stop > max * 0.6 ? cut.slice(0, stop + 1) : cut) + " …";
 }
 
-/** Drop markdown images and link targets, keep the words. */
+/**
+ * Keep the words of a markdown page: drop images, link targets, and the short
+ * lines that are navigation, menus and footers rather than content (a page's
+ * first 1,200 characters were otherwise mostly "Skip to content · Docs ...").
+ */
 export function pageToText(markdown) {
     return String(markdown ?? "")
         .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
         .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
         .replace(/^#+\s*/gm, "")
-        .replace(/[*_`>|]+/g, " ");
+        .replace(/[*_`>|]+/g, " ")
+        .split("\n")
+        .map((l) => l.replace(/\s+/g, " ").trim())
+        .filter((l) => l.length >= MIN_LINE_CHARS)
+        .join("\n");
 }
 
 /** @returns {Promise<Array<{ title: string, url: string, snippet: string }>>} */
 export async function searchWeb(query, { apiKey = process.env.VALUESERP_API_KEY, fetchImpl = fetch } = {}) {
     if (!apiKey) throw new Error("web search is not configured (VALUESERP_API_KEY)");
-    const params = new URLSearchParams({ api_key: apiKey, q: query, num: String(RESULTS + 1) });
+    // English results and dates; unset, dev2 got Google Japan ("2026年8月3日").
+    const params = new URLSearchParams({ api_key: apiKey, q: query, num: String(RESULTS + 1), hl: "en", gl: "us", google_domain: "google.com" });
     const res = await fetchImpl(`https://api.valueserp.com/search?${params}`, {
         signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
         cache: "no-store"
@@ -86,7 +96,8 @@ export async function buildWebContext(query, { now = new Date(), fetchImpl = fet
     });
     const day = now.toISOString().slice(0, 10);
     const blocks = sources.map((s) =>
-        `[${s.n}] ${s.title}\n${s.url}\n${s.text || s.snippet || "(no text)"}`
+        // The search snippet carries the date and usually the answer; the page adds detail.
+        [`[${s.n}] ${s.title}`, s.url, s.snippet, s.text].filter(Boolean).join("\n")
     );
     const context = sources.length === 0
         ? `Web search for "${query}" (${day}) found nothing. Say that you could not find web results, then answer from what you know.`

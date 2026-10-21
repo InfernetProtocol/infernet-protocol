@@ -36,8 +36,8 @@ describe("web search for chat", () => {
         const { impl, calls } = fakeFetch({
             results,
             pages: {
-                "https://a.example/x": "# Alpha page\n\n![img](x.png) Alpha body with a [link](https://z).",
-                "https://b.example/y": "Beta body."
+                "https://a.example/x": "Skip to content\nDocs\n# Alpha page\n\n![img](x.png) Alpha 2.0 shipped on 2026-10-01 with a [new engine](https://z).",
+                "https://b.example/y": "Menu\nBeta is a long enough line of real content to keep."
                 // c.example: relay 429 -> falls back to the snippet
             }
         });
@@ -50,7 +50,9 @@ describe("web search for chat", () => {
             [4, "https://d.example/w", false]
         ]);
         expect(out.context).toContain('Web search results for "what is alpha", retrieved 2026-10-21.');
-        expect(out.context).toContain("[1] Alpha\nhttps://a.example/x\nAlpha page Alpha body with a link.");
+        // Snippet first (it carries the date), then the page text without its navigation lines.
+        expect(out.context).toContain("[1] Alpha\nhttps://a.example/x\nalpha snippet\nAlpha 2.0 shipped on 2026-10-01 with a new engine.");
+        expect(out.context).not.toContain("Skip to content");
         expect(out.context).toContain("[3] Gamma\nhttps://c.example/z\ngamma snippet");
         expect(out.context).toContain("Cite them inline as [1], [2]");
         // Page bodies stay server-side; the browser only gets the citation list.
@@ -74,8 +76,15 @@ describe("web search for chat", () => {
             .rejects.toThrow(/500/);
     });
 
-    it("keeps the words of a markdown page and drops images and link targets", () => {
-        expect(pageToText("## Title\n![a](b.png) see [docs](https://x) **now**").replace(/\s+/g, " ").trim())
-            .toBe("Title see docs now");
+    it("keeps the words of a markdown page and drops images, link targets and short nav lines", () => {
+        expect(pageToText("## Title\nHome\n![a](b.png) see the [docs](https://x) for **everything** you need here"))
+            .toBe("see the docs for everything you need here");
+    });
+
+    it("asks Google for English results", async () => {
+        const { impl, calls } = fakeFetch({ results: [], pages: {} });
+        await buildWebContext("q", { fetchImpl: impl, apiKey: "k" });
+        const url = new URL(calls[0][0]);
+        expect([url.searchParams.get("hl"), url.searchParams.get("gl")]).toEqual(["en", "us"]);
     });
 });
