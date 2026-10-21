@@ -3,9 +3,21 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const _dir = dirname(fileURLToPath(import.meta.url));
-export const CURRENT_VERSION = JSON.parse(
-    readFileSync(join(_dir, '../package.json'), 'utf8')
-).version;
+export const CURRENT_VERSION = readInstalledVersion();
+
+/**
+ * The version on disk right now, read fresh (CURRENT_VERSION is what this
+ * process started with). Self-update compares the two after the installer
+ * runs: if nothing newer landed, restarting would only repeat the same update
+ * every 5 minutes.
+ */
+export function readInstalledVersion() {
+    try {
+        return JSON.parse(readFileSync(join(_dir, '../package.json'), 'utf8')).version;
+    } catch {
+        return '0.0.0';
+    }
+}
 
 export async function fetchLatestVersion() {
     try {

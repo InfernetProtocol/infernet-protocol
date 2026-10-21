@@ -45,7 +45,10 @@ function runShell(cmd) {
 
 export async function pullLatestBinary() {
     process.stdout.write(`\n→ Pulling latest CLI from ${INSTALLER_URL}\n\n`);
-    const code = await runShell(`curl -fsSL ${INSTALLER_URL} | sh`);
+    // INFERNET_AUTOSTART=0: the installer would otherwise run `infernet setup`,
+    // which restarts (or, next to infernet.service, duplicates) the daemon from
+    // inside its own self-update. Both callers run setup themselves afterwards.
+    const code = await runShell(`curl -fsSL ${INSTALLER_URL} | INFERNET_AUTOSTART=0 sh`);
     if (code !== 0) {
         process.stderr.write(`\nerror: installer exited ${code}.\n`);
         return false;

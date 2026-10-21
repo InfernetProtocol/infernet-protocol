@@ -15,7 +15,7 @@
  *   infernet setup --skip-pull              # don't pull a model
  */
 
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import fsSync from "node:fs";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -33,7 +33,7 @@ import {
     lastDetectionDiagnostics
 } from "@infernetprotocol/gpu";
 import { isDaemonAlive } from "../lib/ipc.js";
-import { ensureService } from "./service.js";
+import { ensureService, systemUnitPresent } from "./service.js";
 import { createNodeClient } from "../lib/node-client.js";
 
 const pExec = promisify(execFile);
@@ -827,7 +827,7 @@ export default async function setup(args) {
         n += 1;
         step(n, total, "Daemon");
         const wasAlive = await isDaemonAlive(500);
-        if (wasAlive) {
+        if (wasAlive && !systemUnitPresent()) {
             process.stdout.write("  daemon was running — restarting so it picks up current CLI code\n");
             try {
                 await runSubcommand("stop", []);
@@ -842,10 +842,20 @@ export default async function setup(args) {
         let startCode = 0;
         const noService = args.has("no-service") || process.env.INFERNET_NO_SERVICE === "1"
             || fsSync.existsSync("/.dockerenv") || fsSync.existsSync("/run/.containerenv");
-        const svc = noService ? { ok: false, reason: "disabled" } : await ensureService({ log: (m) => ok(m) });
-        if (!svc.ok) {
-            if (!noService) process.stdout.write(`  no service unit (${svc.reason}); using the built-in supervisor\n`);
-            startCode = await runSubcommand("start", []);
+        if (systemUnitPresent()) {
+            // A system-wide infernet.service owns the daemon (fleet boxes, root
+            // installs). Starting another one here is how a second daemon leaked
+            // next to it for a week on bbs; restart the unit instead.
+            const r = spawnSync("systemctl", ["restart", "infernet.service"], { stdio: "pipe" });
+            const viaSudo = r.status === 0 ? r : spawnSync("sudo", ["-n", "systemctl", "restart", "infernet.service"], { stdio: "pipe" });
+            if (viaSudo.status === 0) ok("restarted infernet.service");
+            else warn("infernet.service manages the daemon; restart it with: sudo systemctl restart infernet");
+        } else {
+            const svc = noService ? { ok: false, reason: "disabled" } : await ensureService({ log: (m) => ok(m) });
+            if (!svc.ok) {
+                if (!noService) process.stdout.write(`  no service unit (${svc.reason}); using the built-in supervisor\n`);
+                startCode = await runSubcommand("start", []);
+            }
         }
         if (startCode !== 0) {
             fail(`start exited ${startCode}`);
