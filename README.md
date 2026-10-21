@@ -341,6 +341,8 @@ infernet register
 infernet setup --yes        # installs the service; or `infernet start`
 ```
 
+Running it on a box that already runs a provider? Give it its own config dir and let only the provider update the install: `XDG_CONFIG_HOME=/var/lib/infernet-aggregator INFERNET_AUTO_UPDATE=follow infernet start --foreground --no-p2p` (and a free `PORT` for its `/healthz`). In `follow` mode a daemon never runs the installer; it restarts into a newer version once one is installed.
+
 Coordinating multi-node jobs (IPIP-0028 / IPIP-0033) is the next aggregator duty.
 
 ### P2P port
