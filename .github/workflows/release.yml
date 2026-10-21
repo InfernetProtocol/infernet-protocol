@@ -58,6 +58,14 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Releasing version $VERSION"
+          # Git-path installs (install.sh clones master) read their version from
+          # apps/cli/package.json. If it lags the release they see an update
+          # forever and reinstall every 5 minutes (it sat at 0.1.45 until 0.1.63).
+          CLI_VERSION=$(node -p "require('./apps/cli/package.json').version")
+          if [ "$CLI_VERSION" != "$VERSION" ]; then
+            echo "::error::apps/cli/package.json is $CLI_VERSION but this release is $VERSION. Bump apps/cli/package.json to $VERSION on master, then tag that commit."
+            exit 1
+          fi
 
       - run: pnpm install --frozen-lockfile
 

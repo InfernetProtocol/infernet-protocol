@@ -63,7 +63,7 @@ import { getOrCreateModelKey, getModelPublicKeys } from '../lib/model-key.js';
 import { pullLatestBinary } from './upgrade.js';
 import { PROBE_INTERVAL_MS, runProbeRound } from '../lib/aggregator.js';
 import { nodeTokenLogin } from './login.js';
-import { CURRENT_VERSION, fetchLatestVersion, isNewerVersion } from '../lib/version.js';
+import { CURRENT_VERSION, fetchLatestVersion, isNewerVersion, readInstalledVersion } from '../lib/version.js';
 import { readInferenceState, readInferenceStateSync, isPidAlive } from '../lib/inference/state.js';
 
 function readInferenceStateSyncSafe() {
@@ -94,6 +94,7 @@ const DEFAULT_HEARTBEAT_MS = 30_000;
 const DEFAULT_POLL_MS = 15_000;
 const UPDATE_CHECK_MS = 5 * 60 * 1000; // 5 minutes
 const UPDATE_DRAIN_MS = 10 * 60 * 1000; // wait for in-flight jobs before restarting
+const UPDATE_PAUSE_MS = 6 * 60 * 60 * 1000; // after an update that installed nothing newer
 const SHUTDOWN_DEADLINE_MS = 5_000; // hard exit: a half-shut daemon must never outlive its pidfile
 const OFFLINE_HEARTBEAT_TIMEOUT_MS = 3_000;
 
@@ -1624,8 +1625,9 @@ async function runDaemon(args, ctx) {
     // available, pull the installer, re-generate any missing keys + re-register
     // specs (idempotent), then re-exec so the new code is running immediately.
     let isUpgrading = false;
+    let updatePausedUntil = 0;
     const updateTimer = setInterval(async () => {
-        if (shuttingDown || isUpgrading) return;
+        if (shuttingDown || isUpgrading || Date.now() < updatePausedUntil) return;
         // Never start an upgrade under a running job; the next check retries.
         if (stats.activeJobIds.size > 0) return;
         const latest = await fetchLatestVersion();
@@ -1636,6 +1638,17 @@ async function runDaemon(args, ctx) {
         const ok = await pullLatestBinary();
         if (!ok) {
             process.stderr.write('[update] installer failed — will retry next check\n');
+            isUpgrading = false;
+            return;
+        }
+        // The installer can succeed without changing this install (a git checkout
+        // whose package.json lagged the release, or npm writing to another
+        // prefix). Restarting then would rerun the same update every 5 minutes
+        // forever, so keep serving and try again much later.
+        const installed = readInstalledVersion();
+        if (!isNewerVersion(CURRENT_VERSION, installed)) {
+            updatePausedUntil = Date.now() + UPDATE_PAUSE_MS;
+            process.stderr.write(`[update] installer left v${installed} here (latest v${latest}); not restarting, next try in ${UPDATE_PAUSE_MS / 3_600_000}h\n`);
             isUpgrading = false;
             return;
         }
