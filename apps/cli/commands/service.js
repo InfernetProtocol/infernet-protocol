@@ -8,8 +8,12 @@
  * or anything system-wide. Service file lives under
  * ~/.config/systemd/user/infernet.service.
  *
- * Linux-only (uses systemd --user). macOS / Windows users continue
- * to run `infernet start` directly or wire their own supervisor.
+ * Linux uses systemd --user; macOS uses a launchd LaunchAgent
+ * (~/Library/LaunchAgents/com.infernetprotocol.node.plist). Elsewhere
+ * `infernet start` runs the built-in supervisor (lib/supervisor.js).
+ *
+ * Both units restart on any non-zero exit (crash, OOM kill, or exit 75 from
+ * a self-update) and stay down after a clean `infernet stop` (exit 0).
  *
  * Usage:
  *   infernet service install        write the unit file + daemon-reload
@@ -22,6 +26,7 @@
  */
 
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
@@ -29,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import { question } from "../lib/prompt.js";
 
 export const SERVICE_NAME = "infernet";
+export const LAUNCHD_LABEL = "com.infernetprotocol.node";
 
 const HELP = `infernet service — manage the userland systemd unit
 
@@ -50,7 +56,7 @@ Flags:
   -h, --help      Show this help.
 
 Notes:
-  - Linux-only (uses systemd --user). Skip on macOS / Windows.
+  - Linux: systemd --user. macOS: launchd LaunchAgent (${"com.infernetprotocol.node"}).
   - Type=simple. ExecStart calls 'infernet start --foreground' so
     systemd owns the process (no double-fork).
   - Logs go to journald; tail with 'journalctl --user -u ${SERVICE_NAME} -f'
@@ -60,7 +66,65 @@ Notes:
 `;
 
 export function getServicePath() {
+    if (process.platform === "darwin") return getLaunchdPath();
     return path.join(os.homedir(), ".config", "systemd", "user", `${SERVICE_NAME}.service`);
+}
+
+export function getLaunchdPath() {
+    return path.join(os.homedir(), "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+}
+
+function xmlEscape(v) {
+    return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * LaunchAgent plist. KeepAlive.SuccessfulExit=false restarts on any non-zero
+ * exit and leaves a clean `infernet stop` (exit 0) alone; RunAtLoad starts it
+ * at login. Pure function.
+ *
+ * @param {{ nodeBin: string, cliEntry: string, logPath: string, pathEnv?: string }} args
+ */
+export function buildLaunchdPlist({ nodeBin, cliEntry, logPath, pathEnv } = {}) {
+    if (!nodeBin) throw new Error("buildLaunchdPlist: nodeBin is required");
+    if (!cliEntry) throw new Error("buildLaunchdPlist: cliEntry is required");
+    const args = [nodeBin, cliEntry, "start", "--foreground"]
+        .map((a) => `        <string>${xmlEscape(a)}</string>`).join("\n");
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${LAUNCHD_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+${args}
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>INFERNET_SUPERVISED</key>
+        <string>1</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>PATH</key>
+        <string>${xmlEscape(pathEnv ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")}</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>${xmlEscape(logPath)}</string>
+    <key>StandardErrorPath</key>
+    <string>${xmlEscape(logPath)}</string>
+</dict>
+</plist>
+`;
 }
 
 /**
@@ -84,6 +148,9 @@ export function buildServiceUnit({ nodeBin, cliEntry, environment = {}, descript
         "Documentation=https://infernetprotocol.com",
         "After=network-online.target",
         "Wants=network-online.target",
+        // Never give up restarting: a node that crash-loops while the network is
+        // down must still come back once it returns.
+        "StartLimitIntervalSec=0",
         "",
         "[Service]",
         "Type=simple",
@@ -91,6 +158,8 @@ export function buildServiceUnit({ nodeBin, cliEntry, environment = {}, descript
         "Restart=on-failure",
         "RestartSec=10",
         "Environment=NODE_ENV=production",
+        // Self-update exits 75 under a supervisor instead of re-execing (lib/supervisor.js).
+        "Environment=INFERNET_SUPERVISED=1",
         ...envLines,
         "",
         "[Install]",
@@ -106,7 +175,79 @@ function resolveCliEntry() {
     return path.resolve(here, "..", "index.js");
 }
 
+/** True when this host can run the unit: systemd --user on Linux, launchd on macOS. */
+export function serviceSupported() {
+    if (process.platform === "darwin") return true;
+    if (process.platform !== "linux") return false;
+    const uid = process.getuid?.();
+    return fsSync.existsSync("/run/systemd/system") && uid != null && fsSync.existsSync(`/run/user/${uid}/bus`);
+}
+
+/** A system-wide infernet.service (our fleet boxes, root installs) owns the daemon already. */
+export function systemUnitPresent() {
+    if (process.platform !== "linux") return false;
+    const r = spawnSync("systemctl", ["is-enabled", "--quiet", "infernet.service"], { stdio: "ignore" });
+    return r.status === 0
+        || fsSync.existsSync("/etc/systemd/system/infernet.service")
+        || fsSync.existsSync("/lib/systemd/system/infernet.service");
+}
+
+function launchctl(args) {
+    return spawnSync("launchctl", args, { stdio: "pipe" });
+}
+
+/**
+ * Install (if missing) and start the supervisor unit for this platform, so the
+ * daemon survives crashes, reboots and self-updates. Never throws.
+ *
+ * @returns {Promise<{ ok: boolean, how?: string, reason?: string }>}
+ */
+export async function ensureService({ log = () => {} } = {}) {
+    try {
+        if (!serviceSupported()) return { ok: false, reason: "no systemd --user or launchd here" };
+        if (systemUnitPresent()) return { ok: false, reason: "system infernet.service manages the daemon" };
+        const target = getServicePath();
+        const cliEntry = resolveCliEntry();
+        await fs.mkdir(path.dirname(target), { recursive: true });
+
+        if (process.platform === "darwin") {
+            const { getDaemonLogPath } = await import("../lib/config.js");
+            const plist = buildLaunchdPlist({
+                nodeBin: process.execPath, cliEntry, logPath: getDaemonLogPath(), pathEnv: process.env.PATH
+            });
+            await fs.writeFile(target, plist, { mode: 0o644 });
+            const domain = `gui/${process.getuid()}`;
+            launchctl(["bootout", `${domain}/${LAUNCHD_LABEL}`]);
+            const r = launchctl(["bootstrap", domain, target]);
+            if (r.status !== 0) {
+                const legacy = launchctl(["load", "-w", target]);
+                if (legacy.status !== 0) return { ok: false, reason: `launchctl: ${String(r.stderr || legacy.stderr).trim()}` };
+            }
+            launchctl(["kickstart", "-k", `${domain}/${LAUNCHD_LABEL}`]);
+            log(`launchd agent ${LAUNCHD_LABEL} installed and started`);
+            return { ok: true, how: "launchd" };
+        }
+
+        await fs.writeFile(target, buildServiceUnit({ nodeBin: process.execPath, cliEntry }), { mode: 0o644 });
+        runSystemctl(["daemon-reload"], { inherit: false });
+        const en = runSystemctl(["enable", SERVICE_NAME], { inherit: false });
+        if (en.status !== 0) return { ok: false, reason: `systemctl --user enable: ${String(en.stderr).trim()}` };
+        const rs = runSystemctl(["restart", SERVICE_NAME], { inherit: false });
+        if (rs.status !== 0) return { ok: false, reason: `systemctl --user restart: ${String(rs.stderr).trim()}` };
+        // Keep running after logout and start at boot. Allowed for your own user on
+        // most distros; harmless when it is refused.
+        const linger = spawnSync("loginctl", ["enable-linger", os.userInfo().username], { stdio: "pipe" });
+        log(linger.status === 0
+            ? "systemd user unit installed, enabled and started (linger on: survives logout and reboot)"
+            : "systemd user unit installed, enabled and started (run `loginctl enable-linger $USER` to survive logout)");
+        return { ok: true, how: "systemd" };
+    } catch (err) {
+        return { ok: false, reason: err?.message ?? String(err) };
+    }
+}
+
 function ensureLinux() {
+    if (process.platform === "darwin") return true;
     if (process.platform !== "linux") {
         process.stderr.write(
             `error: 'infernet service' is Linux-only (your platform: ${process.platform}).\n` +
@@ -218,12 +359,46 @@ function spawnInherited(bin, argv) {
     });
 }
 
+async function darwinCmd(sub) {
+    const domain = `gui/${process.getuid()}`;
+    const target = getLaunchdPath();
+    switch (sub) {
+        case "install":
+        case "enable": {
+            const res = await ensureService({ log: (m) => process.stdout.write(`✓ ${m}\n`) });
+            if (!res.ok) process.stderr.write(`error: ${res.reason}\n`);
+            return res.ok ? 0 : 1;
+        }
+        case "disable":
+        case "uninstall":
+            launchctl(["bootout", `${domain}/${LAUNCHD_LABEL}`]);
+            if (sub === "uninstall") { try { await fs.unlink(target); } catch { /* not installed */ } }
+            process.stdout.write(`✓ ${sub === "uninstall" ? "removed" : "stopped"} ${LAUNCHD_LABEL}\n`);
+            return 0;
+        case "status":
+            return spawnInherited("launchctl", ["print", `${domain}/${LAUNCHD_LABEL}`]);
+        case "logs": {
+            const { getDaemonLogPath } = await import("../lib/config.js");
+            return spawnInherited("tail", ["-f", getDaemonLogPath()]);
+        }
+        case "unit": {
+            const { getDaemonLogPath } = await import("../lib/config.js");
+            process.stdout.write(buildLaunchdPlist({ nodeBin: process.execPath, cliEntry: resolveCliEntry(), logPath: getDaemonLogPath() }));
+            return 0;
+        }
+        default:
+            process.stderr.write(HELP);
+            return 2;
+    }
+}
+
 export default async function service(args) {
     if (args.has("help") || args.has("h")) {
         process.stdout.write(HELP);
         return 0;
     }
     const sub = (args.positional ?? [])[0];
+    if (process.platform === "darwin") return darwinCmd(sub);
     switch (sub) {
         case "install":   return installCmd(args);
         case "uninstall": return uninstallCmd(args);

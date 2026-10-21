@@ -3,6 +3,7 @@ import "server-only";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { tableForRole } from "@/lib/auth/verify-signed-request";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
+import { isPublicIp, refreshGeoIfMoved } from "@/lib/geo";
 
 const MAX_SPECS_GPUS = 16;
 
@@ -207,14 +208,14 @@ export async function registerNode({ role, pubkey, body }) {
 /**
  * Update last_seen + optional address/port/status. Returns the new row id.
  */
-export async function heartbeatNode({ role, pubkey, body }) {
+export async function heartbeatNode({ role, pubkey, body, clientIp = null }) {
     const table = tableForRole(role);
     if (!table) throw withStatus(`invalid role: ${role}`, 400);
 
     const supabase = getSupabaseServerClient();
     const { data: existing, error: lookupErr } = await supabase
         .from(table)
-        .select("id, public_key")
+        .select(role === "client" ? "id, public_key" : "id, public_key, geo_ip")
         .eq("public_key", pubkey)
         .maybeSingle();
 
@@ -224,6 +225,11 @@ export async function heartbeatNode({ role, pubkey, body }) {
     const patch = { last_seen: new Date().toISOString() };
     if (role !== "client") {
         patch.status = body.status === "offline" ? "offline" : "available";
+        // Back online: the next outage may mail the owner again.
+        if (patch.status === "available") patch.silence_emailed_at = null;
+        // Location: the advertised address when public, else where the request came from.
+        const ip = isPublicIp(body.address) ? body.address : clientIp;
+        refreshGeoIfMoved({ table, id: existing.id, ip, knownIp: existing.geo_ip });
     }
     if (typeof body.address === "string") patch.address = body.address;
     if (Number.isFinite(body.port)) patch.port = Number(body.port);
@@ -239,6 +245,58 @@ export async function heartbeatNode({ role, pubkey, body }) {
     const { error } = await supabase.from(table).update(patch).eq("id", existing.id);
     if (error) throw withStatus(error.message, 500);
     return { id: existing.id };
+}
+
+const MAX_PROBES_PER_REPORT = 500;
+
+/**
+ * Store one aggregator probe round. Probes for unknown pubkeys are dropped; a
+ * probe whose reported node_id disagrees with the provider row counts as
+ * unreachable (someone else answers on that address).
+ */
+export async function recordAggregatorProbes({ pubkey, probes }) {
+    if (!Array.isArray(probes)) throw withStatus("probes must be an array", 400);
+    const supabase = getSupabaseServerClient();
+    const { data: agg, error: aggErr } = await supabase
+        .from("aggregators")
+        .select("id")
+        .eq("public_key", pubkey)
+        .maybeSingle();
+    if (aggErr) throw withStatus(aggErr.message, 500);
+    if (!agg) throw withStatus("no aggregator row for this pubkey — register with role aggregator first", 403);
+
+    const clean = probes.slice(0, MAX_PROBES_PER_REPORT)
+        .filter((p) => p && typeof p.pubkey === "string" && /^[0-9a-f]{64}$/i.test(p.pubkey));
+    if (clean.length === 0) return { stored: 0 };
+
+    const { data: providers, error: provErr } = await supabase
+        .from("providers")
+        .select("id, public_key, node_id")
+        .in("public_key", [...new Set(clean.map((p) => p.pubkey))]);
+    if (provErr) throw withStatus(provErr.message, 500);
+    const byKey = new Map((providers ?? []).map((r) => [r.public_key, r]));
+
+    const now = new Date().toISOString();
+    const rows = [];
+    for (const p of clean) {
+        const prov = byKey.get(p.pubkey);
+        if (!prov) continue;
+        const mismatch = p.reachable === true && p.node_id && prov.node_id && p.node_id !== prov.node_id;
+        const ok = p.reachable === true && !mismatch;
+        rows.push({
+            aggregator_id: agg.id,
+            provider_id: prov.id,
+            reachable: ok,
+            rtt_ms: ok && Number.isFinite(p.rtt_ms) ? Math.max(0, Math.min(Math.round(p.rtt_ms), 600_000)) : null,
+            error: mismatch ? "node_id mismatch" : (typeof p.error === "string" ? p.error.slice(0, 64) : null),
+            probed_at: now
+        });
+    }
+    if (rows.length > 0) {
+        const { error } = await supabase.from("provider_probes").insert(rows);
+        if (error) throw withStatus(error.message, 500);
+    }
+    return { stored: rows.length };
 }
 
 export async function pollJobsForNode({ pubkey, limit = 5 }) {

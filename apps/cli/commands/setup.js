@@ -33,6 +33,7 @@ import {
     lastDetectionDiagnostics
 } from "@infernetprotocol/gpu";
 import { isDaemonAlive } from "../lib/ipc.js";
+import { ensureService } from "./service.js";
 import { createNodeClient } from "../lib/node-client.js";
 
 const pExec = promisify(execFile);
@@ -53,6 +54,8 @@ Flags:
   --skip-identity        Don't chain into \`infernet init\` if identity is missing.
   --skip-register        Don't chain into \`infernet register\` if not registered.
   --skip-daemon          Don't offer to start the daemon.
+  --no-service           Don't install the systemd/launchd unit; use the
+                         built-in supervisor (also INFERNET_NO_SERVICE=1).
   -h, --help             Show this help.
 
 By default, every step that wants to install or change something on
@@ -834,7 +837,16 @@ export default async function setup(args) {
             // Give the OS a moment to release the IPC socket / pidfile.
             await new Promise((r) => setTimeout(r, 800));
         }
-        const startCode = await runSubcommand("start", []);
+        // Prefer a real service manager: restarts on crash, at boot, and after
+        // self-updates. Containers have their own supervisor (restart policy).
+        let startCode = 0;
+        const noService = args.has("no-service") || process.env.INFERNET_NO_SERVICE === "1"
+            || fsSync.existsSync("/.dockerenv") || fsSync.existsSync("/run/.containerenv");
+        const svc = noService ? { ok: false, reason: "disabled" } : await ensureService({ log: (m) => ok(m) });
+        if (!svc.ok) {
+            if (!noService) process.stdout.write(`  no service unit (${svc.reason}); using the built-in supervisor\n`);
+            startCode = await runSubcommand("start", []);
+        }
         if (startCode !== 0) {
             fail(`start exited ${startCode}`);
             warn("  check `infernet logs` and `infernet status`");

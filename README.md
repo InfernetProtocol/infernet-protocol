@@ -322,6 +322,27 @@ Payments:
 
 Use `infernet start --foreground` under systemd / Docker / Kubernetes when a supervisor wants the process in the foreground.
 
+### Staying up
+
+A node restarts itself; you should never have to notice it went down.
+
+- `infernet setup` installs a **systemd user unit** on Linux (with `loginctl enable-linger`, so it runs without a login and starts at boot) or a **launchd agent** on macOS. Opt out with `--no-service` or `INFERNET_NO_SERVICE=1`; containers rely on their own restart policy.
+- Without a service manager, `infernet start` runs a small built-in **supervisor** that restarts the daemon after a crash or kill (backoff 1 s doubling to 60 s). `infernet stop` stops the supervisor too.
+- Self-update drains running jobs, then exits with code **75**; the supervisor or unit starts the new version. Exit 0 means a deliberate stop and stays stopped.
+- If a node linked to your account is silent for 24 hours you get one email with the restart commands.
+
+### Aggregators
+
+An aggregator verifies providers independently: every minute it dials each provider's advertised P2P address, checks it answers as the node it claims to be, and reports reachability and round-trip time (signed `POST /api/v1/node/aggregator/probes`). /status and each `/nodes/<id>` page show how many aggregators reached a provider in the last hour. Anyone can run one, on any small box:
+
+```bash
+infernet init --role aggregator --name my-aggregator
+infernet register
+infernet setup --yes        # installs the service; or `infernet start`
+```
+
+Coordinating multi-node jobs (IPIP-0028 / IPIP-0033) is the next aggregator duty.
+
 ### P2P port
 
 Each provider/aggregator node binds TCP **46337** (dual-stack) for peer communication. Change with `--p2p-port`, or disable with `--no-p2p`. The node advertises its `address:port` to the control plane on every signed heartbeat so other nodes can discover it — unless it was started with `--no-advertise`, in which case nothing is published and the node operates outbound-only.

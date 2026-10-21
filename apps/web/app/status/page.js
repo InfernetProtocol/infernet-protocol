@@ -7,7 +7,7 @@ import {
   getClients,
   getDashboardOverview,
   getJobs,
-  getProviders,
+  getStatusProviders,
   getServedModelsAcrossProviders
 } from "@/lib/data/infernet";
 
@@ -31,7 +31,7 @@ export default async function HomePage() {
   const [overview, jobs, providers, models, clients, aggregators, latestCli] = await Promise.all([
     getDashboardOverview(),
     getJobs({ limit: 6 }),
-    getProviders({ limit: 6 }),
+    getStatusProviders({ limit: 12 }),
     getServedModelsAcrossProviders(),
     getClients({ limit: 6 }),
     getAggregators({ limit: 6 }),
@@ -51,7 +51,7 @@ export default async function HomePage() {
             Latest CLI: <span className="font-mono text-white">{latestCli}</span>
           </span>
         )}
-        <RealtimeRefresh tables={["providers", "jobs"]} />
+        <RealtimeRefresh tables={["providers", "aggregators", "jobs"]} />
       </div>
       <OverviewGrid cards={overview.cards} />
       <div className="grid gap-6 xl:grid-cols-2">
@@ -69,14 +69,14 @@ export default async function HomePage() {
         />
         <ResourceTable
           title="Providers"
-          description="Providers available to schedule work."
+          description="Online first, then most recently seen. Click a provider for its location, hardware, models and jobs. Verified = aggregators that reached it in the last hour."
           columns={[
-            { key: "name", label: "Provider" },
+            { key: "name", label: "Provider", hrefKey: "href" },
             { key: "status", label: "Status" },
+            { key: "location", label: "Location" },
+            { key: "last_seen", label: "Last seen" },
+            { key: "verified", label: "Verified" },
             { key: "gpu_summary", label: "GPU" },
-            { key: "cpu_summary", label: "CPU" },
-            { key: "fabric", label: "Fabric" },
-            { key: "price_display", label: "Price" },
             { key: "cli_version", label: "Version" }
           ]}
           rows={providers}
@@ -106,14 +106,16 @@ export default async function HomePage() {
         />
         <ResourceTable
           title="Aggregators"
-          description="Aggregators coordinating distributed work."
+          description="Independent nodes that dial every provider each minute and report which ones are really reachable. Run one with: infernet init --role aggregator, then infernet setup --yes."
           columns={[
-            { key: "name", label: "Aggregator" },
+            { key: "name", label: "Aggregator", hrefKey: "href" },
             { key: "status", label: "Status" },
-            { key: "active_jobs", label: "Active jobs" }
+            { key: "location", label: "Location" },
+            { key: "last_seen", label: "Last seen" },
+            { key: "probed", label: "Last hour" }
           ]}
           rows={aggregators}
-          emptyMessage="No aggregators found."
+          emptyMessage="No aggregators yet."
         />
       </div>
     </DashboardShell>

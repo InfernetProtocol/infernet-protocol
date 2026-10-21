@@ -15,6 +15,9 @@ import "server-only";
  *                  daemon heartbeats every 30 s and every heartbeat sets the
  *                  status back to 'available', so flipping a silent node to
  *                  'offline' is undone the moment it comes back.
+ *   aggregators    the same rule as providers.
+ *
+ * Aggregator probe rows (provider_probes) older than a week are deleted.
  *
  * Each rule is a single conditional UPDATE, so a row that moved on between
  * the read and the write is never touched.
@@ -29,7 +32,9 @@ export const REAP_RULES = {
     // Model installs can pull tens of GB; a day is generous.
     commandAfterMs: 24 * 60 * MINUTE,
     // 20 missed heartbeats.
-    providerAfterMs: 10 * MINUTE
+    providerAfterMs: 10 * MINUTE,
+    // Aggregator verification history kept for /nodes/[id].
+    probeRetentionMs: 7 * 24 * 60 * MINUTE
 };
 
 function errMessage(error) {
@@ -52,7 +57,7 @@ async function countOnly(query, what) {
 /**
  * @param {object} supabase  service-role client
  * @param {{ now?: Date, dryRun?: boolean, rules?: typeof REAP_RULES }} [opts]
- * @returns {Promise<{ jobs: number, commands: number, providers: number, dryRun: boolean }>}
+ * @returns {Promise<{ jobs: number, commands: number, providers: number, aggregators: number, probes: number, dryRun: boolean }>}
  */
 export async function reapStaleState(supabase, { now = new Date(), dryRun = false, rules = REAP_RULES } = {}) {
     const before = (ms) => new Date(now.getTime() - ms).toISOString();
@@ -63,12 +68,14 @@ export async function reapStaleState(supabase, { now = new Date(), dryRun = fals
 
     if (dryRun) {
         const head = (table) => supabase.from(table).select("*", { count: "exact", head: true });
-        const [jobs, commands, providers] = await Promise.all([
+        const [jobs, commands, providers, aggregators, probes] = await Promise.all([
             countOnly(head("jobs").in("status", ["pending", "assigned", "running"]).lt("updated_at", jobCutoff), "jobs"),
             countOnly(head("node_commands").in("status", ["pending", "running"]).lt("issued_at", commandCutoff), "node_commands"),
-            countOnly(head("providers").eq("status", "available").lt("last_seen", providerCutoff), "providers")
+            countOnly(head("providers").eq("status", "available").lt("last_seen", providerCutoff), "providers"),
+            countOnly(head("aggregators").eq("status", "available").lt("last_seen", providerCutoff), "aggregators"),
+            countOnly(head("provider_probes").lt("probed_at", before(rules.probeRetentionMs)), "provider_probes")
         ]);
-        return { jobs, commands, providers, dryRun: true };
+        return { jobs, commands, providers, aggregators, probes, dryRun: true };
     }
 
     const jobs = await reap(
@@ -107,5 +114,19 @@ export async function reapStaleState(supabase, { now = new Date(), dryRun = fals
         "providers"
     );
 
-    return { jobs, commands, providers, dryRun: false };
+    const aggregators = await reap(
+        supabase
+            .from("aggregators")
+            .update({ status: "offline" })
+            .eq("status", "available")
+            .lt("last_seen", providerCutoff),
+        "aggregators"
+    );
+
+    const probes = await reap(
+        supabase.from("provider_probes").delete().lt("probed_at", before(rules.probeRetentionMs)),
+        "provider_probes"
+    );
+
+    return { jobs, commands, providers, aggregators, probes, dryRun: false };
 }

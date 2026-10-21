@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 function formatValue(value) {
   if (value === null || value === undefined || value === "") {
     return "—";
@@ -36,7 +38,13 @@ export default function ResourceTable({ title, description, columns, rows, empty
                 <tr key={row.id ?? `${title}-${index}`} className="border-t border-white/10">
                   {columns.map((column) => (
                     <td key={column.key} className="px-5 py-4 text-white/90">
-                      {formatValue(row[column.key])}
+                      {column.hrefKey && row[column.hrefKey] ? (
+                        <Link href={row[column.hrefKey]} className="text-[var(--accent)] hover:underline">
+                          {formatValue(row[column.key])}
+                        </Link>
+                      ) : (
+                        formatValue(row[column.key])
+                      )}
                     </td>
                   ))}
                 </tr>

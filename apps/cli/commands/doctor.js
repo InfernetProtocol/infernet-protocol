@@ -21,7 +21,7 @@
 import fs from "node:fs/promises";
 import { loadConfig, getConfigPath, getConfigDir, getDaemonLogPath, fixConfigPermissions } from "../lib/config.js";
 import { isDaemonAlive, sendToDaemon } from "../lib/ipc.js";
-import { spawnDetachedDaemon } from "../lib/daemonize.js";
+import { readLiveSupervisorPid, spawnDetachedSupervisor } from "../lib/supervisor.js";
 import { createNodeClient } from "../lib/node-client.js";
 import { submitChatJob, streamChatEvents } from "../lib/remote-chat.js";
 
@@ -226,7 +226,8 @@ async function checkDaemon() {
     if (!alive) {
         // Auto-start: doctor starts the daemon rather than just warning.
         try {
-            spawnDetachedDaemon([]);
+            // A live supervisor is already bringing the daemon back.
+            if (!readLiveSupervisorPid()) spawnDetachedSupervisor([]);
         } catch (err) {
             return {
                 status: "fail",

@@ -7,12 +7,17 @@
  *
  * Fallback: read ~/.config/infernet/daemon.pid and send SIGTERM (or a
  * custom --signal) directly to the process.
+ *
+ * When `infernet start` left a supervisor running (lib/supervisor.js), it is
+ * signalled first: it forwards SIGTERM to the daemon and exits, instead of
+ * restarting the daemon we just stopped.
  */
 
 import fs from 'node:fs/promises';
 
 import { getDaemonPidPath } from '../lib/config.js';
 import { isDaemonAlive, sendToDaemon } from '../lib/ipc.js';
+import { readLiveSupervisorPid } from '../lib/supervisor.js';
 
 const HELP = `infernet stop — signal the running daemon to exit
 
@@ -32,6 +37,18 @@ export default async function stop(args) {
     }
 
     const explicitSignal = args.get('signal') ?? (args.has('force') ? 'SIGKILL' : null);
+
+    const supervisorPid = readLiveSupervisorPid();
+    if (supervisorPid) {
+        try {
+            process.kill(supervisorPid, explicitSignal ?? 'SIGTERM');
+            process.stdout.write(`Stopping supervisor (pid ${supervisorPid}) and its daemon.\n`);
+        } catch (err) {
+            process.stderr.write(`Failed to signal supervisor ${supervisorPid}: ${err.message}\n`);
+        }
+        // SIGTERM is forwarded to the daemon; any other signal leaves it to us.
+        if (!explicitSignal) return 0;
+    }
 
     // Prefer graceful IPC-driven shutdown when available.
     if (!explicitSignal && (await isDaemonAlive())) {
