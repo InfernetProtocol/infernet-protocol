@@ -17,6 +17,7 @@ function fakeClient() {
             };
             const q = {
                 update(patch) { call.patch = patch; return q; },
+                delete() { call.patch = "delete"; return q; },
                 select(_cols, opts) { call.head = Boolean(opts?.head); return q; },
                 in(col, vals) { call.filters.push(["in", col, vals]); return q; },
                 eq(col, val) { call.filters.push(["eq", col, val]); return q; },
@@ -54,9 +55,9 @@ describe("reapStaleState", () => {
     const iso = (ms) => new Date(now.getTime() - ms).toISOString();
 
     it("expires stuck jobs, times out commands, marks silent providers offline", async () => {
-        state.reaped = { jobs: ["j1", "j2"], node_commands: ["c1"], providers: ["p1", "p2", "p3"] };
+        state.reaped = { jobs: ["j1", "j2"], node_commands: ["c1"], providers: ["p1", "p2", "p3"], aggregators: ["a1"], provider_probes: ["x1", "x2"] };
         const out = await reapStaleState(fakeClient(), { now });
-        expect(out).toEqual({ jobs: 2, commands: 1, providers: 3, dryRun: false });
+        expect(out).toEqual({ jobs: 2, commands: 1, providers: 3, aggregators: 1, probes: 2, dryRun: false });
 
         const [jobs, cmds, provs] = state.calls;
         expect(jobs.table).toBe("jobs");
@@ -81,6 +82,17 @@ describe("reapStaleState", () => {
             ["eq", "status", "available"],
             ["lt", "last_seen", iso(REAP_RULES.providerAfterMs)]
         ]);
+
+        const [aggs, probes] = state.calls.slice(3);
+        expect(aggs.table).toBe("aggregators");
+        expect(aggs.patch).toEqual({ status: "offline" });
+        expect(aggs.filters).toEqual([
+            ["eq", "status", "available"],
+            ["lt", "last_seen", iso(REAP_RULES.providerAfterMs)]
+        ]);
+        expect(probes.table).toBe("provider_probes");
+        expect(probes.patch).toBe("delete");
+        expect(probes.filters).toEqual([["lt", "probed_at", iso(REAP_RULES.probeRetentionMs)]]);
     });
 
     it("never touches completed work", async () => {
@@ -93,9 +105,9 @@ describe("reapStaleState", () => {
     });
 
     it("dry run only counts", async () => {
-        state.counts = { jobs: 91, node_commands: 21, providers: 18 };
+        state.counts = { jobs: 91, node_commands: 21, providers: 18, aggregators: 2, provider_probes: 40 };
         const out = await reapStaleState(fakeClient(), { now, dryRun: true });
-        expect(out).toEqual({ jobs: 91, commands: 21, providers: 18, dryRun: true });
+        expect(out).toEqual({ jobs: 91, commands: 21, providers: 18, aggregators: 2, probes: 40, dryRun: true });
         expect(state.calls.every((c) => c.patch === null && c.head)).toBe(true);
     });
 
@@ -116,10 +128,14 @@ describe("POST /api/cron/maintenance", () => {
 
     it("reaps and reports the counts", async () => {
         vi.spyOn(console, "log").mockImplementation(() => {});
+        delete process.env.RESEND_API_KEY;
         state.reaped = { jobs: ["j1"] };
         const res = await POST(req());
         expect(res.status).toBe(200);
-        expect((await res.json()).data).toEqual({ jobs: 1, commands: 0, providers: 0, dryRun: false });
+        expect((await res.json()).data).toEqual({
+            jobs: 1, commands: 0, providers: 0, aggregators: 0, probes: 0, dryRun: false,
+            silent: { emailed: 0, skipped: 0, errors: 0 }
+        });
     });
 
     it("?dry_run=1 changes nothing", async () => {

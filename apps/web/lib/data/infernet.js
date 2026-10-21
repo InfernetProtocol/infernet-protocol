@@ -1,6 +1,7 @@
 import "server-only";
 import { getEnv } from "@/lib/env";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { formatGeo } from "@/lib/geo";
 
 function withLimit(query, limit) {
   const pageSize = getEnv().pageSize;
@@ -307,17 +308,180 @@ export async function getClients({ limit } = {}) {
   }));
 }
 
+const ONLINE_WINDOW_MS = 10 * 60 * 1000;
+const PROBE_WINDOW_MS = 60 * 60 * 1000;
+
+function isOnline(row, now = Date.now()) {
+  return row.status === "available" && row.last_seen && now - new Date(row.last_seen).getTime() < ONLINE_WINDOW_MS;
+}
+
+/** Online first, then most recently seen. */
+function byLiveness(a, b) {
+  const on = Number(isOnline(b)) - Number(isOnline(a));
+  if (on !== 0) return on;
+  return String(b.last_seen ?? "").localeCompare(String(a.last_seen ?? ""));
+}
+
+/** Last-hour aggregator probes, grouped by `key` (provider_id or aggregator_id). */
+async function recentProbesBy(key, ids) {
+  if (ids.length === 0) return new Map();
+  const supabase = getSupabaseServerClient();
+  const since = new Date(Date.now() - PROBE_WINDOW_MS).toISOString();
+  const rows = await runQuery(
+    supabase
+      .from("provider_probes")
+      .select("provider_id,aggregator_id,reachable,rtt_ms")
+      .in(key, ids)
+      .gte("probed_at", since)
+      .limit(20000)
+  );
+  const out = new Map();
+  for (const r of rows) {
+    const g = out.get(r[key]) ?? { probes: 0, reachable: 0, aggregators: new Set(), okAggregators: new Set(), providers: new Set(), rtts: [] };
+    g.probes += 1;
+    g.aggregators.add(r.aggregator_id);
+    g.providers.add(r.provider_id);
+    if (r.reachable) {
+      g.reachable += 1;
+      g.okAggregators.add(r.aggregator_id);
+      if (Number.isFinite(r.rtt_ms)) g.rtts.push(r.rtt_ms);
+    }
+    out.set(r[key], g);
+  }
+  return out;
+}
+
+function median(nums) {
+  if (nums.length === 0) return null;
+  const s = [...nums].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
+function verifiedLabel(g) {
+  if (!g) return "—";
+  if (g.okAggregators.size === 0) return `unreachable (${g.aggregators.size} checked)`;
+  const rtt = median(g.rtts);
+  return `${g.okAggregators.size} of ${g.aggregators.size}${rtt != null ? ` · ${rtt} ms` : ""}`;
+}
+
+/**
+ * Providers for /status: online first, then most recently seen, each linking
+ * to its /nodes/[id] page (public nodes only).
+ */
+export async function getStatusProviders({ limit = 12 } = {}) {
+  const supabase = getSupabaseServerClient();
+  const rows = await runQuery(
+    supabase
+      .from("providers")
+      .select("id,name,status,gpu_model,price,reputation,specs,created_at,last_seen,geo,is_public")
+      .order("last_seen", { ascending: false, nullsFirst: false })
+      .limit(500)
+  );
+  const top = rows.sort(byLiveness).slice(0, limit);
+  const probes = await recentProbesBy("provider_id", top.map((r) => r.id));
+  return top.map((row) => ({
+    ...mapProvider(row),
+    status: isOnline(row) ? "online" : "offline",
+    location: formatGeo(row.geo) ?? "—",
+    last_seen: row.last_seen ? relativeAgo(row.last_seen) : "never",
+    verified: verifiedLabel(probes.get(row.id)),
+    href: row.is_public ? `/nodes/${row.id}` : null
+  }));
+}
+
 export async function getAggregators({ limit } = {}) {
   const supabase = getSupabaseServerClient();
-  return runQuery(
+  const rows = await runQuery(
     withLimit(
       supabase
         .from("aggregators")
-        .select("id,name,status,active_jobs,created_at")
-        .order("created_at", { ascending: false }),
+        .select("id,name,status,active_jobs,created_at,last_seen,geo,is_public")
+        .order("last_seen", { ascending: false, nullsFirst: false }),
       limit
     )
   );
+  const probes = await recentProbesBy("aggregator_id", rows.map((r) => r.id));
+  return rows.sort(byLiveness).map((row) => {
+    const g = probes.get(row.id);
+    return {
+      ...row,
+      status: isOnline(row) ? "online" : "offline",
+      location: formatGeo(row.geo) ?? "—",
+      last_seen: row.last_seen ? relativeAgo(row.last_seen) : "never",
+      probed: g ? `${g.providers.size} providers · ${g.reachable}/${g.probes} reachable` : "—",
+      href: row.is_public ? `/nodes/${row.id}` : null
+    };
+  });
+}
+
+/**
+ * Everything /nodes/[id] shows about one public provider or aggregator:
+ * jobs (counts, success rate, recent list without prompt content), aggregator
+ * verification, and for aggregators what they have probed.
+ */
+export async function getNodeActivity({ id, role }) {
+  const supabase = getSupabaseServerClient();
+  const DAY = 24 * 60 * 60 * 1000;
+  const since7d = new Date(Date.now() - 7 * DAY).toISOString();
+  if (role === "aggregator") {
+    const probes = await recentProbesBy("aggregator_id", [id]);
+    const g = probes.get(id);
+    return {
+      aggregator: g
+        ? { providers: g.providers.size, probes: g.probes, reachable: g.reachable, median_rtt_ms: median(g.rtts) }
+        : null
+    };
+  }
+  const count = async (q) => {
+    const { count: n, error } = await q;
+    if (error) throw new Error(error.message);
+    return n ?? 0;
+  };
+  const head = () => supabase.from("jobs").select("id", { count: "exact", head: true }).eq("provider_id", id);
+  const since24h = new Date(Date.now() - DAY).toISOString();
+  const [total, completed, failed, jobs24h, jobs7d, recent, probes] = await Promise.all([
+    count(head()),
+    count(head().eq("status", "completed")),
+    count(head().eq("status", "failed")),
+    count(head().gte("created_at", since24h)),
+    count(head().gte("created_at", since7d)),
+    runQuery(
+      supabase
+        .from("jobs")
+        .select("id,type,status,model_name,created_at,completed_at")
+        .eq("provider_id", id)
+        .order("created_at", { ascending: false })
+        .limit(15)
+    ),
+    recentProbesBy("provider_id", [id])
+  ]);
+  const durations = recent
+    .filter((j) => j.status === "completed" && j.completed_at)
+    .map((j) => new Date(j.completed_at).getTime() - new Date(j.created_at).getTime())
+    .filter((ms) => ms >= 0);
+  const g = probes.get(id);
+  return {
+    jobs: {
+      total,
+      completed,
+      failed,
+      last24h: jobs24h,
+      last7d: jobs7d,
+      success_rate: completed + failed > 0 ? Math.round((completed / (completed + failed)) * 100) : null,
+      median_duration_ms: median(durations)
+    },
+    recent: recent.map((j) => ({
+      id: j.id,
+      type: j.type ?? "inference",
+      status: j.status,
+      model: j.model_name ?? "—",
+      when: relativeAgo(j.created_at),
+      duration_ms: j.completed_at ? new Date(j.completed_at).getTime() - new Date(j.created_at).getTime() : null
+    })),
+    verification: g
+      ? { aggregators: g.aggregators.size, reachable_from: g.okAggregators.size, median_rtt_ms: median(g.rtts) }
+      : null
+  };
 }
 
 export async function getDashboardOverview({ pubkey } = {}) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { reapStaleState } from "@/lib/maintenance";
+import { emailSilentNodes } from "@/lib/silent-nodes";
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +30,21 @@ export async function POST(request) {
     }
     const dryRun = new URL(request.url).searchParams.get("dry_run") === "1";
     try {
-        const reaped = await reapStaleState(getSupabaseServerClient(), { dryRun });
-        if (!dryRun && (reaped.jobs || reaped.commands || reaped.providers)) {
-            console.log(`[maintenance] reaped jobs=${reaped.jobs} commands=${reaped.commands} providers=${reaped.providers}`);
+        const supabase = getSupabaseServerClient();
+        const reaped = await reapStaleState(supabase, { dryRun });
+        if (!dryRun && (reaped.jobs || reaped.commands || reaped.providers || reaped.aggregators)) {
+            console.log(`[maintenance] reaped jobs=${reaped.jobs} commands=${reaped.commands} providers=${reaped.providers} aggregators=${reaped.aggregators} probes=${reaped.probes}`);
         }
-        return NextResponse.json({ data: reaped });
+        let silent = null;
+        if (!dryRun) {
+            try {
+                silent = await emailSilentNodes(supabase);
+                if (silent.emailed || silent.errors) console.log(`[maintenance] silent-node emails sent=${silent.emailed} errors=${silent.errors}`);
+            } catch (err) {
+                console.error("[maintenance] silent-node emails:", err instanceof Error ? err.message : err);
+            }
+        }
+        return NextResponse.json({ data: { ...reaped, silent } });
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("[maintenance]", message);

@@ -6,6 +6,7 @@ import {
     parseJsonBody
 } from "@/lib/auth/verify-signed-request";
 import { heartbeatNode } from "@/lib/data/node-api";
+import { getClientIp } from "@/lib/rate-limit";
 
 const VALID_ROLES = new Set(["provider", "aggregator", "client"]);
 
@@ -21,7 +22,7 @@ export async function POST(request) {
             throw err;
         }
 
-        const row = await heartbeatNode({ role, pubkey, body: json });
+        const row = await heartbeatNode({ role, pubkey, body: json, clientIp: getClientIp(request) });
         return NextResponse.json({ data: row });
     });
 }

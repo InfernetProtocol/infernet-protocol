@@ -1,8 +1,10 @@
 /**
  * `infernet start` — run the node daemon loop.
  *
- * By default, `infernet start` spawns a **detached** background process and
- * returns immediately; logs go to `~/.config/infernet/daemon.log`. Use
+ * By default, `infernet start` spawns a **detached** supervisor that runs the
+ * daemon and restarts it when it dies (lib/supervisor.js), and returns
+ * immediately; logs go to `~/.config/infernet/daemon.log`. When the user-level
+ * systemd unit is enabled, it starts that instead. Use
  * `--foreground` to run the loop in the current terminal (useful under
  * systemd / Docker / Kubernetes where the supervisor wants the process in
  * the foreground).
@@ -41,7 +43,14 @@ import {
     saveConfig,
     fixConfigPermissions
 } from '../lib/config.js';
-import { spawnDetachedDaemon } from '../lib/daemonize.js';
+import {
+    EXIT_RESTART,
+    isSupervised,
+    readLiveSupervisorPid,
+    runSupervisor,
+    spawnDetachedSupervisor,
+    userServiceEnabled
+} from '../lib/supervisor.js';
 import { isDaemonAlive } from '../lib/ipc.js';
 import { resolveP2pPort, detectLocalAddress, formatEndpoint } from '../lib/network.js';
 import { executeChatJob, failChatJob, shutdownEngine } from '../lib/chat-executor.js';
@@ -52,6 +61,7 @@ import { startVllmServe, stopVllmServe, vllmInstalled, waitForVllmModel, extract
 import { detectGpus, detectHost } from '@infernetprotocol/gpu';
 import { getOrCreateModelKey, getModelPublicKeys } from '../lib/model-key.js';
 import { pullLatestBinary } from './upgrade.js';
+import { PROBE_INTERVAL_MS, runProbeRound } from '../lib/aggregator.js';
 import { nodeTokenLogin } from './login.js';
 import { CURRENT_VERSION, fetchLatestVersion, isNewerVersion } from '../lib/version.js';
 import { readInferenceState, readInferenceStateSync, isPidAlive } from '../lib/inference/state.js';
@@ -67,6 +77,7 @@ Usage:
 
 Flags:
   --foreground               Run in the current terminal (don't detach)
+  --supervise                Run the restart-on-crash supervisor in this terminal
   --heartbeat-interval <ms>  Override heartbeat cadence (default 30000)
   --poll-interval <ms>       Override job poll cadence (default 15000)
   --p2p-port <n>             TCP port for peer connections (default 46337)
@@ -129,6 +140,9 @@ export default async function start(args, ctx) {
         return 0;
     }
 
+    if (args.has('supervise')) {
+        return runSupervisor(passthroughArgs(args));
+    }
     const foreground = args.has('foreground') || process.env.INFERNET_DAEMON_FOREGROUND === '1';
     if (!foreground) {
         return spawnAndReturn(args);
@@ -136,14 +150,7 @@ export default async function start(args, ctx) {
     return runDaemon(args, ctx);
 }
 
-async function spawnAndReturn(args) {
-    const alreadyAlive = await isDaemonAlive();
-    if (alreadyAlive) {
-        process.stderr.write('A daemon is already running (socket responsive). Run `infernet stop` first.\n');
-        return 1;
-    }
-    removeSocketFile();
-
+function passthroughArgs(args) {
     const passthrough = [];
     const hb = args.get('heartbeat-interval');
     if (hb) passthrough.push('--heartbeat-interval', hb);
@@ -154,9 +161,32 @@ async function spawnAndReturn(args) {
     if (args.has('no-p2p')) passthrough.push('--no-p2p');
     if (args.has('no-advertise')) passthrough.push('--no-advertise');
     if (args.has('once')) passthrough.push('--once');
+    return passthrough;
+}
 
-    const { pid, logPath } = spawnDetachedDaemon(passthrough);
-    process.stdout.write(`infernet daemon started (pid ${pid})\n`);
+async function spawnAndReturn(args) {
+    const alreadyAlive = await isDaemonAlive();
+    if (alreadyAlive) {
+        process.stderr.write('A daemon is already running (socket responsive). Run `infernet stop` first.\n');
+        return 1;
+    }
+    const supervisorPid = readLiveSupervisorPid();
+    if (supervisorPid) {
+        process.stderr.write(`A supervisor is already running (pid ${supervisorPid}) and will bring the daemon back. Run \`infernet stop\` first.\n`);
+        return 1;
+    }
+    // The systemd unit owns the daemon when it is enabled: starting a second
+    // one here would fight it over the socket, pidfile and port.
+    if (userServiceEnabled()) {
+        const { spawnSync } = await import('node:child_process');
+        const r = spawnSync('systemctl', ['--user', 'start', 'infernet.service'], { stdio: 'inherit' });
+        if (r.status === 0) process.stdout.write('infernet daemon started via systemd (systemctl --user status infernet)\n');
+        return r.status ?? 1;
+    }
+    removeSocketFile();
+
+    const { pid, logPath } = spawnDetachedSupervisor(passthroughArgs(args));
+    process.stdout.write(`infernet daemon started under its supervisor (pid ${pid}); it restarts itself if it dies\n`);
     process.stdout.write(`  logs:   ${logPath}\n`);
     process.stdout.write(`  socket: ${getDaemonSocketPath()}\n`);
     process.stdout.write('Tail logs with `infernet logs -f`, query live state with `infernet status`.\n');
@@ -164,6 +194,15 @@ async function spawnAndReturn(args) {
 }
 
 async function runDaemon(args, ctx) {
+    // A stray rejection must not take the node down; a thrown exception leaves
+    // state unknown, so exit non-zero and let the supervisor start a clean one.
+    process.on('unhandledRejection', (reason) => {
+        process.stderr.write(`[${new Date().toISOString()}] unhandled rejection (continuing): ${reason?.stack ?? reason}\n`);
+    });
+    process.on('uncaughtException', (err) => {
+        process.stderr.write(`[${new Date().toISOString()}] uncaught exception, exiting for restart: ${err?.stack ?? err}\n`);
+        process.exit(1);
+    });
     const { config, client, configPath } = ctx;
     const node = config.node ?? {};
     if (!node.role || !node.nodeId) {
@@ -1551,6 +1590,18 @@ async function runDaemon(args, ctx) {
     }, commandPollMs);
     if (typeof commandTimer.unref === 'function') commandTimer.unref();
 
+    // Aggregators verify providers independently (lib/aggregator.js).
+    if (node.role === 'aggregator' && config.controlPlane?.url) {
+        const probeRound = async () => {
+            const r = await runProbeRound({ client, controlPlaneUrl: config.controlPlane.url });
+            stats.lastProbeRound = { at: new Date().toISOString(), ...r };
+            process.stdout.write(`[${stats.lastProbeRound.at}] probe round: ${r.reachable}/${r.probed} reachable${r.error ? ` (${r.error})` : ''}\n`);
+        };
+        setTimeout(() => { probeRound(); }, 5_000).unref?.();
+        const probeTimer = setInterval(() => { probeRound(); }, PROBE_INTERVAL_MS);
+        if (typeof probeTimer.unref === 'function') probeTimer.unref();
+    }
+
     // Open-market training (IPIP-0030). Daemons that opted in via
     // `infernet config set engine.acceptTraining true` (or env var
     // INFERNET_ACCEPT_TRAINING=1) poll for available shards and run them
@@ -1633,6 +1684,14 @@ async function runDaemon(args, ctx) {
 
         // Small grace period so OS reclaims the ports before the new process binds.
         await new Promise((r) => setTimeout(r, 500));
+
+        // Under a supervisor, hand the restart to it. A detached re-exec followed by
+        // exit 0 is what killed nodes under systemd: exit 0 ends the unit, and the
+        // control-group kill takes the detached child with it.
+        if (isSupervised()) {
+            process.stdout.write(`[update] exiting ${EXIT_RESTART} so the supervisor starts v${latest}\n`);
+            process.exit(EXIT_RESTART);
+        }
 
         // Re-exec the daemon with the same args so the new code is live.
         process.stdout.write('[update] restarting daemon with new version\n');
