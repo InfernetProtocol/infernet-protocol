@@ -1626,43 +1626,52 @@ async function runDaemon(args, ctx) {
     // specs (idempotent), then re-exec so the new code is running immediately.
     let isUpgrading = false;
     let updatePausedUntil = 0;
+    // INFERNET_AUTO_UPDATE=follow: never run the installer here, only restart
+    // once something else (the box's provider daemon) has installed a newer
+    // version. For a second daemon on the same install, e.g. an aggregator, so
+    // two daemons never run the installer at once.
+    const followOnly = process.env.INFERNET_AUTO_UPDATE === 'follow';
     const updateTimer = setInterval(async () => {
         if (shuttingDown || isUpgrading || Date.now() < updatePausedUntil) return;
         // Never start an upgrade under a running job; the next check retries.
         if (stats.activeJobIds.size > 0) return;
-        const latest = await fetchLatestVersion();
+        const latest = followOnly ? readInstalledVersion() : await fetchLatestVersion();
         if (!latest || !isNewerVersion(CURRENT_VERSION, latest)) return;
         isUpgrading = true;
 
-        process.stdout.write(`[update] v${latest} available (running v${CURRENT_VERSION}) — upgrading\n`);
-        const ok = await pullLatestBinary();
-        if (!ok) {
-            process.stderr.write('[update] installer failed — will retry next check\n');
-            isUpgrading = false;
-            return;
-        }
-        // The installer can succeed without changing this install (a git checkout
-        // whose package.json lagged the release, or npm writing to another
-        // prefix). Restarting then would rerun the same update every 5 minutes
-        // forever, so keep serving and try again much later.
-        const installed = readInstalledVersion();
-        if (!isNewerVersion(CURRENT_VERSION, installed)) {
-            updatePausedUntil = Date.now() + UPDATE_PAUSE_MS;
-            process.stderr.write(`[update] installer left v${installed} here (latest v${latest}); not restarting, next try in ${UPDATE_PAUSE_MS / 3_600_000}h\n`);
-            isUpgrading = false;
-            return;
-        }
+        if (followOnly) {
+            process.stdout.write(`[update] v${latest} installed on this machine (running v${CURRENT_VERSION}) — restarting into it\n`);
+        } else {
+            process.stdout.write(`[update] v${latest} available (running v${CURRENT_VERSION}) — upgrading\n`);
+            const ok = await pullLatestBinary();
+            if (!ok) {
+                process.stderr.write('[update] installer failed — will retry next check\n');
+                isUpgrading = false;
+                return;
+            }
+            // The installer can succeed without changing this install (a git checkout
+            // whose package.json lagged the release, or npm writing to another
+            // prefix). Restarting then would rerun the same update every 5 minutes
+            // forever, so keep serving and try again much later.
+            const installed = readInstalledVersion();
+            if (!isNewerVersion(CURRENT_VERSION, installed)) {
+                updatePausedUntil = Date.now() + UPDATE_PAUSE_MS;
+                process.stderr.write(`[update] installer left v${installed} here (latest v${latest}); not restarting, next try in ${UPDATE_PAUSE_MS / 3_600_000}h\n`);
+                isUpgrading = false;
+                return;
+            }
 
-        // Post-upgrade: run `infernet upgrade --skip-setup` is already done
-        // (pullLatestBinary above). Now run setup --yes so keys are regenerated,
-        // specs re-registered, and the daemon restarts cleanly via re-exec below.
-        process.stdout.write('[update] re-initializing keys and specs\n');
-        try {
-            const { default: setup } = await import('./setup.js');
-            const setupArgs = new Map([['yes', true], ['confirm', true], ['skip-pull', true], ['skip-daemon', true]]);
-            await setup(setupArgs, { config, client, configPath });
-        } catch (err) {
-            process.stderr.write(`[update] post-upgrade setup: ${err?.message ?? err}\n`);
+            // Post-upgrade: run `infernet upgrade --skip-setup` is already done
+            // (pullLatestBinary above). Now run setup --yes so keys are regenerated,
+            // specs re-registered, and the daemon restarts cleanly via re-exec below.
+            process.stdout.write('[update] re-initializing keys and specs\n');
+            try {
+                const { default: setup } = await import('./setup.js');
+                const setupArgs = new Map([['yes', true], ['confirm', true], ['skip-pull', true], ['skip-daemon', true]]);
+                await setup(setupArgs, { config, client, configPath });
+            } catch (err) {
+                process.stderr.write(`[update] post-upgrade setup: ${err?.message ?? err}\n`);
+            }
         }
 
         // Jobs that arrived while the installer ran get to finish: stop taking
