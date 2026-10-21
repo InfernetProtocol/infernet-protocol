@@ -1,7 +1,6 @@
 import Link from "next/link";
 import CopyButton from "@/components/copy-button";
 import ProviderLogos from "@/components/provider-logos";
-import AdUnit from "@/components/ad-unit";
 
 export const metadata = {
   title: "Infernet Protocol — Decentralized GPU compute",
@@ -53,8 +52,6 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-
-      <AdUnit />
 
       {/* What it is */}
       <section className="border-b border-white/10">
