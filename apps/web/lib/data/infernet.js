@@ -460,7 +460,21 @@ export async function getNodeActivity({ id, role }) {
     .map((j) => new Date(j.completed_at).getTime() - new Date(j.created_at).getTime())
     .filter((ms) => ms >= 0);
   const g = probes.get(id);
+  let earnings = null;
+  let earnedByJob = new Map();
+  try {
+    const { getEarningsForProviders, getEarningsByJob } = await import("@/lib/data/earnings");
+    const [e, byJob] = await Promise.all([
+      getEarningsForProviders([id], { recent: 0 }),
+      getEarningsByJob(recent.map((j) => j.id))
+    ]);
+    earnings = { ...e.balance, config: e.config };
+    earnedByJob = byJob;
+  } catch {
+    /* earnings are additive; the page renders without them */
+  }
   return {
+    earnings,
     jobs: {
       total,
       completed,
@@ -476,6 +490,8 @@ export async function getNodeActivity({ id, role }) {
       status: j.status,
       model: j.model_name ?? "—",
       when: relativeAgo(j.created_at),
+      earned_usd: earnedByJob.get(j.id)?.amount_usd ?? null,
+      earned_status: earnedByJob.get(j.id)?.status ?? null,
       duration_ms: j.completed_at ? new Date(j.completed_at).getTime() - new Date(j.created_at).getTime() : null
     })),
     verification: g

@@ -4,6 +4,7 @@ import RealtimeRefresh from "@/components/realtime-refresh";
 import PushModelButton from "@/components/push-model-button";
 import RevealTitle from "@/components/reveal-title";
 import { getCurrentUser } from "@/lib/supabase/auth-server";
+import { fmtUsdPrecise, EARNING_STATUS_LABELS } from "@/lib/earnings/core";
 import {
     getEarningsSummary,
     getSpendSummary,
@@ -22,7 +23,8 @@ export const metadata = {
 };
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }) {
+    const sp = (await searchParams) ?? {};
     const user = await getCurrentUser();
     if (!user) {
         redirect("/auth/login?next=/dashboard");
@@ -76,9 +78,9 @@ export default async function DashboardPage() {
                 {/* Stat cards */}
                 <section className="mb-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     <Stat
-                        label="Earnings (last 30d)"
-                        value={earnings.last_30d_usd}
-                        sub={`${earnings.all_time_usd} all-time · ${earnings.confirmed_payments} confirmed`}
+                        label="Earnings"
+                        value={fmtUsdPrecise(earnings.confirmed_usd + earnings.pending_usd + earnings.pending_approval_usd)}
+                        sub={`${fmtUsdPrecise(earnings.confirmed_usd)} confirmed · ${fmtUsdPrecise(earnings.pending_approval_usd)} pending approval · ${fmtUsdPrecise(earnings.paid_usd)} paid out · ${earnings.jobs_credited} jobs`}
                     />
                     <Stat
                         label="Spend (last 30d)"
@@ -250,6 +252,14 @@ export default async function DashboardPage() {
                     </div>
                 </div>
 
+                {!noProviders ? (
+                    <section id="earnings" className="mt-10">
+                        <Card title="Earnings + payouts">
+                            <EarningsPanel providers={providers} earnings={earnings} notice={sp.payout} error={sp.payout_error} />
+                        </Card>
+                    </section>
+                ) : null}
+
                 {/* Operator-side view: jobs your nodes actually processed */}
                 <section className="mt-10">
                     <Card title="Recent jobs (your nodes processed)">
@@ -290,7 +300,17 @@ export default async function DashboardPage() {
                                                 ) : "—"}
                                             </td>
                                             <td className="py-2 pr-3"><StatusPill status={j.status} /></td>
-                                            <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsd(j.payment_offer)}</td>
+                                            <td className="py-2 pr-3 text-[var(--muted)]">
+                                                {j.earned_usd != null ? (
+                                                    <>
+                                                        {fmtUsdPrecise(j.earned_usd)}
+                                                        <span className="block text-[10px] uppercase tracking-wider">
+                                                            {EARNING_STATUS_LABELS[j.earned_status] ?? j.earned_status}
+                                                            {j.output_tokens ? ` · ${j.output_tokens} tok` : ""}
+                                                        </span>
+                                                    </>
+                                                ) : j.status === "completed" ? "crediting…" : "—"}
+                                            </td>
                                             <td className="py-2 pr-3 text-[var(--muted)]">
                                                 {relTime(j.completed_at ?? j.created_at)}
                                             </td>
@@ -357,6 +377,103 @@ export default async function DashboardPage() {
                 </section>
             </main>
         </>
+    );
+}
+
+function EarningsPanel({ providers, earnings, notice, error }) {
+    const cfg = earnings.config ?? {};
+    const minPayout = Number(cfg.min_payout_usd ?? 0);
+    return (
+        <div className="space-y-5 text-sm">
+            {notice === "requested" ? (
+                <p className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-emerald-100">
+                    Withdrawal requested. It is sent after an admin approves it.
+                </p>
+            ) : null}
+            {error ? (
+                <p className="rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-red-200">{String(error)}</p>
+            ) : null}
+            <p className="text-[var(--muted)]">
+                Every completed job credits the node that served it. Free playground jobs earn a house subsidy of{" "}
+                {fmtUsdPrecise(cfg.subsidy_per_1k_output_usd)} per 1k output tokens
+                {cfg.subsidy_approved ? "" : ", shown as pending approval until the rate is approved"}. Earnings accrue with or
+                without a payout address; you only need one to withdraw. Minimum withdrawal {fmtUsdPrecise(minPayout)}.{" "}
+                <Link href="/docs#earnings" className="text-[var(--accent)] hover:underline">How earnings work</Link>
+            </p>
+            <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                    <thead>
+                        <tr className="text-left text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
+                            <th className="py-2 pr-3 font-medium">Node</th>
+                            <th className="py-2 pr-3 font-medium">Pending approval</th>
+                            <th className="py-2 pr-3 font-medium">Awaiting client</th>
+                            <th className="py-2 pr-3 font-medium">Confirmed</th>
+                            <th className="py-2 pr-3 font-medium">Paid out</th>
+                            <th className="py-2 pr-3 font-medium">Available</th>
+                            <th className="py-2 pr-3 font-medium" />
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {providers.map((p) => {
+                            const b = earnings.per_provider?.[p.id] ?? {};
+                            const open = (earnings.payouts ?? []).find(
+                                (r) => r.provider_id === p.id && ["requested", "approved", "sending"].includes(r.status)
+                            );
+                            const canWithdraw = !open && Number(b.available_usd) >= minPayout && Number(b.available_usd) > 0;
+                            return (
+                                <tr key={p.id} className="border-t border-white/5">
+                                    <td className="py-2 pr-3 text-white">
+                                        <Link href={`/nodes/${p.id}`} className="hover:underline">{p.name}</Link>
+                                        <span className="block text-xs text-[var(--muted)]">{b.jobs_credited ?? 0} jobs credited</span>
+                                    </td>
+                                    <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsdPrecise(b.pending_approval_usd)}</td>
+                                    <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsdPrecise(b.pending_usd)}</td>
+                                    <td className="py-2 pr-3 text-white">{fmtUsdPrecise(b.confirmed_usd)}</td>
+                                    <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsdPrecise(b.paid_usd)}</td>
+                                    <td className="py-2 pr-3 text-white">{fmtUsdPrecise(b.available_usd)}</td>
+                                    <td className="py-2 pr-3">
+                                        {open ? (
+                                            <span className="text-xs text-amber-200">{fmtUsdPrecise(open.amount_usd)} {open.status}</span>
+                                        ) : (
+                                            <form action="/api/v1/user/payouts/request" method="post">
+                                                <input type="hidden" name="provider_id" value={p.id} />
+                                                <button
+                                                    type="submit"
+                                                    disabled={!canWithdraw}
+                                                    title={canWithdraw ? "Request a withdrawal of the available balance" : `Available balance is below the ${fmtUsdPrecise(minPayout)} minimum`}
+                                                    className="rounded-full border border-white/15 px-3 py-1 text-xs text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                                                >
+                                                    Withdraw
+                                                </button>
+                                            </form>
+                                        )}
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+            {(earnings.payouts ?? []).length > 0 ? (
+                <div>
+                    <p className="mb-2 text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Withdrawals</p>
+                    <ul className="space-y-1 text-xs text-[var(--muted)]">
+                        {earnings.payouts.map((r) => (
+                            <li key={r.id}>
+                                {new Date(r.created_at).toISOString().slice(0, 10)} · {fmtUsdPrecise(r.amount_usd)} {r.coin} · {r.status}
+                                {r.tx_hash ? ` · tx ${r.tx_hash.slice(0, 14)}…` : ""}
+                                {r.status === "rejected" && r.error ? ` · ${r.error}` : ""}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
+            <pre className="overflow-x-auto rounded-lg bg-[var(--panel-strong)] p-3 text-xs leading-5 text-[var(--accent)]">
+{`infernet payout list            # balance, ledger, address
+infernet payout set USDC 0x... --network polygon  # where withdrawals go
+infernet payout request         # withdraw the available balance`}
+            </pre>
+        </div>
     );
 }
 

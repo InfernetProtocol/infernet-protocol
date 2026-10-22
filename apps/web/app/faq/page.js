@@ -309,12 +309,51 @@ const SECTIONS = [
                 q: "How does a provider get paid?",
                 a: (
                     <>
-                        Per completed job, settled to the payout address for the coin
-                        the client paid in. Payouts batch into{" "}
-                        <code>provider_payouts</code> rows; you can inspect via{" "}
-                        <code>infernet payments</code>. There's no platform spread above
-                        market gateway fees — the protocol is the matchmaker, not a
-                        rent extractor.
+                        Every completed job credits the node that served it in the earnings ledger. A paid job
+                        earns your share of what the client paid (house fee 0% today), confirmed once CoinPay
+                        confirms the client&apos;s payment. A free job (the /chat playground, most traffic in the
+                        alpha) earns a house subsidy per 1,000 output tokens, shown as <em>pending approval</em>{" "}
+                        until the rate is approved. Withdraw with <code>infernet payout request</code> or the
+                        dashboard&apos;s Withdraw button; requests are approved and then sent through CoinPay. See{" "}
+                        <Link href="/docs#earnings" className="text-[var(--accent)] hover:underline">
+                            Earnings + payouts
+                        </Link>
+                        .
+                    </>
+                )
+            },
+            {
+                q: "My node completed jobs but shows $0.00 earned. Were they paid?",
+                a: (
+                    <>
+                        Almost certainly they were free jobs: playground and unpaid API traffic carry no client
+                        payment. Since October 2026 those jobs earn a house subsidy per 1k output tokens, and jobs
+                        completed before then were credited retroactively. Short chat replies earn fractions of a
+                        cent, which the dashboard and <code>infernet payout list</code> now show to six decimals
+                        instead of rounding to $0.00. They show as <em>pending approval</em> until the subsidy rate
+                        is approved.
+                    </>
+                )
+            },
+            {
+                q: "Do I need a payout address before I earn?",
+                a: (
+                    <>
+                        No. Earnings accrue from your first completed job whether or not an address is set. You
+                        need one only to withdraw: <code>infernet payout set &lt;COIN&gt; &lt;ADDRESS&gt;</code>{" "}
+                        (add <code>--network polygon</code> etc. for stablecoins off Ethereum).
+                    </>
+                )
+            },
+            {
+                q: "Can my hardware get paid jobs?",
+                a: (
+                    <>
+                        Paid jobs are routed by model, not by GPU brand: any node that serves the requested model
+                        and is online can be picked, including older cards like a P104-100 running small models.
+                        Paid demand has not started yet in the alpha: so far every job has been a free one, earning the
+                        subsidy. Serving popular small models (for example the qwen2.5 family your VRAM fits) and
+                        staying online is what gets a node picked.
                     </>
                 )
             }

@@ -38,7 +38,7 @@ Diagnostics:
   doctor       End-to-end health check across all three sides
 
 Payments:
-  payout       Manage payout coin/address
+  payout       Earnings, withdrawals and payout address
   payments     Show recent payment transactions
 
 Managed endpoints:

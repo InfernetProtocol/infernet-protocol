@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getNodeActivity } from "@/lib/data/infernet";
 import { formatGeo } from "@/lib/geo";
+import { fmtUsdPrecise, EARNING_STATUS_LABELS } from "@/lib/earnings/core";
 
 export const dynamic = "force-dynamic";
 
@@ -177,6 +178,14 @@ export default async function NodeDetailsPage({ params }) {
                         <Stat label="All time" value={jobs.total} />
                         <Stat label="Success" value={jobs.success_rate != null ? `${jobs.success_rate}%` : "—"} />
                     </dl>
+                    {activity.earnings ? (
+                        <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                            <Stat label="Earned, pending approval" value={fmtUsdPrecise(activity.earnings.pending_approval_usd)} />
+                            <Stat label="Earned, confirmed" value={fmtUsdPrecise(activity.earnings.confirmed_usd)} />
+                            <Stat label="Awaiting client payment" value={fmtUsdPrecise(activity.earnings.pending_usd)} />
+                            <Stat label="Paid out" value={fmtUsdPrecise(activity.earnings.paid_usd)} />
+                        </dl>
+                    ) : null}
                     {activity.recent?.length ? (
                         <div className="mt-5 overflow-x-auto">
                             <table className="min-w-full text-left text-sm">
@@ -186,7 +195,8 @@ export default async function NodeDetailsPage({ params }) {
                                         <th className="py-2 pr-4 font-medium">Type</th>
                                         <th className="py-2 pr-4 font-medium">Model</th>
                                         <th className="py-2 pr-4 font-medium">Status</th>
-                                        <th className="py-2 font-medium">Took</th>
+                                        <th className="py-2 pr-4 font-medium">Took</th>
+                                        <th className="py-2 font-medium">Earned</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -196,7 +206,17 @@ export default async function NodeDetailsPage({ params }) {
                                             <td className="py-2 pr-4">{j.type}</td>
                                             <td className="py-2 pr-4 font-mono text-xs">{j.model}</td>
                                             <td className="py-2 pr-4">{j.status}</td>
-                                            <td className="py-2">{j.duration_ms != null ? formatDuration(j.duration_ms) : "—"}</td>
+                                            <td className="py-2 pr-4">{j.duration_ms != null ? formatDuration(j.duration_ms) : "—"}</td>
+                                            <td className="py-2">
+                                                {j.earned_usd != null ? (
+                                                    <>
+                                                        {fmtUsdPrecise(j.earned_usd)}
+                                                        <span className="block text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                                                            {EARNING_STATUS_LABELS[j.earned_status] ?? j.earned_status}
+                                                        </span>
+                                                    </>
+                                                ) : "—"}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>

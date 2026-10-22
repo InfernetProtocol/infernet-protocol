@@ -16,6 +16,7 @@ const TOC = [
     { id: "cli-init",      label: "infernet init" },
     { id: "cli-start",     label: "infernet start" },
     { id: "cli-doctor",    label: "infernet doctor" },
+    { id: "earnings",      label: "Earnings + payouts" },
     { id: "cli-payout",    label: "infernet payout" },
     { id: "cli-tui",       label: "infernet tui" },
     { id: "cli-service",   label: "infernet service (systemd)" },
@@ -162,7 +163,7 @@ infernet setup`}
                         ["Node lifecycle","init, login, register, update, remove",       "Configure node identity + (de)register with a control plane"],
                         ["Daemon",        "start, stop, status, stats, logs, service",   "Run the long-lived process and inspect it"],
                         ["Diagnostics",   "gpu, firewall, chat, tui, doctor",            "Probe the local box + interact with the network"],
-                        ["Payments",      "payout, payments",                            "Configure your payout addresses + view earnings"]
+                        ["Payments",      "payout, payments",                            "Earnings balance, withdrawals, payout addresses"]
                     ]}
                 />
                 <p>
@@ -347,38 +348,75 @@ All checks passed.`}
                 <CodeBlock>{`infernet doctor --skip-e2e`}</CodeBlock>
             </Section>
 
+            {/* EARNINGS */}
+            <Section id="earnings" title="Earnings + payouts">
+                <p>
+                    Every job your node completes is credited to it in the earnings ledger, one row per job.
+                    What a job earns depends on how it was paid for:
+                </p>
+                <ul className="list-disc space-y-1 pl-6">
+                    <li>
+                        <strong>Paid jobs</strong> (the client paid an invoice through CoinPay): your share of the
+                        client&apos;s payment after the house fee (0% today). The credit shows as{" "}
+                        <em>awaiting client payment</em> until CoinPay confirms the payment, then <em>confirmed</em>.
+                        A job split across several nodes (pipeline-parallel) is shared the same way the CPR receipts
+                        split it: the primary takes 1/(n+1), the rest is weighted by layers served.
+                    </li>
+                    <li>
+                        <strong>Free jobs</strong> (the public /chat playground and other unpaid traffic, which is
+                        most traffic during the alpha): the house pays a subsidy per 1,000 output tokens. These
+                        credits show as <em>pending approval</em> until the subsidy rate is approved, then they
+                        become <em>confirmed</em> at the rate recorded on each job.
+                    </li>
+                </ul>
+                <p>
+                    Earnings accrue whether or not you have set a payout address. The address is only needed to
+                    withdraw. Your balance is <em>confirmed earnings minus what has been paid out or requested</em>;
+                    once it is above the minimum you can request a withdrawal. Requests are reviewed and then sent
+                    through CoinPay to your default payout address.
+                </p>
+                <CodeBlock>
+{`infernet status                 # one-line balance
+infernet payout list            # balance, recent credits per job, withdrawals, addresses
+infernet payout set USDC 0xYourAddress --network polygon
+infernet payout request         # withdraw the whole available balance
+infernet payout request --amount 10`}
+                </CodeBlock>
+                <p>
+                    The dashboard shows the same numbers per node (pending approval, awaiting client payment,
+                    confirmed, paid out, available) with a Withdraw button, and each job row shows what it earned.
+                    Amounts below one cent are shown to six decimals rather than rounded to $0.00.
+                </p>
+            </Section>
+
             {/* PAYOUT */}
             <Section id="cli-payout" title="infernet payout">
                 <p>
-                    Configure where you want to be paid for served jobs. CoinPayPortal
-                    sends payouts to whatever addresses you set here. Operators who already
-                    have wallets paste their addresses; operators who don't can have a
-                    non-custodial BIP39 wallet generated and the encrypted seed phrase
-                    delivered to their PGP key.
+                    Set where withdrawals go, check your balance, and request a withdrawal. The coin and network
+                    must match one of the supported payment coins; the first network listed for a coin is the
+                    default (USDC and USDT default to Ethereum, so pass <code>--network</code> for Polygon,
+                    Solana or Base).
                 </p>
                 <CodeBlock>
-{`# Bring your own wallet (recommended — non-custodial)
-infernet payout set BTC mainnet bc1q9h6zcv4fp9kx5n0jq5qf3w2yxz4z3y2w5
-infernet payout set ETH mainnet 0x742d35Cc6634C0532925a3b844Bc9e7595f8B59f
-infernet payout set SOL mainnet 5RaBwVPRBfpz9MRBnGRcQAPfvKxcUVtxL2ANe9XJ
-infernet payout set USDC solana 5RaBwVPRBfpz9MRBnGRcQAPfvKxcUVtxL2ANe9XJ
-infernet payout set USDC polygon 0x742d35Cc6634C0532925a3b844Bc9e7595f8B59f
+{`# Where withdrawals go (the newest one you set is the default)
+infernet payout set BTC bc1q9h6zcv4fp9kx5n0jq5qf3w2yxz4z3y2w5
+infernet payout set ETH 0x742d35Cc6634C0532925a3b844Bc9e7595f8B59f
+infernet payout set USDC 0x742d35Cc6634C0532925a3b844Bc9e7595f8B59f --network polygon
+infernet payout set USDC 5RaBwVPRBfpz9MRBnGRcQAPfvKxcUVtxL2ANe9XJ --network solana
 
-# Lightning — paste your bolt12 (recommended) or LNURL-pay address
-infernet payout set BTC ln lno1qsgqmqvgm96frzdg8m0gc6nz...
-
-# Don't have an LN node? Opt-in to a CoinPay-custodial channel:
-infernet payout set BTC ln --provision
-
-# Inspect
+# Balance, per-job credits, withdrawals and addresses
 infernet payout list
-infernet payout remove ETH mainnet
-infernet payments                    # recent transactions (signed read)`}
+infernet payout list --json
+
+# Withdraw (queued for approval, then sent via CoinPay)
+infernet payout request
+infernet payout request --amount 25
+
+infernet payments                    # client-side payment transactions (signed read)`}
                 </CodeBlock>
                 <Aside type="warn">
-                    Lightning is the single custodial exception. All other coins are
-                    fully non-custodial — CoinPay generates the BIP39 seed if you ask
-                    it to, delivers it GPG-encrypted, and never holds the keys.
+                    A withdrawal is sent to the address that was your default when you requested it. Changing
+                    the address afterwards does not redirect a request that is already waiting.
                 </Aside>
             </Section>
 

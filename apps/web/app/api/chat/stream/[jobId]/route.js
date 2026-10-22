@@ -370,6 +370,7 @@ async function runRpcProxy({ supabase, job, safeEnqueue, sseFrame }) {
           result: { type: "chat", text: fullText, source: "rpc", primary_id: primary.id }
         });
         await emitRpcReceipts({ supabase, job, primary, chosenSlices, layerByPeer });
+        await creditRpcJob({ supabase, job, primary, chosenSlices, layerByPeer, text: fullText });
         return;
       } else if (evName === "error") {
         const persisted = await insertJobEvent(supabase, job.id, "error", evData);
@@ -429,6 +430,28 @@ async function emitRpcReceipts({ supabase, job, primary, chosenSlices, layerByPe
 }
 
 
+
+/**
+ * Earnings for a pipeline-parallel job: the same IPIP-0033 split the CPR
+ * receipts use, written to the provider_earnings ledger.
+ */
+async function creditRpcJob({ supabase, job, primary, chosenSlices, layerByPeer, text }) {
+  try {
+    const { creditCompletedJob } = await import("@/lib/data/earnings");
+    const shares = splitRpcReceiptShares({ primary, slices: chosenSlices, daemonPeers: layerByPeer })
+      .filter((s) => s.provider?.id)
+      .map((s) => ({ provider_id: s.provider.id, share: s.share, role: s.role }));
+    await creditCompletedJob({
+      supabase,
+      job: { ...job, provider_id: job.provider_id ?? primary.id, completed_at: new Date().toISOString() },
+      result: { text },
+      shares,
+      source: "rpc"
+    });
+  } catch (err) {
+    console.warn(`rpc earnings credit failed: ${err?.message ?? err}`);
+  }
+}
 
 function providerEndpoint(provider) {
   if (!provider?.address) throw new Error("provider has no advertised address");

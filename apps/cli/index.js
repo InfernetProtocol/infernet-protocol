@@ -171,7 +171,11 @@ async function main() {
 
     const helpRequested = args.has('help') || args.has('h');
 
-    if (!NO_CONFIG.has(sub) && !helpRequested) {
+    // `infernet payout admin ...` runs on an admin's machine with only the
+    // admin token, not a node config.
+    const adminOnly = sub === 'payout' && rest[0] === 'admin';
+
+    if (!NO_CONFIG.has(sub) && !helpRequested && !adminOnly) {
         const config = await loadConfig();
         if (!config) {
             process.stderr.write(
