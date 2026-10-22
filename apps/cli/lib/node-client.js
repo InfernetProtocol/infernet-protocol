@@ -109,6 +109,14 @@ export function createNodeClient({ url, publicKey, privateKey, role, timeoutMs =
             return signedFetch('/api/v1/node/me', { role });
         },
 
+        earnings(recent = 20) {
+            return signedFetch('/api/v1/node/earnings', { recent });
+        },
+
+        requestPayout(amountUsd = null) {
+            return signedFetch('/api/v1/node/payouts/request', amountUsd == null ? {} : { amount_usd: amountUsd });
+        },
+
         listPayments(limit = 20) {
             return signedFetch('/api/v1/node/payments/list', { role, limit });
         },

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // completeJobForNode must be idempotent: a daemon that retries a completion
 // (slow or lost response) must not re-mark the job or queue another CPR
 // receipt. Production had 353 receipts queued for a single job.
-const state = { job: null, updates: [], enqueued: 0 };
+const state = { job: null, updates: [], enqueued: 0, credits: [] };
 
 function fakeClient() {
     return {
@@ -17,6 +17,10 @@ function fakeClient() {
                 in(col, values) { if (col === "status") statusFilter = values; return q; },
                 update(p) { mode = "update"; patch = p; return q; },
                 insert() { return Promise.resolve({ error: null }); },
+                upsert(rows) {
+                    if (table === "provider_earnings") state.credits.push(...rows);
+                    return Promise.resolve({ error: null });
+                },
                 maybeSingle() {
                     if (table === "providers") return Promise.resolve({ data: { id: "prov-1" }, error: null });
                     return Promise.resolve({ data: state.job ? { ...state.job } : null, error: null });
@@ -53,6 +57,7 @@ beforeEach(() => {
     state.job = { id: "job-1", provider_id: "prov-1", payment_offer: 0, payment_coin: null, status: "assigned" };
     state.updates = [];
     state.enqueued = 0;
+    state.credits = [];
 });
 
 describe("completeJobForNode", () => {
@@ -61,6 +66,9 @@ describe("completeJobForNode", () => {
         expect(out).toEqual({ id: "job-1", status: "completed" });
         expect(state.updates).toHaveLength(1);
         expect(state.enqueued).toBe(1);
+        // A free job still credits its provider (house subsidy, pending approval).
+        expect(state.credits).toHaveLength(1);
+        expect(state.credits[0]).toMatchObject({ job_id: "job-1", provider_id: "prov-1", kind: "subsidy", status: "pending_approval" });
     });
 
     it("a retried completion is a no-op: no second update, no second receipt", async () => {
@@ -71,6 +79,7 @@ describe("completeJobForNode", () => {
         }
         expect(state.updates).toHaveLength(1);
         expect(state.enqueued).toBe(1);
+        expect(state.credits).toHaveLength(1);
     });
 
     it("does not overwrite a job the reaper already failed", async () => {

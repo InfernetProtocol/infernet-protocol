@@ -339,7 +339,7 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
 
     const { data: job, error: jobErr } = await supabase
         .from("jobs")
-        .select("id, provider_id, payment_offer, payment_coin, status")
+        .select("id, provider_id, payment_offer, payment_coin, payment_status, model_name, status")
         .eq("id", jobId)
         .maybeSingle();
     if (jobErr) throw withStatus(jobErr.message, 500);
@@ -373,26 +373,17 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
         return { id: job.id, status: job.status, noop: true };
     }
 
+    // Credit the serving provider: its share of a paid job, or the house
+    // subsidy on a free one. Earnings accrue whether or not a payout address
+    // is set. Never fails the completion.
     if (!failed) {
-        const amount = Number.parseFloat(job.payment_offer ?? 0) || 0;
-        if (amount > 0) {
-            const coin = job.payment_coin ?? "USDC";
-            const { error: payErr } = await supabase.from("payment_transactions").insert({
-                direction: "outbound",
-                job_id: job.id,
-                provider_id: provider.id,
-                coin,
-                amount,
-                amount_usd: amount,
-                address: "pending-payout",
-                status: "pending",
-                metadata: { via: "node-api" }
-            });
-            if (payErr) {
-                // Non-fatal — payment accounting is follow-up work.
-                console.warn(`payment_transactions insert failed: ${payErr.message}`);
-            }
-        }
+        const { creditCompletedJob } = await import("@/lib/data/earnings");
+        await creditCompletedJob({
+            supabase,
+            job: { ...job, provider_id: provider.id, completed_at: completedAt },
+            result: body.result,
+            source: "node-api"
+        });
     }
 
     // IPIP-0007 phase 2: emit a CPR Receipt for this job. Non-blocking

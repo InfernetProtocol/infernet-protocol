@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { confirmPaidJobCredits } from "@/lib/data/earnings";
 import {
   verifyWebhookSignature,
   parseWebhookPayload,
@@ -105,6 +106,15 @@ export async function POST(request) {
   const { error: jobErr } = await supabase.from("jobs").update(jobUpdate).eq("id", job.id);
   if (jobErr) {
     return errorResponse(500, "Failed to update job payment status", jobErr.message);
+  }
+
+  // 4. The serving providers' credits for this job are now real money.
+  if (event.status === "confirmed") {
+    try {
+      await confirmPaidJobCredits(job.id, supabase);
+    } catch (err) {
+      console.warn(`confirmPaidJobCredits failed: ${err?.message ?? err}`);
+    }
   }
 
   return NextResponse.json({ ok: true, settled: event.status === "confirmed", jobId: job.id });

@@ -8,6 +8,7 @@
 
 export {
   createCheckout,
+  createPayout,
   listPaymentMethods,
   getPayment,
   toCoinpayMethod,

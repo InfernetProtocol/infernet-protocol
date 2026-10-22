@@ -92,17 +92,19 @@ async function sumPaymentsUsd({ ids, direction, sinceDays }) {
     return { total, count: count ?? data?.length ?? 0 };
 }
 
+/**
+ * Provider earnings from the provider_earnings ledger (every completed job
+ * credits its node; free jobs carry the house subsidy, pending approval).
+ */
 export async function getEarningsSummary(userId) {
     const providers = await getUserProviders(userId);
-    const ids = providers.map((p) => p.id);
-    const [allTime, last30d] = await Promise.all([
-        sumPaymentsUsd({ ids, direction: "inbound" }),
-        sumPaymentsUsd({ ids, direction: "inbound", sinceDays: 30 })
-    ]);
+    const { getEarningsForProviders } = await import("@/lib/data/earnings");
+    const out = await getEarningsForProviders(providers.map((p) => p.id), { recent: 0 });
     return {
-        all_time_usd: fmtUsd(allTime.total),
-        last_30d_usd: fmtUsd(last30d.total),
-        confirmed_payments: allTime.count
+        ...out.balance,
+        per_provider: out.per_provider,
+        payouts: out.payouts,
+        config: out.config
     };
 }
 
@@ -295,12 +297,18 @@ export async function getRecentJobsProcessed(userId, { limit = 8 } = {}) {
         .order("created_at", { ascending: false })
         .limit(limit);
     if (error) throw new Error(error.message);
+    const { getEarningsByJob } = await import("@/lib/data/earnings");
+    const earned = await getEarningsByJob((data ?? []).map((j) => j.id)).catch(() => new Map());
     return (data ?? []).map((j) => {
         const meta = nameById.get(j.provider_id) ?? {};
+        const e = earned.get(j.id);
         return {
             ...withPrompt(j),
             provider_name: meta.name,
-            provider_node_id: meta.node_id
+            provider_node_id: meta.node_id,
+            earned_usd: e ? e.amount_usd : null,
+            earned_status: e?.status ?? null,
+            output_tokens: e?.output_tokens ?? null
         };
     });
 }

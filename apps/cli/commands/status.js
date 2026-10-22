@@ -7,6 +7,7 @@
 
 import { isDaemonAlive, sendToDaemon } from '../lib/ipc.js';
 import { formatEndpoint } from '../lib/network.js';
+import { formatBalance } from './payout.js';
 
 const HELP = `infernet status — show this node's state
 
@@ -98,14 +99,11 @@ export default async function status(args, ctx) {
 
     if (node.role === 'provider') {
         try {
-            const { rows } = await client.listPayments(100);
-            const sum = (list) => list.reduce((a, t) => a + (Number.parseFloat(t.amount_usd) || 0), 0);
-            const outbound = (rows ?? []).filter((t) => t.direction === 'outbound');
-            const confirmed = outbound.filter((t) => t.status === 'confirmed');
-            const pending = outbound.filter((t) => t.status === 'pending');
-            process.stdout.write(
-                `Earnings:   $${sum(confirmed).toFixed(2)} confirmed, $${sum(pending).toFixed(2)} pending (USD)\n`
-            );
+            const earnings = await client.earnings(1);
+            process.stdout.write(formatBalance(earnings?.balance) + '\n');
+            if (!earnings?.config?.subsidy_approved && Number(earnings?.balance?.pending_approval_usd) > 0) {
+                process.stdout.write('            free-job credits are pending approval of the subsidy rate; see `infernet payout list`\n');
+            }
         } catch (err) {
             process.stderr.write(`earnings query failed: ${err?.message ?? err}\n`);
         }

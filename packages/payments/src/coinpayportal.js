@@ -122,10 +122,10 @@ export function apiOrigin(base = env("COINPAY_API_URL", "COINPAYPORTAL_API_BASE_
     }
 }
 
-async function raw(path, { method = "GET", body, headers = {} } = {}) {
+async function raw(path, { method = "GET", body, headers = {}, timeoutMs = 15_000 } = {}) {
     const url = `${apiOrigin()}${path}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
         return await fetch(url, {
             method,
@@ -431,6 +431,57 @@ export async function getPayment(paymentId) {
     if (!paymentId) throw new Error("[coinpayportal] getPayment: paymentId is required");
     const json = await cppFetch(`/api/payments/${encodeURIComponent(paymentId)}`);
     return json.payment ?? json;
+}
+
+/**
+ * Send a crypto payout from the business wallet (POST /api/payouts/create).
+ * CoinPay broadcasts synchronously, so the answer is one of:
+ *
+ *   { outcome: "sent", payoutId, txHash }      broadcast, tx hash known
+ *   { outcome: "failed", error, payoutId? }    CoinPay refused or recorded a
+ *                                              definite failure: nothing sent
+ *   { outcome: "unknown", error }              timeout / network / 5xx /
+ *                                              'indeterminate': it MAY have
+ *                                              been sent, so never retry
+ *                                              without checking the chain
+ *
+ * @param {object} p
+ * @param {string} p.recipientEmail
+ * @param {string} p.recipientWallet
+ * @param {number} p.amountUsd
+ * @param {string} p.cryptocurrency   CoinPay code, e.g. "USDC_POL"
+ * @param {object} [p.metadata]
+ */
+export async function createPayout({ recipientEmail, recipientWallet, amountUsd, cryptocurrency, metadata = {} }) {
+    if (!recipientWallet) throw new Error("[coinpayportal] createPayout: recipientWallet is required");
+    if (!(Number(amountUsd) > 0)) throw new Error("[coinpayportal] createPayout: amountUsd must be > 0");
+    let response;
+    try {
+        response = await raw("/api/payouts/create", {
+            method: "POST",
+            timeoutMs: 90_000,
+            body: {
+                recipient_email: recipientEmail,
+                recipient_wallet: recipientWallet,
+                amount_usd: Number(amountUsd),
+                cryptocurrency,
+                metadata: { property: PROPERTY, ...metadata }
+            }
+        });
+    } catch (err) {
+        return { outcome: "unknown", error: err.message };
+    }
+    const payload = await readJson(response);
+    const payout = payload?.payout ?? null;
+    const status = String(payout?.status ?? "").toLowerCase();
+    if (response.ok && payload?.success !== false && payout?.tx_hash) {
+        return { outcome: "sent", payoutId: payout.id ?? null, txHash: payout.tx_hash };
+    }
+    const error = payload?.error || payload?.message || `HTTP ${response.status}`;
+    if (status === "indeterminate" || response.status >= 500 || (response.ok && !payout?.tx_hash)) {
+        return { outcome: "unknown", error, payoutId: payout?.id ?? null };
+    }
+    return { outcome: "failed", error, payoutId: payout?.id ?? null };
 }
 
 /**

@@ -1,159 +1,78 @@
 # Earnings
 
-## How Payments Work
+## How earnings work
 
-Every completed inference job generates a **Compute Payment Receipt (CPR)**. A CPR is a signed record that proves your node completed a specific job: it includes the job ID, token count, model used, your node's public key, the client's public key, and an on-chain settlement value.
+Every job your node completes is credited to it in the **earnings ledger**: one row per job, per node that worked on it. What a job earns depends on how it was paid for.
 
-CPRs accumulate in your node's account on the control plane. When you run `infernet payout`, the pending CPRs are aggregated into an on-chain transaction that transfers the earned amount to your payout wallet.
+**Paid jobs.** A client opens a CoinPay invoice for the job's `payment_offer`. Your node earns its share of that payment after the house fee (0% today; the site promises no platform spread above gateway fees). The credit shows as *awaiting client payment* until CoinPay confirms the payment, then *confirmed*. A pipeline-parallel job served by several nodes is split the same way its Compute Payment Receipts are: the primary takes `1 / (n + 1)` for orchestration and the rest is weighted by the number of layers each slice served.
 
-## Checking Your Balance
+**Free jobs.** The public `/chat` playground and other unpaid traffic carry no client payment. During the alpha that is all of the traffic, so the house pays a **subsidy per 1,000 output tokens** for it. Subsidy credits show as *pending approval* until the subsidy rate is approved; after that they become *confirmed* at the rate recorded on each job. Jobs completed before the ledger existed (October 2026) were credited retroactively at the same rate.
+
+Output tokens come from the `token_count` your daemon reports when it completes a job. For older daemons and pipeline-parallel jobs that only return text, the control plane estimates about four characters per token.
+
+Short chat replies earn fractions of a cent. The dashboard and the CLI show amounts below one cent to six decimals, so a real credit never reads as `$0.00`.
+
+## You do not need a payout address to earn
+
+Earnings accrue from your first completed job whether or not you have set a payout address. The address is only needed when you withdraw.
+
+## Checking your balance
 
 ```bash
 infernet status
-# Shows: Earnings: 12.84 USDC (unclaimed)
 ```
 
-For more detail:
+```
+Earnings:   $0.0042 pending approval, $0.00 awaiting client payment, $0.00 confirmed
+Payouts:    $0.00 paid, $0.00 requested, $0.00 available to withdraw
+Jobs:       9 credited
+```
+
+For the per-job ledger, your withdrawals and your payout addresses:
 
 ```bash
-infernet payments
+infernet payout list
+infernet payout list --json
 ```
 
+The dashboard (`/dashboard`) shows the same numbers per node, with a **Withdraw** button, and every job row shows what it earned. Your node's public page (`/nodes/<id>`) shows its totals too, unless you made the node private in `/settings`.
+
+The balance is:
+
 ```
-Earnings Summary
-================
-Unclaimed balance:  12.84 USDC
-Paid out (lifetime): 847.22 USDC
-
-Recent jobs (last 24h):
-  job_9a3f2c1d  qwen2.5:14b  312 tokens  0.0031 USDC  2026-04-30 14:23
-  job_8b2e1c3a  llama3.2:3b   89 tokens  0.0009 USDC  2026-04-30 14:19
-  job_7c1d4b2f  qwen2.5:14b  891 tokens  0.0089 USDC  2026-04-30 14:11
-  ...
-
-Total today: 142 jobs, 0.9182 USDC
+available = confirmed earnings - (paid out + withdrawals waiting)
 ```
 
-You can also see this in the dashboard under **Earnings** → **Ledger**.
-
-## Setting Your Payout Address
-
-Before you can receive payments, set your payout wallet address:
+## Setting your payout address
 
 ```bash
-infernet payout --set-address 0xYourWalletAddressHere
+infernet payout set <COIN> <ADDRESS> [--network <name>]
 ```
 
-Or edit `~/.infernet/config.json` directly:
-
-```json
-{
-  "payout_address": "0xYourWalletAddressHere"
-}
-```
-
-The address must be valid for the chain you want to receive payment on. Infernet supports multiple chains — specify which chain when setting the address:
+Supported coins are BTC, BCH, ETH, SOL, POL, BNB, XRP, ADA, DOGE, plus USDT on Ethereum, Polygon and Solana and USDC on Ethereum, Polygon, Solana and Base. The first network listed for a coin is the default, so USDC and USDT go to Ethereum unless you pass `--network`:
 
 ```bash
-# Ethereum mainnet
-infernet payout --set-address 0x... --chain ethereum
-
-# Base
-infernet payout --set-address 0x... --chain base
-
-# Solana
-infernet payout --set-address YourSolanaPublicKey --chain solana
+infernet payout set USDC 0xYourAddress --network polygon
+infernet payout set SOL YourSolanaAddress
 ```
 
-The address is sent to the control plane on the next heartbeat and appears in the dashboard under **Settings → Payout Address**.
+The newest address you set becomes the default.
 
-## Claiming Earnings
+## Withdrawing
 
 ```bash
-infernet payout
+infernet payout request               # the whole available balance
+infernet payout request --amount 10   # part of it
 ```
 
-This initiates an on-chain settlement for your current unclaimed balance. The process:
+A withdrawal needs a confirmed balance at or above the minimum (shown by `infernet payout list`) and a payout address. You can have one request open at a time. Requests are reviewed by the Infernet team and then sent through CoinPay to the address that was your default when you asked; changing the address afterwards does not redirect a request that is already waiting. When it is sent, `infernet payout list` shows the transaction hash.
 
-1. The CLI requests a payout from the control plane
-2. The control plane aggregates all pending CPRs for your node
-3. An on-chain transaction is submitted to transfer the balance to your payout address
-4. The CLI waits for confirmation and shows the transaction hash
+## Which nodes get paid jobs
 
-```
-Initiating payout...
-  Unclaimed balance: 12.84 USDC
-  Destination: 0x1234...abcd
-  Chain: base
-  
-Submitting transaction...
-  Tx hash: 0xabc123...
-  Waiting for confirmation...
-  
-Confirmed! (block 14298741)
-12.84 USDC transferred to 0x1234...abcd
-```
+Jobs are routed by model, not by GPU brand. Any online node that serves the requested model can be picked, including older cards running small models. Serving popular models that fit your VRAM and staying online is what gets a node picked. Paid demand is still to come in the alpha; until it does, free jobs earn the subsidy.
 
-Payout transactions typically confirm within 5–30 seconds on Base, a few minutes on Ethereum mainnet.
+## Payment security
 
-## Payout Minimums
+Credits are tied to the node that completed the job: the completion call is signed with your node's key, and a job can only be completed by the node it was assigned to. Withdrawals go only to the default address on file when the request was made, and only after review.
 
-There's a minimum payout threshold to avoid spending more on gas than you earn. The minimum varies by chain:
-
-| Chain | Minimum Payout |
-|-------|---------------|
-| Base | 1.00 USDC |
-| Ethereum | 10.00 USDC |
-| Polygon | 1.00 USDC |
-| Solana | 1.00 USDC |
-
-If your balance is below the minimum, the payout command will tell you and exit without submitting a transaction.
-
-## Pricing Per Job
-
-Job pricing is set by the network based on:
-
-- **Model**: larger models cost more per token
-- **Token count**: output tokens + input tokens, weighted (output costs ~4x more)
-- **Tier premium**: `>=48gb` tier nodes earn a small premium for serving models others can't
-
-Current approximate rates (subject to network demand):
-
-| Model Size | Rate (per 1K output tokens) |
-|------------|----------------------------|
-| 1B–3B | $0.001 |
-| 7B | $0.002 |
-| 13B–14B | $0.005 |
-| 30B–33B | $0.012 |
-| 70B+ | $0.025 |
-
-These rates are illustrative. The actual network rate is visible in the dashboard under **Earnings → Pricing**.
-
-## Automated Payouts
-
-You can schedule automatic payouts via cron. The `--auto` flag runs the payout non-interactively and only if the balance meets the minimum:
-
-```bash
-# Claim earnings every day at midnight
-0 0 * * * /usr/local/bin/infernet payout --auto >> /var/log/infernet-payout.log 2>&1
-```
-
-Or configure auto-payout in `~/.infernet/config.json`:
-
-```json
-{
-  "auto_payout": true,
-  "auto_payout_threshold": 5.0,
-  "auto_payout_schedule": "daily"
-}
-```
-
-Valid schedule values: `"hourly"`, `"daily"`, `"weekly"`.
-
-## Payment Security
-
-Payments are cryptographically tied to your node's keypair. A CPR is only valid if it's signed by the node that executed the job. The control plane verifies the signature before issuing the on-chain transaction.
-
-This means: even if someone gains access to your payout wallet address, they can't forge CPRs or claim earnings that aren't yours. And even if someone gains access to the control plane, they can't redirect your earnings because the on-chain transaction requires a valid CPR signature.
-
-Keep your node's private key (`~/.infernet/keys/node.key`) secure. Back it up somewhere safe. If you lose it, you can't claim any pending unclaimed earnings, and you'll need to re-register with a new keypair.
+Keep your node's private key safe and backed up. If you lose it you need to register a new node, and the old node's balance has to be moved by hand.
