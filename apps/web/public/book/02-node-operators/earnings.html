@@ -264,189 +264,92 @@
 <h1 class="title">Earnings · The Infernet Book</h1>
 </header>
 <h1 id="earnings">Earnings</h1>
-<h2 id="how-payments-work">How Payments Work</h2>
-<p>Every completed inference job generates a <strong>Compute Payment
-Receipt (CPR)</strong>. A CPR is a signed record that proves your node
-completed a specific job: it includes the job ID, token count, model
-used, your node’s public key, the client’s public key, and an on-chain
-settlement value.</p>
-<p>CPRs accumulate in your node’s account on the control plane. When you
-run <code>infernet payout</code>, the pending CPRs are aggregated into
-an on-chain transaction that transfers the earned amount to your payout
-wallet.</p>
-<h2 id="checking-your-balance">Checking Your Balance</h2>
+<h2 id="how-earnings-work">How earnings work</h2>
+<p>Every job your node completes is credited to it in the
+<strong>earnings ledger</strong>: one row per job, per node that worked
+on it. What a job earns depends on how it was paid for.</p>
+<p><strong>Paid jobs.</strong> A client opens a CoinPay invoice for the
+job’s <code>payment_offer</code>. Your node earns its share of that
+payment after the house fee (0% today; the site promises no platform
+spread above gateway fees). The credit shows as <em>awaiting client
+payment</em> until CoinPay confirms the payment, then
+<em>confirmed</em>. A pipeline-parallel job served by several nodes is
+split the same way its Compute Payment Receipts are: the primary takes
+<code>1 / (n + 1)</code> for orchestration and the rest is weighted by
+the number of layers each slice served.</p>
+<p><strong>Free jobs.</strong> The public <code>/chat</code> playground
+and other unpaid traffic carry no client payment. During the alpha that
+is all of the traffic, so the house pays a <strong>subsidy per 1,000
+output tokens</strong> for it. Subsidy credits show as <em>pending
+approval</em> until the subsidy rate is approved; after that they become
+<em>confirmed</em> at the rate recorded on each job. Jobs completed
+before the ledger existed (October 2026) were credited retroactively at
+the same rate.</p>
+<p>Output tokens come from the <code>token_count</code> your daemon
+reports when it completes a job. For older daemons and pipeline-parallel
+jobs that only return text, the control plane estimates about four
+characters per token.</p>
+<p>Short chat replies earn fractions of a cent. The dashboard and the
+CLI show amounts below one cent to six decimals, so a real credit never
+reads as <code>$0.00</code>.</p>
+<h2 id="you-do-not-need-a-payout-address-to-earn">You do not need a
+payout address to earn</h2>
+<p>Earnings accrue from your first completed job whether or not you have
+set a payout address. The address is only needed when you withdraw.</p>
+<h2 id="checking-your-balance">Checking your balance</h2>
 <div class="sourceCode" id="cb1"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> status</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Shows: Earnings: 12.84 USDC (unclaimed)</span></span></code></pre></div>
-<p>For more detail:</p>
-<div class="sourceCode" id="cb2"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payments</span></code></pre></div>
-<pre><code>Earnings Summary
-================
-Unclaimed balance:  12.84 USDC
-Paid out (lifetime): 847.22 USDC
-
-Recent jobs (last 24h):
-  job_9a3f2c1d  qwen2.5:14b  312 tokens  0.0031 USDC  2026-04-30 14:23
-  job_8b2e1c3a  llama3.2:3b   89 tokens  0.0009 USDC  2026-04-30 14:19
-  job_7c1d4b2f  qwen2.5:14b  891 tokens  0.0089 USDC  2026-04-30 14:11
-  ...
-
-Total today: 142 jobs, 0.9182 USDC</code></pre>
-<p>You can also see this in the dashboard under
-<strong>Earnings</strong> → <strong>Ledger</strong>.</p>
-<h2 id="setting-your-payout-address">Setting Your Payout Address</h2>
-<p>Before you can receive payments, set your payout wallet address:</p>
-<div class="sourceCode" id="cb4"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout <span class="at">--set-address</span> 0xYourWalletAddressHere</span></code></pre></div>
-<p>Or edit <code>~/.infernet/config.json</code> directly:</p>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> status</span></code></pre></div>
+<pre><code>Earnings:   $0.0042 pending approval, $0.00 awaiting client payment, $0.00 confirmed
+Payouts:    $0.00 paid, $0.00 requested, $0.00 available to withdraw
+Jobs:       9 credited</code></pre>
+<p>For the per-job ledger, your withdrawals and your payout
+addresses:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout list</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout list <span class="at">--json</span></span></code></pre></div>
+<p>The dashboard (<code>/dashboard</code>) shows the same numbers per
+node, with a <strong>Withdraw</strong> button, and every job row shows
+what it earned. Your node’s public page (<code>/nodes/&lt;id&gt;</code>)
+shows its totals too, unless you made the node private in
+<code>/settings</code>.</p>
+<p>The balance is:</p>
+<pre><code>available = confirmed earnings - (paid out + withdrawals waiting)</code></pre>
+<h2 id="setting-your-payout-address">Setting your payout address</h2>
 <div class="sourceCode" id="cb5"><pre
-class="sourceCode json"><code class="sourceCode json"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;payout_address&quot;</span><span class="fu">:</span> <span class="st">&quot;0xYourWalletAddressHere&quot;</span></span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
-<p>The address must be valid for the chain you want to receive payment
-on. Infernet supports multiple chains — specify which chain when setting
-the address:</p>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout set <span class="op">&lt;</span>COIN<span class="op">&gt;</span> <span class="op">&lt;</span>ADDRESS<span class="op">&gt;</span> [--network <span class="op">&lt;</span>name<span class="op">&gt;</span>]</span></code></pre></div>
+<p>Supported coins are BTC, BCH, ETH, SOL, POL, BNB, XRP, ADA, DOGE,
+plus USDT on Ethereum, Polygon and Solana and USDC on Ethereum, Polygon,
+Solana and Base. The first network listed for a coin is the default, so
+USDC and USDT go to Ethereum unless you pass <code>--network</code>:</p>
 <div class="sourceCode" id="cb6"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Ethereum mainnet</span></span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout <span class="at">--set-address</span> 0x... <span class="at">--chain</span> ethereum</span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Base</span></span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout <span class="at">--set-address</span> 0x... <span class="at">--chain</span> base</span>
-<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Solana</span></span>
-<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout <span class="at">--set-address</span> YourSolanaPublicKey <span class="at">--chain</span> solana</span></code></pre></div>
-<p>The address is sent to the control plane on the next heartbeat and
-appears in the dashboard under <strong>Settings → Payout
-Address</strong>.</p>
-<h2 id="claiming-earnings">Claiming Earnings</h2>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout set USDC 0xYourAddress <span class="at">--network</span> polygon</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout set SOL YourSolanaAddress</span></code></pre></div>
+<p>The newest address you set becomes the default.</p>
+<h2 id="withdrawing">Withdrawing</h2>
 <div class="sourceCode" id="cb7"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout</span></code></pre></div>
-<p>This initiates an on-chain settlement for your current unclaimed
-balance. The process:</p>
-<ol type="1">
-<li>The CLI requests a payout from the control plane</li>
-<li>The control plane aggregates all pending CPRs for your node</li>
-<li>An on-chain transaction is submitted to transfer the balance to your
-payout address</li>
-<li>The CLI waits for confirmation and shows the transaction hash</li>
-</ol>
-<pre><code>Initiating payout...
-  Unclaimed balance: 12.84 USDC
-  Destination: 0x1234...abcd
-  Chain: base
-  
-Submitting transaction...
-  Tx hash: 0xabc123...
-  Waiting for confirmation...
-  
-Confirmed! (block 14298741)
-12.84 USDC transferred to 0x1234...abcd</code></pre>
-<p>Payout transactions typically confirm within 5–30 seconds on Base, a
-few minutes on Ethereum mainnet.</p>
-<h2 id="payout-minimums">Payout Minimums</h2>
-<p>There’s a minimum payout threshold to avoid spending more on gas than
-you earn. The minimum varies by chain:</p>
-<table>
-<thead>
-<tr class="header">
-<th>Chain</th>
-<th>Minimum Payout</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>Base</td>
-<td>1.00 USDC</td>
-</tr>
-<tr class="even">
-<td>Ethereum</td>
-<td>10.00 USDC</td>
-</tr>
-<tr class="odd">
-<td>Polygon</td>
-<td>1.00 USDC</td>
-</tr>
-<tr class="even">
-<td>Solana</td>
-<td>1.00 USDC</td>
-</tr>
-</tbody>
-</table>
-<p>If your balance is below the minimum, the payout command will tell
-you and exit without submitting a transaction.</p>
-<h2 id="pricing-per-job">Pricing Per Job</h2>
-<p>Job pricing is set by the network based on:</p>
-<ul>
-<li><strong>Model</strong>: larger models cost more per token</li>
-<li><strong>Token count</strong>: output tokens + input tokens, weighted
-(output costs ~4x more)</li>
-<li><strong>Tier premium</strong>: <code>&gt;=48gb</code> tier nodes
-earn a small premium for serving models others can’t</li>
-</ul>
-<p>Current approximate rates (subject to network demand):</p>
-<table>
-<thead>
-<tr class="header">
-<th>Model Size</th>
-<th>Rate (per 1K output tokens)</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>1B–3B</td>
-<td>$0.001</td>
-</tr>
-<tr class="even">
-<td>7B</td>
-<td>$0.002</td>
-</tr>
-<tr class="odd">
-<td>13B–14B</td>
-<td>$0.005</td>
-</tr>
-<tr class="even">
-<td>30B–33B</td>
-<td>$0.012</td>
-</tr>
-<tr class="odd">
-<td>70B+</td>
-<td>$0.025</td>
-</tr>
-</tbody>
-</table>
-<p>These rates are illustrative. The actual network rate is visible in
-the dashboard under <strong>Earnings → Pricing</strong>.</p>
-<h2 id="automated-payouts">Automated Payouts</h2>
-<p>You can schedule automatic payouts via cron. The <code>--auto</code>
-flag runs the payout non-interactively and only if the balance meets the
-minimum:</p>
-<div class="sourceCode" id="cb9"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Claim earnings every day at midnight</span></span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="ex">0</span> 0 <span class="pp">*</span> <span class="pp">*</span> <span class="pp">*</span> /usr/local/bin/infernet payout <span class="at">--auto</span> <span class="op">&gt;&gt;</span> /var/log/infernet-payout.log <span class="dv">2</span><span class="op">&gt;&amp;</span><span class="dv">1</span></span></code></pre></div>
-<p>Or configure auto-payout in <code>~/.infernet/config.json</code>:</p>
-<div class="sourceCode" id="cb10"><pre
-class="sourceCode json"><code class="sourceCode json"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
-<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;auto_payout&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;auto_payout_threshold&quot;</span><span class="fu">:</span> <span class="fl">5.0</span><span class="fu">,</span></span>
-<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;auto_payout_schedule&quot;</span><span class="fu">:</span> <span class="st">&quot;daily&quot;</span></span>
-<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
-<p>Valid schedule values: <code>"hourly"</code>, <code>"daily"</code>,
-<code>"weekly"</code>.</p>
-<h2 id="payment-security">Payment Security</h2>
-<p>Payments are cryptographically tied to your node’s keypair. A CPR is
-only valid if it’s signed by the node that executed the job. The control
-plane verifies the signature before issuing the on-chain
-transaction.</p>
-<p>This means: even if someone gains access to your payout wallet
-address, they can’t forge CPRs or claim earnings that aren’t yours. And
-even if someone gains access to the control plane, they can’t redirect
-your earnings because the on-chain transaction requires a valid CPR
-signature.</p>
-<p>Keep your node’s private key (<code>~/.infernet/keys/node.key</code>)
-secure. Back it up somewhere safe. If you lose it, you can’t claim any
-pending unclaimed earnings, and you’ll need to re-register with a new
-keypair.</p>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout request               <span class="co"># the whole available balance</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="ex">infernet</span> payout request <span class="at">--amount</span> 10   <span class="co"># part of it</span></span></code></pre></div>
+<p>A withdrawal needs a confirmed balance at or above the minimum (shown
+by <code>infernet payout list</code>) and a payout address. You can have
+one request open at a time. Requests are reviewed by the Infernet team
+and then sent through CoinPay to the address that was your default when
+you asked; changing the address afterwards does not redirect a request
+that is already waiting. When it is sent,
+<code>infernet payout list</code> shows the transaction hash.</p>
+<h2 id="which-nodes-get-paid-jobs">Which nodes get paid jobs</h2>
+<p>Jobs are routed by model, not by GPU brand. Any online node that
+serves the requested model can be picked, including older cards running
+small models. Serving popular models that fit your VRAM and staying
+online is what gets a node picked. Paid demand is still to come in the
+alpha; until it does, free jobs earn the subsidy.</p>
+<h2 id="payment-security">Payment security</h2>
+<p>Credits are tied to the node that completed the job: the completion
+call is signed with your node’s key, and a job can only be completed by
+the node it was assigned to. Withdrawals go only to the default address
+on file when the request was made, and only after review.</p>
+<p>Keep your node’s private key safe and backed up. If you lose it you
+need to register a new node, and the old node’s balance has to be moved
+by hand.</p>
 <nav class="book-nav book-nav-bottom"><a href="/book/02-node-operators/index.html" class="book-nav-prev">← Chapter 2: Node Operators</a><span class="book-nav-spacer"></span><a href="/book/02-node-operators/installation.html" class="book-nav-next">Installation →</a></nav>
 </body>
 </html>
