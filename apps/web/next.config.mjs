@@ -28,7 +28,7 @@ const nextConfig = {
       "connect-src 'self' https: wss:",
       "frame-ancestors 'self'",
       "base-uri 'self'",
-      "form-action 'self'",
+      "form-action 'self' https://pit.world", // the footer newsletter form's no-script fallback
       "object-src 'none'"
     ].join("; ");
     return [
