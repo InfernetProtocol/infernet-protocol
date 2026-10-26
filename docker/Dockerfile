@@ -72,7 +72,7 @@ RUN pnpm --filter @infernetprotocol/web build
 # The workspace tree is kept intact as before (non-standalone), so request-
 # time reads such as public/install.sh resolve exactly as they did.
 # ---------------------------------------------------------------------------
-FROM oven/bun:1.4.0-alpine AS bun
+FROM oven/bun:1.4.4-alpine AS bun
 
 FROM alpine:3.24 AS production
 RUN apk add --no-cache libstdc++ libgcc ca-certificates

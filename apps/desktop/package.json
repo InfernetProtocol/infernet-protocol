@@ -20,11 +20,11 @@
   "author": "Infernet Protocol Team",
   "license": "MIT",
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "cross-env": "^7.0.3",
-    "electron": "^39.8.5",
-    "electron-builder": "^24.13.3",
-    "wait-on": "^8.0.3"
+    "concurrently": "^10.0.6",
+    "cross-env": "^10.1.0",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
+    "wait-on": "^9.5.1"
   },
   "dependencies": {},
   "build": {
