@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { getSupabaseAuthClient } from "@/lib/supabase/auth-server";
 import { appUrl } from "@/lib/auth/app-url";
+import { afterSignIn } from "@/lib/credits/sign-in";
+import { INVITE_COOKIE } from "@/lib/credits/core";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +30,7 @@ export async function GET(request) {
     }
 
     const supabase = await getSupabaseAuthClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
         return NextResponse.redirect(
             new URL(`/auth/login?error=${encodeURIComponent(error.message)}`, appUrl())
@@ -38,5 +40,12 @@ export async function GET(request) {
     // Bust the layout's Router Cache so SiteHeader picks up the new
     // session cookie without a hard reload.
     revalidatePath("/", "layout");
-    return NextResponse.redirect(new URL(next, appUrl()));
+
+    // Accept a pending invite (cookie or the code saved at signup), record a
+    // ?ref= attribution and settle any invite bonus. Never blocks sign-in.
+    await afterSignIn(request, data?.user);
+
+    const res = NextResponse.redirect(new URL(next, appUrl()));
+    res.cookies.delete(INVITE_COOKIE);
+    return res;
 }

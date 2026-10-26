@@ -42,6 +42,20 @@ export async function proxy(request) {
     // already poking at our surface area.
     response.headers.set("X-Hiring", "https://infernetprotocol.com/careers");
 
+    // Affiliate links (?ref=<code>): keep the FIRST touch for 30 days in the
+    // referral_code cookie (@profullstack/referrals' name, read by
+    // @profullstack/affiliates' refFromRequest at signup / sign-in).
+    const ref = request.nextUrl.searchParams.get("ref");
+    if (ref && /^[A-Za-z0-9_-]{4,64}$/.test(ref) && !request.cookies.get("referral_code")) {
+        response.cookies.set("referral_code", ref, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "lax",
+            path: "/",
+            maxAge: 30 * 24 * 60 * 60
+        });
+    }
+
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     // If Supabase isn't configured (e.g. local dev without an .env), skip

@@ -4,6 +4,9 @@ import { parseAuthBody, wantsRedirect } from "@/lib/auth/parse-body";
 import { appUrl } from "@/lib/auth/app-url";
 import { COLUMNS, validateProfile, saveSignupProfile } from "@profullstack/profile";
 import { userProfileStore } from "@/lib/data/user-profile";
+import { cookieFrom } from "@/lib/auth/request-user";
+import { INVITE_COOKIE, looksLikeCode } from "@/lib/credits/core";
+import { REF_COOKIE } from "@profullstack/affiliates";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +41,12 @@ export async function POST(request) {
         return NextResponse.json({ error: message, errors: check.errors }, { status: 400 });
     }
 
+    // Invite + ?ref= travel with the account (user_metadata), not only a cookie,
+    // so the confirmation link accepts them from another browser or phone.
+    const inviteCode = [body.invite_code, cookieFrom(request, INVITE_COOKIE)].find((c) => looksLikeCode(c)) ?? null;
+    const refRaw = String(body.ref ?? cookieFrom(request, REF_COOKIE) ?? "").trim();
+    const refCode = /^[A-Za-z0-9_-]{4,64}$/.test(refRaw) ? refRaw : null;
+
     const supabase = await getSupabaseAuthClient();
     const { data, error } = await supabase.auth.signUp({
         email,
@@ -49,7 +58,9 @@ export async function POST(request) {
                 last_name: check.profile.last_name ?? null,
                 company_domain: check.profile.company_domain ?? null,
                 job_title: check.profile.job_title ?? null,
-                linkedin_url: check.profile.linkedin_url ?? null
+                linkedin_url: check.profile.linkedin_url ?? null,
+                ...(inviteCode ? { invite_code: String(inviteCode).trim() } : {}),
+                ...(refCode ? { ref_code: refCode } : {})
             }
         }
     });

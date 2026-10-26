@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { getSupabaseAuthClient } from "@/lib/supabase/auth-server";
 import { parseAuthBody, wantsRedirect } from "@/lib/auth/parse-body";
 import { appUrl } from "@/lib/auth/app-url";
+import { afterSignIn } from "@/lib/credits/sign-in";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ export async function POST(request) {
     const supabase = await getSupabaseAuthClient();
 
     if (password) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data: signedIn, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
             return wantHtml
                 ? NextResponse.redirect(
@@ -41,6 +42,7 @@ export async function POST(request) {
         // Bust the layout's Router Cache so SiteHeader picks up the new
         // session cookie without a hard reload — same trap as logout.
         revalidatePath("/", "layout");
+        await afterSignIn(request, signedIn?.user);
         return wantHtml
             ? NextResponse.redirect(new URL("/dashboard", appUrl()), { status: 303 })
             : NextResponse.json({ ok: true });

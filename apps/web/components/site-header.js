@@ -15,6 +15,7 @@ const SIGNED_IN_NAV = [
     { href: "/deploy", label: "Deploy" },
     { href: "/chat", label: "Chat" },
     { href: "/status", label: "Status" },
+    { href: "/invites", label: "Invites" },
     { href: "/settings", label: "Settings" }
 ];
 
