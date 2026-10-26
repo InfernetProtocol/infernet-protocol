@@ -198,7 +198,7 @@ importers:
         version: 1.2.1(@types/node@26.6.5)
       '@profullstack/footer':
         specifier: latest
-        version: 0.3.0(react@19.3.1)
+        version: 0.4.0(react@19.3.1)
       '@profullstack/form-guard':
         specifier: ^0.2.2
         version: 0.2.2
@@ -1585,8 +1585,8 @@ packages:
     engines: {node: '>=20.0.0'}
     hasBin: true
 
-  '@profullstack/footer@0.3.0':
-    resolution: {integrity: sha512-T95BxnTLRWj0OdEZQwGQkHJCPSBs8VpDATyAIPUqomnC9IRMMvgLEFeION1HSqIvwgHgiC0vbs15ydZyFq99ew==}
+  '@profullstack/footer@0.4.0':
+    resolution: {integrity: sha512-EJZnMUQmWDi9Gzx6BAjogloeaPFFSSCHtHJuC9dsXiOz8M87hfn6Z+Zx9AMYWk8s6xemPrPlkXKGB3PZugkcEA==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -8102,7 +8102,7 @@ snapshots:
     transitivePeerDependencies:
       - '@types/node'
 
-  '@profullstack/footer@0.3.0(react@19.3.1)':
+  '@profullstack/footer@0.4.0(react@19.3.1)':
     optionalDependencies:
       react: 19.3.1
 
