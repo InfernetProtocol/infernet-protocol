@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infernetprotocol.com/schemas/liquid-agent/v1/dataset-manifest.schema.json",
+  "title": "DatasetManifestV1",
+  "description": "A versioned, reviewed set of episodes with fixed splits. dataset_hash is sha256 over the canonical JSON of {episodes, splits} (each episode entry carries its content_hash).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "dataset_id", "version", "created_at", "episodes", "splits", "license", "provenance", "consent", "retention", "redaction", "dataset_hash"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "dataset_manifest" },
+    "dataset_id": { "type": "string", "pattern": "^ds_[A-Za-z0-9_-]{4,64}$" },
+    "name": { "type": "string", "maxLength": 160 },
+    "version": { "type": "integer", "minimum": 1 },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "episodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["episode_id", "content_hash", "task", "split"],
+        "properties": {
+          "episode_id": { "type": "string", "pattern": "^ep_[A-Za-z0-9_-]{4,64}$" },
+          "content_hash": { "$ref": "common.schema.json#/$defs/sha256" },
+          "task": { "$ref": "common.schema.json#/$defs/taskId" },
+          "split": { "enum": ["train", "validation", "test"] },
+          "split_group": { "type": "string", "maxLength": 128 }
+        }
+      }
+    },
+    "splits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "seed", "counts"],
+      "properties": {
+        "strategy": { "enum": ["by_session", "by_task", "by_account", "by_variant"] },
+        "seed": { "type": "integer", "minimum": 0 },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["train", "validation", "test"],
+          "properties": {
+            "train": { "type": "integer", "minimum": 0 },
+            "validation": { "type": "integer", "minimum": 0 },
+            "test": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "license": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": { "enum": ["w3bs", "synthetic", "import"] },
+        "generator": { "type": "string", "maxLength": 128 },
+        "tool_version": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["consent_id", "purposes", "granted_at"],
+      "properties": {
+        "consent_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "purposes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["model_training", "evaluation", "remote_training", "remote_inference"] }
+        },
+        "granted_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "revoked_at": { "anyOf": [{ "$ref": "common.schema.json#/$defs/timestamp" }, { "type": "null" }] }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["days", "delete_on_revoke"],
+      "properties": {
+        "days": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "delete_on_revoke": { "type": "boolean" }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "secret_scan"],
+      "properties": {
+        "profile": { "enum": ["strict", "standard"] },
+        "secret_scan": { "const": "passed" },
+        "scanner_version": { "type": "string", "maxLength": 32 }
+      }
+    },
+    "dataset_hash": { "$ref": "common.schema.json#/$defs/sha256" }
+  }
+}

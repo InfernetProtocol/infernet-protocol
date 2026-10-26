@@ -17,6 +17,10 @@
  *                    OpenDiLoCo). Class C: WAN-tolerant delta exchange.
  *   - "petals"     — pipeline-parallel sharding for fine-tunes across
  *                    volunteer GPUs. Class C-LLM: BigScience's Petals.
+ *   - "liquid"     — temporal policies (CfC/LTC liquid networks, GRU
+ *                    baseline) via the isolated infernet-liquid runtime.
+ *                    Single provider, CPU or GPU. Workload
+ *                    infernet.temporal.train.
  *   - "stub"       — synthetic training run, no GPU required. Default.
  *
  * Auto-selection precedence (only if `opts.backend` is not set):
@@ -25,6 +29,7 @@
  */
 
 import { createDeepspeedBackend } from "./backends/deepspeed.js";
+import { createLiquidBackend } from "./backends/liquid.js";
 import { createOpenDiLoCoBackend } from "./backends/opendiloco.js";
 import { createOpenRLHFBackend } from "./backends/openrlhf.js";
 import { createPetalsBackend } from "./backends/petals.js";
@@ -43,6 +48,8 @@ export async function createTrainer(opts = {}) {
             return createOpenDiLoCoBackend(opts);
         case "petals":
             return createPetalsBackend(opts);
+        case "liquid":
+            return createLiquidBackend(opts);
         case "stub":
             return createStubTrainer(opts);
         default:

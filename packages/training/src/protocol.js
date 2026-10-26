@@ -21,7 +21,7 @@
  *
  * Job config shape (extend as needed; backends ignore fields they don't use):
  *   {
- *     kind: "fine-tune" | "lora" | "rlhf-rollout" | "pretrain",
+ *     kind: "fine-tune" | "lora" | "rlhf-rollout" | "pretrain" | "temporal-policy",
  *     base_model: string,
  *     dataset: { url, sha256?, format?, split? },
  *     hyperparams: { lr?, batch_size?, epochs?, max_steps? },
@@ -48,7 +48,7 @@ export const TMSG = Object.freeze({
     LOG: "log"
 });
 
-export const JOB_KINDS = Object.freeze(["fine-tune", "lora", "rlhf-rollout", "pretrain"]);
+export const JOB_KINDS = Object.freeze(["fine-tune", "lora", "rlhf-rollout", "pretrain", "temporal-policy"]);
 
 export const DONE_REASONS = Object.freeze(["complete", "cancel", "error", "not_implemented"]);
 

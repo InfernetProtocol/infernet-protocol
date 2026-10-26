@@ -30,6 +30,9 @@ importers:
       '@infernetprotocol/engine':
         specifier: workspace:^
         version: link:packages/engine
+      '@infernetprotocol/liquid-agent':
+        specifier: workspace:*
+        version: link:packages/liquid-agent
       vitest:
         specifier: ^3.0.8
         version: 3.2.4(@types/debug@4.1.13)(@types/node@25.6.0)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.1)(yaml@2.8.3)
@@ -51,6 +54,9 @@ importers:
       '@infernetprotocol/gpu':
         specifier: workspace:*
         version: link:../../packages/gpu
+      '@infernetprotocol/liquid-agent':
+        specifier: workspace:*
+        version: link:../../packages/liquid-agent
       '@infernetprotocol/rpc-adapter':
         specifier: workspace:*
         version: link:../../packages/rpc-adapter
@@ -270,6 +276,8 @@ importers:
 
   packages/gpu: {}
 
+  packages/liquid-agent: {}
+
   packages/logger: {}
 
   packages/nim-adapter: {}
@@ -289,6 +297,9 @@ importers:
       '@infernetprotocol/engine':
         specifier: workspace:*
         version: link:../engine
+      '@infernetprotocol/liquid-agent':
+        specifier: workspace:*
+        version: link:../liquid-agent
 
 packages:
 
@@ -1204,7 +1215,7 @@ packages:
 
   '@expo/bunyan@4.0.1':
     resolution: {integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==}
-    engines: {node: '>=0.10.0'}
+    engines: {'0': node >=0.10.0}
 
   '@expo/cli@0.17.13':
     resolution: {integrity: sha512-n13yxOmI3I0JidzMdFCH68tYKGDtK4XlDFk1vysZX7AIRKeDVRsSbHhma5jCla2bDt25RKmJBHA9KtzielwzAA==}

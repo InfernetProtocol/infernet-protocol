@@ -1,0 +1,44 @@
+{
+  "kind": "train_job",
+  "value": {
+    "baselines": [
+      "gru"
+    ],
+    "created_at": "2026-10-25T12:00:00Z",
+    "dataset_hash": "sha256:dce2e7d70920e254b3b04e633dd2ad1383f41d592e2d79506fb42e0c9336c6ec",
+    "dataset_ref": "dataset-bundle.json",
+    "hyperparameters": {
+      "batch_size": 8,
+      "epochs": 2,
+      "feature_dim": 64,
+      "hidden_units": 16,
+      "learning_rate": 0,
+      "seed": 0
+    },
+    "idempotency_key": "fixture-0001-idem",
+    "job_id": "tj_fixture_0001",
+    "kind": "train_job",
+    "limits": {
+      "max_budget_usd": 0,
+      "max_retries": 1,
+      "timeout_s": 600
+    },
+    "model_type": "cfc",
+    "privacy": {
+      "mode": "local_only",
+      "upload_approved": false
+    },
+    "resources": {
+      "device": "cpu",
+      "gpu_required": false,
+      "max_threads": 2,
+      "min_ram_mb": 512
+    },
+    "retention": {
+      "artifact_days": 30,
+      "delete_dataset_after": true
+    },
+    "schema_version": "liquid-agent/v1"
+  },
+  "why": "learning_rate exclusiveMinimum 0"
+}

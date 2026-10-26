@@ -2,7 +2,7 @@
   "name": "@infernetprotocol/training",
   "private": true,
   "version": "0.1.12",
-  "description": "Training orchestration for Infernet — pluggable backends (DeepSpeed/FSDP for trusted clusters, OpenDiLoCo for cross-provider async, Petals for trustless P2P fine-tunes) over a stable async-iterator API.",
+  "description": "Training orchestration for Infernet \u2014 pluggable backends (DeepSpeed/FSDP for trusted clusters, OpenDiLoCo for cross-provider async, Petals for trustless P2P fine-tunes) over a stable async-iterator API.",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.js",
@@ -18,7 +18,8 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@infernetprotocol/engine": "workspace:*"
+    "@infernetprotocol/engine": "workspace:*",
+    "@infernetprotocol/liquid-agent": "workspace:*"
   },
   "repository": {
     "type": "git",

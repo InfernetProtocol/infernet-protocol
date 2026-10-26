@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infernetprotocol.com/schemas/liquid-agent/v1/predict-request.schema.json",
+  "title": "PredictRequestV1",
+  "description": "One observed step sent to a session. prev_action is what was actually executed after the previous proposal (null at the start).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "session_id", "sequence_index", "dt_ms", "observation"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "predict_request" },
+    "session_id": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$" },
+    "model_hash": { "$ref": "common.schema.json#/$defs/sha256" },
+    "sequence_index": { "type": "integer", "minimum": 0 },
+    "dt_ms": { "type": "integer", "minimum": 0 },
+    "task": { "$ref": "common.schema.json#/$defs/taskId" },
+    "observation": { "$ref": "common.schema.json#/$defs/observation" },
+    "prev_action": { "anyOf": [{ "$ref": "common.schema.json#/$defs/action" }, { "type": "null" }] }
+  }
+}

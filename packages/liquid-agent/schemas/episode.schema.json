@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infernetprotocol.com/schemas/liquid-agent/v1/episode.schema.json",
+  "title": "EpisodeV1",
+  "description": "One consented, redacted demonstration of a single task. content_hash is sha256 over the canonical JSON of the episode without content_hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "episode_id", "task", "created_at", "capture", "steps", "labels", "content_hash"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "episode" },
+    "episode_id": { "type": "string", "pattern": "^ep_[A-Za-z0-9_-]{4,64}$" },
+    "task": { "$ref": "common.schema.json#/$defs/taskId" },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "split_group": {
+      "description": "Opaque grouping key (recording session or hashed account) used so one group never spans train and test.",
+      "type": "string",
+      "maxLength": 128
+    },
+    "variant": { "description": "UI layout variant label, for generalisation reports.", "type": "string", "maxLength": 64 },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["consent_id", "redaction_profile", "device_local", "source"],
+      "properties": {
+        "consent_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "redaction_profile": { "enum": ["strict", "standard"] },
+        "device_local": { "type": "boolean" },
+        "source": { "enum": ["w3bs-desktop", "synthetic", "import"] },
+        "app_scope": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 64 } }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["t_ms", "observation", "action", "result"],
+        "properties": {
+          "t_ms": { "type": "integer", "minimum": 0 },
+          "observation": { "$ref": "common.schema.json#/$defs/observation" },
+          "action": { "$ref": "common.schema.json#/$defs/action" },
+          "result": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status"],
+            "properties": {
+              "status": { "enum": ["ok", "error", "blocked", "skipped"] },
+              "error": { "type": "string", "maxLength": 500 }
+            }
+          }
+        }
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["success", "reviewed", "risk"],
+      "properties": {
+        "success": { "type": "boolean" },
+        "reviewed": { "type": "boolean" },
+        "risk": { "enum": ["low", "medium", "high"] },
+        "goal": { "type": "string", "maxLength": 500 },
+        "failure_reason": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "content_hash": { "$ref": "common.schema.json#/$defs/sha256" }
+  }
+}

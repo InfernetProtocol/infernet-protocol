@@ -1,0 +1,88 @@
+{
+  "architecture": {
+    "backbone_units": 64,
+    "family": "cfc",
+    "feature_dim": 64,
+    "hidden_units": 16,
+    "params": 16095,
+    "research": false
+  },
+  "created_at": "2026-10-26T07:22:09.542Z",
+  "eval": {
+    "episodes": 4,
+    "metrics": {
+      "action_accuracy": 0.375,
+      "episode_success": 0.0,
+      "episodes": 4,
+      "external_write_recall": 1.0,
+      "latency_ms_p50": 0.0744,
+      "latency_ms_p95": 0.1179,
+      "step_accuracy": 0.125,
+      "steps": 24,
+      "target_accuracy": 0.25
+    },
+    "split": "validation"
+  },
+  "input_schema": {
+    "encoding": "hashed-bag/v1",
+    "feature_dim": 64,
+    "tasks": [
+      "email.reply_draft",
+      "linkedin.notifications_review",
+      "reddit.post_compose"
+    ],
+    "time_delta": "log1p_seconds"
+  },
+  "kind": "model_manifest",
+  "license": "UNLICENSED-private",
+  "manifest_hash": "sha256:69709bf527cc061bd780ea428d571f1f140d573999fca3bb2a7e77338e3bd6f9",
+  "model_id": "lm_f4daee3297421b91",
+  "output_schema": {
+    "action_types": [
+      "click",
+      "double_click",
+      "type",
+      "key",
+      "scroll",
+      "navigate",
+      "select",
+      "focus",
+      "wait",
+      "submit",
+      "send",
+      "post",
+      "publish",
+      "delete",
+      "done"
+    ],
+    "targets": [
+      "pointer:visible-elements"
+    ]
+  },
+  "runtime": {
+    "lock_hash": "sha256:682b7a9c048b1e899e82eac2b5cb0437607ea6bce8528eb330a72b96aa936b96",
+    "name": "infernet-liquid",
+    "ncps": "1.0.1",
+    "python": "3.12.13",
+    "torch": "2.14.1+cpu",
+    "version": "0.1.0"
+  },
+  "schema_version": "liquid-agent/v1",
+  "training": {
+    "dataset_hash": "sha256:dce2e7d70920e254b3b04e633dd2ad1383f41d592e2d79506fb42e0c9336c6ec",
+    "device": "cpu",
+    "epochs": 2,
+    "finished_at": "2026-10-26T07:22:09.535Z",
+    "learning_rate": 0.005,
+    "seed": 0,
+    "started_at": "2026-10-26T07:22:09.509Z",
+    "train_job_id": "tj_fixture_0001",
+    "train_seconds": 0.026
+  },
+  "weights": {
+    "file": "model.safetensors",
+    "format": "safetensors",
+    "size_bytes": 65836,
+    "weights_hash": "sha256:f4daee3297421b9155d7cb0e198c10f21911cfe38d10f4ff3adec9a401d5ba6d"
+  }
+}

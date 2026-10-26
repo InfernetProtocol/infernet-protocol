@@ -1,0 +1,31 @@
+{
+  "name": "@infernetprotocol/liquid-agent",
+  "version": "0.1.66",
+  "description": "liquid-agent/v1 contract and runtime client for Infernet's temporal-policy family: CfC/LTC liquid neural networks (ncps) with a GRU baseline, trained and served through an isolated, version-locked Python subprocess.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./schemas/*": "./schemas/*"
+  },
+  "files": [
+    "src/**/*.js",
+    "schemas/*.json",
+    "fixtures/**/*.json",
+    "runtime/pyproject.toml",
+    "runtime/requirements.lock",
+    "runtime/requirements-cuda.lock",
+    "runtime/infernet_liquid/*.py",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/InfernetProtocol/infernet-protocol.git",
+    "directory": "packages/liquid-agent"
+  },
+  "homepage": "https://github.com/InfernetProtocol/infernet-protocol#readme"
+}

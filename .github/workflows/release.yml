@@ -102,6 +102,7 @@ jobs:
             --filter "@infernetprotocol/engine" \
             --filter "@infernetprotocol/gpu" \
             --filter "@infernetprotocol/rpc-adapter" \
+            --filter "@infernetprotocol/liquid-agent" \
             --access public \
             --no-git-checks \
             --tag latest

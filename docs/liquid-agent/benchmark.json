@@ -1,0 +1,500 @@
+{
+  "dataset_hash": "sha256:61ca9705e288882d04c475a89562f4939a8ea8db7b451ad97458669d9d01a7c4",
+  "families": {
+    "cfc": {
+      "aggregate": {
+        "action_accuracy": {
+          "max": 0.9888,
+          "mean": 0.9819,
+          "min": 0.9696
+        },
+        "by_task_episode_success": {
+          "email.reply_draft": 0.881,
+          "linkedin.notifications_review": 1.0,
+          "reddit.post_compose": 0.7604
+        },
+        "episode_success": {
+          "max": 0.9167,
+          "mean": 0.8691,
+          "min": 0.7857
+        },
+        "external_write_recall": {
+          "max": 1.0,
+          "mean": 0.875,
+          "min": 0.75
+        },
+        "latency_ms_p50": {
+          "max": 0.0819,
+          "mean": 0.08,
+          "min": 0.0783
+        },
+        "latency_ms_p95": {
+          "max": 0.1264,
+          "mean": 0.1165,
+          "min": 0.1049
+        },
+        "params": 54735,
+        "shift_episode_success": {
+          "mean": 0.0972
+        },
+        "shift_step_accuracy": {
+          "mean": 0.7695
+        },
+        "step_accuracy": {
+          "max": 0.9888,
+          "mean": 0.9819,
+          "min": 0.9696
+        },
+        "target_accuracy": {
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0
+        },
+        "train_seconds": {
+          "mean": 6.4
+        }
+      },
+      "runs": [
+        {
+          "epochs_run": 19,
+          "params": 54735,
+          "seed": 0,
+          "shift": {
+            "action_accuracy": 0.9435,
+            "episode_success": 0.1667,
+            "episodes": 120,
+            "external_write_recall": 1.0,
+            "step_accuracy": 0.7944,
+            "steps": 885,
+            "target_accuracy": 0.7038
+          },
+          "test": {
+            "action_accuracy": 0.9872,
+            "episode_success": 0.9048,
+            "episodes": 84,
+            "external_write_recall": 1.0,
+            "latency_ms_p50": 0.0819,
+            "latency_ms_p95": 0.1182,
+            "step_accuracy": 0.9872,
+            "steps": 624,
+            "target_accuracy": 1.0
+          },
+          "train_seconds": 6.648
+        },
+        {
+          "epochs_run": 26,
+          "params": 54735,
+          "seed": 1,
+          "shift": {
+            "action_accuracy": 0.9367,
+            "episode_success": 0.125,
+            "episodes": 120,
+            "external_write_recall": 1.0,
+            "step_accuracy": 0.7898,
+            "steps": 885,
+            "target_accuracy": 0.6788
+          },
+          "test": {
+            "action_accuracy": 0.9888,
+            "episode_success": 0.9167,
+            "episodes": 84,
+            "external_write_recall": 0.875,
+            "latency_ms_p50": 0.0798,
+            "latency_ms_p95": 0.1264,
+            "step_accuracy": 0.9888,
+            "steps": 624,
+            "target_accuracy": 1.0
+          },
+          "train_seconds": 8.761
+        },
+        {
+          "epochs_run": 11,
+          "params": 54735,
+          "seed": 2,
+          "shift": {
+            "action_accuracy": 0.9446,
+            "episode_success": 0.0,
+            "episodes": 120,
+            "external_write_recall": 0.9,
+            "step_accuracy": 0.7243,
+            "steps": 885,
+            "target_accuracy": 0.5673
+          },
+          "test": {
+            "action_accuracy": 0.9696,
+            "episode_success": 0.7857,
+            "episodes": 84,
+            "external_write_recall": 0.75,
+            "latency_ms_p50": 0.0783,
+            "latency_ms_p95": 0.1049,
+            "step_accuracy": 0.9696,
+            "steps": 624,
+            "target_accuracy": 1.0
+          },
+          "train_seconds": 3.8
+        }
+      ]
+    },
+    "gru": {
+      "aggregate": {
+        "action_accuracy": {
+          "max": 0.9968,
+          "mean": 0.9931,
+          "min": 0.9888
+        },
+        "by_task_episode_success": {
+          "email.reply_draft": 1.0,
+          "linkedin.notifications_review": 1.0,
+          "reddit.post_compose": 0.8646
+        },
+        "episode_success": {
+          "max": 0.9762,
+          "mean": 0.9484,
+          "min": 0.9167
+        },
+        "external_write_recall": {
+          "max": 1.0,
+          "mean": 0.9375,
+          "min": 0.875
+        },
+        "latency_ms_p50": {
+          "max": 0.0541,
+          "mean": 0.053,
+          "min": 0.0523
+        },
+        "latency_ms_p95": {
+          "max": 0.0857,
+          "mean": 0.0811,
+          "min": 0.0734
+        },
+        "params": 54799,
+        "shift_episode_success": {
+          "mean": 0.0083
+        },
+        "shift_step_accuracy": {
+          "mean": 0.7748
+        },
+        "step_accuracy": {
+          "max": 0.9968,
+          "mean": 0.9931,
+          "min": 0.9888
+        },
+        "target_accuracy": {
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0
+        },
+        "train_seconds": {
+          "mean": 8.47
+        }
+      },
+      "runs": [
+        {
+          "epochs_run": 30,
+          "params": 54799,
+          "seed": 0,
+          "shift": {
+            "action_accuracy": 0.9107,
+            "episode_success": 0.0,
+            "episodes": 120,
+            "external_write_recall": 0.925,
+            "step_accuracy": 0.7797,
+            "steps": 885,
+            "target_accuracy": 0.6442
+          },
+          "test": {
+            "action_accuracy": 0.9936,
+            "episode_success": 0.9524,
+            "episodes": 84,
+            "external_write_recall": 0.875,
+            "latency_ms_p50": 0.0525,
+            "latency_ms_p95": 0.0857,
+            "step_accuracy": 0.9936,
+            "steps": 624,
+            "target_accuracy": 1.0
+          },
+          "train_seconds": 9.434
+        },
+        {
+          "epochs_run": 30,
+          "params": 54799,
+          "seed": 1,
+          "shift": {
+            "action_accuracy": 0.9119,
+            "episode_success": 0.025,
+            "episodes": 120,
+            "external_write_recall": 1.0,
+            "step_accuracy": 0.7582,
+            "steps": 885,
+            "target_accuracy": 0.6173
+          },
+          "test": {
+            "action_accuracy": 0.9968,
+            "episode_success": 0.9762,
+            "episodes": 84,
+            "external_write_recall": 0.9375,
+            "latency_ms_p50": 0.0541,
+            "latency_ms_p95": 0.0734,
+            "step_accuracy": 0.9968,
+            "steps": 624,
+            "target_accuracy": 1.0
+          },
+          "train_seconds": 9.685
+        },
+        {
+          "epochs_run": 20,
+          "params": 54799,
+          "seed": 2,
+          "shift": {
+            "action_accuracy": 0.8972,
+            "episode_success": 0.0,
+            "episodes": 120,
+            "external_write_recall": 1.0,
+            "step_accuracy": 0.7864,
+            "steps": 885,
+            "target_accuracy": 0.6635
+          },
+          "test": {
+            "action_accuracy": 0.9888,
+            "episode_success": 0.9167,
+            "episodes": 84,
+            "external_write_recall": 1.0,
+            "latency_ms_p50": 0.0523,
+            "latency_ms_p95": 0.0843,
+            "step_accuracy": 0.9888,
+            "steps": 624,
+            "target_accuracy": 1.0
+          },
+          "train_seconds": 6.299
+        }
+      ]
+    },
+    "ltc": {
+      "aggregate": {
+        "action_accuracy": {
+          "max": 0.9904,
+          "mean": 0.9861,
+          "min": 0.984
+        },
+        "by_task_episode_success": {
+          "email.reply_draft": 0.9048,
+          "linkedin.notifications_review": 1.0,
+          "reddit.post_compose": 0.8125
+        },
+        "episode_success": {
+          "max": 0.9286,
+          "mean": 0.8969,
+          "min": 0.881
+        },
+        "external_write_recall": {
+          "max": 0.9688,
+          "mean": 0.875,
+          "min": 0.8125
+        },
+        "latency_ms_p50": {
+          "max": 0.2556,
+          "mean": 0.2349,
+          "min": 0.2222
+        },
+        "latency_ms_p95": {
+          "max": 0.4084,
+          "mean": 0.3156,
+          "min": 0.2503
+        },
+        "params": 71247,
+        "shift_episode_success": {
+          "mean": 0.0
+        },
+        "shift_step_accuracy": {
+          "mean": 0.742
+        },
+        "step_accuracy": {
+          "max": 0.9904,
+          "mean": 0.9861,
+          "min": 0.984
+        },
+        "target_accuracy": {
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0
+        },
+        "train_seconds": {
+          "mean": 31.66
+        }
+      },
+      "runs": [
+        {
+          "epochs_run": 31,
+          "params": 71247,
+          "seed": 0,
+          "shift": {
+            "action_accuracy": 0.8734,
+            "episode_success": 0.0,
+            "episodes": 120,
+            "external_write_recall": 1.0,
+            "step_accuracy": 0.7266,
+            "steps": 885,
+            "target_accuracy": 0.5731
+          },
+          "test": {
+            "action_accuracy": 0.984,
+            "episode_success": 0.881,
+            "episodes": 84,
+            "external_write_recall": 0.8125,
+            "latency_ms_p50": 0.227,
+            "latency_ms_p95": 0.2881,
+            "step_accuracy": 0.984,
+            "steps": 624,
+            "target_accuracy": 1.0
+          },
+          "train_seconds": 26.464
+        },
+        {
+          "epochs_run": 40,
+          "params": 71247,
+          "seed": 1,
+          "shift": {
+            "action_accuracy": 0.9153,
+            "episode_success": 0.0,
+            "episodes": 120,
+            "external_write_recall": 1.0,
+            "step_accuracy": 0.7729,
+            "steps": 885,
+            "target_accuracy": 0.6365
+          },
+          "test": {
+            "action_accuracy": 0.984,
+            "episode_success": 0.881,
+            "episodes": 84,
+            "external_write_recall": 0.8438,
+            "latency_ms_p50": 0.2556,
+            "latency_ms_p95": 0.4084,
+            "step_accuracy": 0.984,
+            "steps": 624,
+            "target_accuracy": 1.0
+          },
+          "train_seconds": 34.131
+        },
+        {
+          "epochs_run": 40,
+          "params": 71247,
+          "seed": 2,
+          "shift": {
+            "action_accuracy": 0.9017,
+            "episode_success": 0.0,
+            "episodes": 120,
+            "external_write_recall": 1.0,
+            "step_accuracy": 0.7266,
+            "steps": 885,
+            "target_accuracy": 0.5635
+          },
+          "test": {
+            "action_accuracy": 0.9904,
+            "episode_success": 0.9286,
+            "episodes": 84,
+            "external_write_recall": 0.9688,
+            "latency_ms_p50": 0.2222,
+            "latency_ms_p95": 0.2503,
+            "step_accuracy": 0.9904,
+            "steps": 624,
+            "target_accuracy": 1.0
+          },
+          "train_seconds": 34.399
+        }
+      ]
+    }
+  },
+  "held_out_per_task": {
+    "email.reply_draft": 28,
+    "linkedin.notifications_review": 24,
+    "reddit.post_compose": 32
+  },
+  "hyperparameters": {
+    "backbone_units": 64,
+    "batch_size": 16,
+    "early_stop_patience": 8,
+    "epochs": 40,
+    "feature_dim": 256,
+    "hidden_units": 64,
+    "learning_rate": 0.005,
+    "seed": 0
+  },
+  "runtime": {
+    "lock_hash": "sha256:682b7a9c048b1e899e82eac2b5cb0437607ea6bce8528eb330a72b96aa936b96",
+    "name": "infernet-liquid",
+    "ncps": "1.0.1",
+    "python": "3.12.13",
+    "torch": "2.14.1+cpu",
+    "version": "0.1.0"
+  },
+  "script_baseline": {
+    "shift": {
+      "action_accuracy": 0.6181,
+      "by_task": {
+        "email.reply_draft": {
+          "episode_success": 0.0,
+          "episodes": 40,
+          "step_accuracy": 0.1912
+        },
+        "linkedin.notifications_review": {
+          "episode_success": 0.0,
+          "episodes": 40,
+          "step_accuracy": 0.5122
+        },
+        "reddit.post_compose": {
+          "episode_success": 0.0,
+          "episodes": 40,
+          "step_accuracy": 0.4932
+        }
+      },
+      "episode_success": 0.0,
+      "episodes": 120,
+      "external_write_recall": 1.0,
+      "latency_ms_p50": 0.0,
+      "latency_ms_p95": 0.0,
+      "step_accuracy": 0.4056,
+      "steps": 885,
+      "target_accuracy": 0.3019
+    },
+    "test": {
+      "action_accuracy": 0.609,
+      "by_task": {
+        "email.reply_draft": {
+          "episode_success": 0.0,
+          "episodes": 28,
+          "step_accuracy": 0.5215
+        },
+        "linkedin.notifications_review": {
+          "episode_success": 0.0,
+          "episodes": 24,
+          "step_accuracy": 0.662
+        },
+        "reddit.post_compose": {
+          "episode_success": 0.0,
+          "episodes": 32,
+          "step_accuracy": 0.4291
+        }
+      },
+      "episode_success": 0.0,
+      "episodes": 84,
+      "external_write_recall": 1.0,
+      "latency_ms_p50": 0.0,
+      "latency_ms_p95": 0.0,
+      "step_accuracy": 0.5096,
+      "steps": 624,
+      "target_accuracy": 0.5184
+    }
+  },
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "shift_dataset_hash": "sha256:3d5e4f817cedaf8f7f4bf64b43e2b158cb9b2e82e6aadc3314b46e9cfd8a58ea",
+  "shift_episodes": 120,
+  "split_counts": {
+    "test": 84,
+    "train": 328,
+    "validation": 68
+  }
+}

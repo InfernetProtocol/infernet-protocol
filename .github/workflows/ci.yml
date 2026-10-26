@@ -79,3 +79,38 @@ jobs:
             sleep 1
           done
           cat /tmp/web.log; kill "$pid" || true; exit 1
+
+  # Temporal policies: the isolated infernet-liquid Python runtime (CPU lock),
+  # its unit tests and the CLI integration test against the real runtime.
+  liquid-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pnpm install --frozen-lockfile
+      - name: Install the runtime from its lock (what `infernet model runtime setup` does)
+        run: |
+          pnpm --filter @infernetprotocol/cli exec infernet model runtime setup --yes
+          pnpm --filter @infernetprotocol/cli exec infernet model runtime
+      - name: Runtime unit tests
+        working-directory: packages/liquid-agent/runtime
+        run: |
+          PY=$(ls -d ~/.infernet/liquid/cpu-*/bin/python)
+          PYTHONPATH=. "$PY" -m unittest tests.test_runtime -v
+      - name: Fixtures are current
+        working-directory: packages/liquid-agent/runtime
+        run: |
+          PY=$(ls -d ~/.infernet/liquid/cpu-*/bin/python)
+          PYTHONPATH=. "$PY" -m tests.make_fixtures > /dev/null
+          git diff --exit-code -- ../fixtures/contract.json ../fixtures/valid/dataset-bundle.json ../fixtures/valid/episode.json
+      - name: CLI integration against the real runtime
+        run: INFERNET_LIQUID_PYTHON=$(ls -d ~/.infernet/liquid/cpu-*/bin/python) pnpm vitest run tests/liquid-agent.test.js
