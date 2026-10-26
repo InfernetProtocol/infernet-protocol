@@ -27,6 +27,7 @@
     "@profullstack/favicon-generator": "^1.1.4",
     "@profullstack/footer": "latest",
     "@profullstack/form-guard": "^0.1.0",
+    "@profullstack/profile": "0.1.3",
     "@profullstack/x402-gateway": "^0.11.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.49.8",

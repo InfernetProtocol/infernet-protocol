@@ -201,6 +201,9 @@ importers:
       '@profullstack/form-guard':
         specifier: ^0.1.0
         version: 0.1.0
+      '@profullstack/profile':
+        specifier: 0.1.3
+        version: 0.1.3(react@19.2.5)
       '@profullstack/x402-gateway':
         specifier: ^0.11.0
         version: 0.11.0
@@ -1814,6 +1817,22 @@ packages:
     peerDependencies:
       react: '>=18'
     peerDependenciesMeta:
+      react:
+        optional: true
+
+  '@profullstack/profile@0.1.3':
+    resolution: {integrity: sha512-P+VdOqCnNGWa5W8EGLU/ls3hwovRcY8bOBOhWZp3h23sW2LDMFyeWF/pUfO+iiYH3E2Tie2/9xyUnpO4ctwSHw==}
+    engines: {node: '>=20'}
+    hasBin: true
+    peerDependencies:
+      '@libsql/client': '>=0.6.0'
+      postgres: ^3.4.0
+      react: '>=18'
+    peerDependenciesMeta:
+      '@libsql/client':
+        optional: true
+      postgres:
+        optional: true
       react:
         optional: true
 
@@ -8407,6 +8426,10 @@ snapshots:
       sharp: 0.33.5
 
   '@profullstack/footer@0.2.5(react@19.2.5)':
+    optionalDependencies:
+      react: 19.2.5
+
+  '@profullstack/profile@0.1.3(react@19.2.5)':
     optionalDependencies:
       react: 19.2.5
 
