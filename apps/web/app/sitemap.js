@@ -12,6 +12,7 @@ const ROUTES = [
     { path: "/protocol", priority: 0.9, changeFrequency: "weekly" },
     { path: "/docs", priority: 0.9, changeFrequency: "weekly" },
     { path: "/docs/managed-endpoints", priority: 0.7, changeFrequency: "monthly" },
+    { path: "/docs/liquid-agent", priority: 0.7, changeFrequency: "monthly" },
     { path: "/book", priority: 0.7, changeFrequency: "weekly" },
     { path: "/chat", priority: 0.8, changeFrequency: "weekly" },
     { path: "/deploy", priority: 0.7, changeFrequency: "weekly" },
