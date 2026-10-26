@@ -743,6 +743,13 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
                         Managed endpoints
                     </Link>.
                 </p>
+                <p>
+                    Training or serving small temporal policies (CfC/LTC liquid networks, GRU baseline) for desktop
+                    tasks? See{" "}
+                    <Link href="/docs/liquid-agent" className="text-[var(--accent)] hover:underline">
+                        Liquid Agent
+                    </Link>.
+                </p>
                 <p>Submit a chat job (anonymous, IP-rate-limited):</p>
                 <CodeBlock>
 {`curl -sS -X POST https://infernetprotocol.com/api/chat \\
