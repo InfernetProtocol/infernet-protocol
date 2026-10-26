@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@infernetprotocol/logger": "workspace:*",
-    "@supabase/supabase-js": "^2.49.8"
+    "@supabase/supabase-js": "^2.118.0"
   },
   "repository": {
     "type": "git",
