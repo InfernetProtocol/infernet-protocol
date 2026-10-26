@@ -1,0 +1,44 @@
+{
+  "dt_ms": 0,
+  "kind": "predict_request",
+  "model_hash": "sha256:f4daee3297421b9155d7cb0e198c10f21911cfe38d10f4ff3adec9a401d5ba6d",
+  "observation": {
+    "app": "mail",
+    "elements": [
+      {
+        "name": "Calendar",
+        "role": "link"
+      },
+      {
+        "name": "Drafts",
+        "role": "link"
+      },
+      {
+        "name": "Spam",
+        "role": "link"
+      },
+      {
+        "name": "Settings",
+        "role": "link"
+      },
+      {
+        "name": "Sent",
+        "role": "link"
+      },
+      {
+        "name": "Compose",
+        "role": "button"
+      },
+      {
+        "name": "Inbox",
+        "role": "link"
+      }
+    ],
+    "url_pattern": "mail://home"
+  },
+  "prev_action": null,
+  "schema_version": "liquid-agent/v1",
+  "sequence_index": 0,
+  "session_id": "sess-fixture-1",
+  "task": "email.reply_draft"
+}

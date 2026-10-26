@@ -1,0 +1,14 @@
+[project]
+name = "infernet-liquid"
+version = "0.1.0"
+description = "Infernet temporal-policy runtime: CfC/LTC liquid networks and a GRU baseline over a stdio JSON contract."
+requires-python = ">=3.11"
+license = "MIT"
+# Exact pins. requirements.lock (uv pip compile --universal --generate-hashes)
+# is what installs; these lines exist so the lock can be regenerated.
+dependencies = [
+  "torch==2.14.1",
+  "ncps==1.0.1",
+  "safetensors==0.8.0",
+  "numpy==2.4.6",
+]

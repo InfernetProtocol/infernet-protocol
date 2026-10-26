@@ -29,6 +29,7 @@ import {
 import { recommendModels } from "../lib/recommender.js";
 import { resolveClientOptions } from "../lib/reservations-client.js";
 import { fetchNodeModels, formatNodeModels } from "../lib/node-models.js";
+import { TEMPORAL_HELP, TEMPORAL_SUBCOMMANDS, runTemporal } from "./model-temporal.js";
 
 const HELP = `infernet model — manage models served by this node
 
@@ -60,7 +61,7 @@ Examples:
 
 Defaults are stored in ~/.config/infernet/config.json under engine.*
 and consumed by the daemon and \`infernet chat\`.
-`;
+${TEMPORAL_HELP}`;
 
 const DEFAULT_HOST = "http://localhost:11434";
 
@@ -575,6 +576,15 @@ export default async function model(args) {
     const positional = args.positional ?? [];
     const sub = positional[0];
     const arg = positional[1];
+
+    if (TEMPORAL_SUBCOMMANDS.has(sub)) {
+        try {
+            return await runTemporal(sub, args);
+        } catch (err) {
+            process.stderr.write(`error: ${err?.code ? `${err.code}: ` : ""}${err?.message ?? err}\n`);
+            return 1;
+        }
+    }
 
     const cfg = (await loadConfig()) ?? {};
     const host = resolveHost(cfg);

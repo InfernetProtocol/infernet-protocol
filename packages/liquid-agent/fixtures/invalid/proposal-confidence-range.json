@@ -1,0 +1,31 @@
+{
+  "kind": "action_proposal",
+  "value": {
+    "abstain_reason": null,
+    "action": {
+      "target": {
+        "name": "Post",
+        "role": "button"
+      },
+      "type": "post"
+    },
+    "alternatives": [
+      {
+        "action": {
+          "type": "wait"
+        },
+        "p": 0.05
+      }
+    ],
+    "confidence": 1.5,
+    "kind": "action_proposal",
+    "latency_ms": 0.2,
+    "model_hash": "sha256:f4daee3297421b9155d7cb0e198c10f21911cfe38d10f4ff3adec9a401d5ba6d",
+    "requires_approval": true,
+    "schema_version": "liquid-agent/v1",
+    "sequence_index": 3,
+    "session_id": "sess-fixture-1",
+    "uncertainty": 0.12
+  },
+  "why": "confidence maximum 1"
+}

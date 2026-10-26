@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infernetprotocol.com/schemas/liquid-agent/v1/model-manifest.schema.json",
+  "title": "ModelManifestV1",
+  "description": "Describes one exported temporal policy. The model is identified everywhere by weights.weights_hash (the model hash). manifest_hash covers every field except manifest_hash and signature.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "model_id", "created_at", "architecture", "weights", "runtime", "input_schema", "output_schema", "training", "eval", "license", "manifest_hash"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "model_manifest" },
+    "model_id": { "type": "string", "pattern": "^lm_[A-Za-z0-9_-]{4,64}$" },
+    "name": { "type": "string", "maxLength": 160 },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "hidden_units", "feature_dim", "params"],
+      "properties": {
+        "family": { "$ref": "common.schema.json#/$defs/family" },
+        "hidden_units": { "type": "integer", "minimum": 1 },
+        "feature_dim": { "type": "integer", "minimum": 1 },
+        "backbone_units": { "type": "integer", "minimum": 1 },
+        "params": { "type": "integer", "minimum": 1 },
+        "research": { "type": "boolean" }
+      }
+    },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "file", "weights_hash", "size_bytes"],
+      "properties": {
+        "format": { "const": "safetensors" },
+        "file": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+        "weights_hash": { "$ref": "common.schema.json#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "runtime": { "$ref": "common.schema.json#/$defs/runtimeRef" },
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "feature_dim", "time_delta"],
+      "properties": {
+        "encoding": { "const": "hashed-bag/v1" },
+        "feature_dim": { "type": "integer", "minimum": 1 },
+        "time_delta": { "const": "log1p_seconds" },
+        "tasks": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/taskId" } }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_types", "targets"],
+      "properties": {
+        "action_types": { "type": "array", "minItems": 1, "items": { "$ref": "common.schema.json#/$defs/actionType" } },
+        "targets": { "type": "array", "minItems": 1, "items": { "type": "string", "maxLength": 230 } }
+      }
+    },
+    "training": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_hash", "seed", "epochs", "device", "started_at", "finished_at"],
+      "properties": {
+        "train_job_id": { "type": "string", "pattern": "^tj_[A-Za-z0-9_-]{4,64}$" },
+        "dataset_hash": { "$ref": "common.schema.json#/$defs/sha256" },
+        "seed": { "type": "integer", "minimum": 0 },
+        "epochs": { "type": "integer", "minimum": 1 },
+        "learning_rate": { "type": "number" },
+        "device": { "type": "string", "maxLength": 32 },
+        "started_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "finished_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "train_seconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "eval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["split", "metrics"],
+      "properties": {
+        "split": { "enum": ["validation", "test"] },
+        "episodes": { "type": "integer", "minimum": 0 },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": { "type": "number" },
+          "required": ["action_accuracy", "target_accuracy", "step_accuracy", "episode_success"]
+        }
+      }
+    },
+    "license": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "manifest_hash": { "$ref": "common.schema.json#/$defs/sha256" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "public_key", "sig"],
+      "properties": {
+        "alg": { "const": "ed25519" },
+        "public_key": { "type": "string", "maxLength": 128 },
+        "sig": { "type": "string", "maxLength": 256 }
+      }
+    }
+  }
+}

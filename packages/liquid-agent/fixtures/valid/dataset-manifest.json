@@ -1,0 +1,126 @@
+{
+  "consent": {
+    "consent_id": "synthetic",
+    "granted_at": "2026-10-25T12:00:00Z",
+    "purposes": [
+      "model_training",
+      "evaluation"
+    ]
+  },
+  "created_at": "2026-10-25T12:00:00Z",
+  "dataset_hash": "sha256:dce2e7d70920e254b3b04e633dd2ad1383f41d592e2d79506fb42e0c9336c6ec",
+  "dataset_id": "ds_syn_3_4",
+  "episodes": [
+    {
+      "content_hash": "sha256:252f9609047a61f694e0bba93740e561277ed10a59372fb7a6f8f7dc8a118e13",
+      "episode_id": "ep_syn_email_3_0000",
+      "split": "train",
+      "split_group": "email-s0",
+      "task": "email.reply_draft"
+    },
+    {
+      "content_hash": "sha256:63462c8edd2d5627bea7318db8687334821397850dff10a923b2b708a612d72a",
+      "episode_id": "ep_syn_email_3_0001",
+      "split": "train",
+      "split_group": "email-s0",
+      "task": "email.reply_draft"
+    },
+    {
+      "content_hash": "sha256:7b088d03d6cb1255198e70696a3c243f86bf430350fb2d3894d3652e874eaa1a",
+      "episode_id": "ep_syn_email_3_0002",
+      "split": "train",
+      "split_group": "email-s0",
+      "task": "email.reply_draft"
+    },
+    {
+      "content_hash": "sha256:1fa97d4de7b6f142648fd7ad6d8b3eba1d2c77f3007c395ea0bef0dd9535760a",
+      "episode_id": "ep_syn_email_3_0003",
+      "split": "train",
+      "split_group": "email-s0",
+      "task": "email.reply_draft"
+    },
+    {
+      "content_hash": "sha256:7c5a85d86398f2a9f47189bb6b8bc54769ae417640a24c27523c458e1f528e86",
+      "episode_id": "ep_syn_reddit_3_0000",
+      "split": "train",
+      "split_group": "reddit-s0",
+      "task": "reddit.post_compose"
+    },
+    {
+      "content_hash": "sha256:a48a28621dbec4048ad3452cb85f7aba274edb1b65daf5bc625e657666b0a9f2",
+      "episode_id": "ep_syn_reddit_3_0001",
+      "split": "train",
+      "split_group": "reddit-s0",
+      "task": "reddit.post_compose"
+    },
+    {
+      "content_hash": "sha256:cac89cc4a373e056af096a638240054a6d1037b131bec8bd74ed6941178dd3d1",
+      "episode_id": "ep_syn_reddit_3_0002",
+      "split": "train",
+      "split_group": "reddit-s0",
+      "task": "reddit.post_compose"
+    },
+    {
+      "content_hash": "sha256:47db4567c3d888b41821eb305989d446da85d76fda9728e27cbd12177b376e4e",
+      "episode_id": "ep_syn_reddit_3_0003",
+      "split": "train",
+      "split_group": "reddit-s0",
+      "task": "reddit.post_compose"
+    },
+    {
+      "content_hash": "sha256:0b6b3b593b1276dc3f1c6d166b6068a983089556925b828cb54341b5f557f6c3",
+      "episode_id": "ep_syn_linkedin_3_0000",
+      "split": "validation",
+      "split_group": "linkedin-s0",
+      "task": "linkedin.notifications_review"
+    },
+    {
+      "content_hash": "sha256:9973221a778516739a0e4ce833de9f74220825937e3aad518de943d81f3e9b21",
+      "episode_id": "ep_syn_linkedin_3_0001",
+      "split": "validation",
+      "split_group": "linkedin-s0",
+      "task": "linkedin.notifications_review"
+    },
+    {
+      "content_hash": "sha256:b0dc03a1c2d536d55f5ab90e967a90bd9e92a885d95ecfbb05b22e8106b77cb7",
+      "episode_id": "ep_syn_linkedin_3_0002",
+      "split": "validation",
+      "split_group": "linkedin-s0",
+      "task": "linkedin.notifications_review"
+    },
+    {
+      "content_hash": "sha256:1dd5ca683ab10c494f2440bb6ae97bb3f13cbd5f4d0e40c30032cf29e06da9f5",
+      "episode_id": "ep_syn_linkedin_3_0003",
+      "split": "validation",
+      "split_group": "linkedin-s0",
+      "task": "linkedin.notifications_review"
+    }
+  ],
+  "kind": "dataset_manifest",
+  "license": "CC0-1.0",
+  "name": "Synthetic mock desktop traces",
+  "provenance": {
+    "generator": "infernet-liquid synth",
+    "source": "synthetic"
+  },
+  "redaction": {
+    "profile": "strict",
+    "scanner_version": "1",
+    "secret_scan": "passed"
+  },
+  "retention": {
+    "days": null,
+    "delete_on_revoke": true
+  },
+  "schema_version": "liquid-agent/v1",
+  "splits": {
+    "counts": {
+      "test": 0,
+      "train": 8,
+      "validation": 4
+    },
+    "seed": 3,
+    "strategy": "by_session"
+  },
+  "version": 1
+}

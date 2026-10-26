@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infernetprotocol.com/schemas/liquid-agent/v1/inference-session.schema.json",
+  "title": "InferenceSessionV1",
+  "description": "A sticky, stateful inference session on one serving worker. sequence_index is the last accepted step (-1 before the first); the next request must carry sequence_index + 1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "session_id", "model_hash", "created_at", "expires_at", "ttl_s", "sequence_index", "state"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "inference_session" },
+    "session_id": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$" },
+    "model_hash": { "$ref": "common.schema.json#/$defs/sha256" },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "ttl_s": { "type": "integer", "minimum": 1, "maximum": 86400 },
+    "sequence_index": { "type": "integer", "minimum": -1 },
+    "state": { "enum": ["active", "closed", "expired"] },
+    "checkpoint_ref": { "$ref": "common.schema.json#/$defs/sha256OrNull" },
+    "worker": { "description": "Serving worker identity for affinity (peer id or 'local').", "type": "string", "maxLength": 128 },
+    "account_scope": { "description": "Opaque hash of the account/tenant; sessions never share state across scopes.", "type": "string", "maxLength": 128 }
+  }
+}

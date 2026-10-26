@@ -1,0 +1,6 @@
+{
+  "bundle_dataset_hash": "sha256:dce2e7d70920e254b3b04e633dd2ad1383f41d592e2d79506fb42e0c9336c6ec",
+  "episode_content_hash": "sha256:252f9609047a61f694e0bba93740e561277ed10a59372fb7a6f8f7dc8a118e13",
+  "schema_version": "liquid-agent/v1",
+  "schemas_hash": "sha256:b8c14ae7a6148406e7ad923f9660ed68068b0fbac65cb8679d68afd6cd80a2b0"
+}

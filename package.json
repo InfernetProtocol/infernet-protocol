@@ -27,6 +27,7 @@
     "@infernetprotocol/auth": "workspace:*",
     "@infernetprotocol/cli": "workspace:*",
     "@infernetprotocol/engine": "workspace:^",
+    "@infernetprotocol/liquid-agent": "workspace:*",
     "vitest": "^3.0.8"
   },
   "pnpm": {

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infernetprotocol.com/schemas/liquid-agent/v1/action-proposal.schema.json",
+  "title": "ActionProposalV1",
+  "description": "A policy's proposed next UI action. A proposal never authorises anything: requires_approval is advisory and executors apply their own stricter gate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "session_id", "sequence_index", "model_hash", "action", "confidence", "uncertainty", "requires_approval", "abstain_reason"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "action_proposal" },
+    "session_id": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$" },
+    "sequence_index": { "type": "integer", "minimum": 0 },
+    "model_hash": { "$ref": "common.schema.json#/$defs/sha256" },
+    "action": { "anyOf": [{ "$ref": "common.schema.json#/$defs/action" }, { "type": "null" }] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "uncertainty": { "description": "Normalised entropy of the action-type distribution, 0 = certain, 1 = uniform.", "type": "number", "minimum": 0, "maximum": 1 },
+    "alternatives": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "p"],
+        "properties": {
+          "action": { "$ref": "common.schema.json#/$defs/action" },
+          "p": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "requires_approval": { "type": "boolean" },
+    "abstain_reason": {
+      "anyOf": [
+        { "enum": ["low_confidence", "unknown_target", "out_of_schema", "stale_session", "kill_switch", "policy_off"] },
+        { "type": "null" }
+      ]
+    },
+    "latency_ms": { "type": "number", "minimum": 0 }
+  }
+}

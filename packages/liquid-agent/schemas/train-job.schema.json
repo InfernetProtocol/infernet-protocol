@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infernetprotocol.com/schemas/liquid-agent/v1/train-job.schema.json",
+  "title": "TrainJobV1",
+  "description": "A single-node training request for workload infernet.temporal.train.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "job_id", "idempotency_key", "created_at", "dataset_hash", "model_type", "hyperparameters", "resources", "limits", "privacy"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "kind": { "const": "train_job" },
+    "job_id": { "type": "string", "pattern": "^tj_[A-Za-z0-9_-]{4,64}$" },
+    "idempotency_key": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "dataset_hash": { "$ref": "common.schema.json#/$defs/sha256" },
+    "dataset_ref": { "description": "Where the worker reads the bundle: a local path, https URL or c0mpute:// content address. Hash-verified before use.", "type": "string", "maxLength": 2048 },
+    "model_type": { "$ref": "common.schema.json#/$defs/family" },
+    "baselines": { "type": "array", "uniqueItems": true, "maxItems": 3, "items": { "$ref": "common.schema.json#/$defs/family" } },
+    "hyperparameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hidden_units", "epochs", "learning_rate", "seed"],
+      "properties": {
+        "hidden_units": { "type": "integer", "minimum": 4, "maximum": 1024 },
+        "epochs": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "learning_rate": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "batch_size": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "seed": { "type": "integer", "minimum": 0 },
+        "feature_dim": { "type": "integer", "minimum": 32, "maximum": 8192 },
+        "backbone_units": { "type": "integer", "minimum": 4, "maximum": 1024 },
+        "early_stop_patience": { "type": "integer", "minimum": 0, "maximum": 1000 }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device"],
+      "properties": {
+        "device": { "enum": ["auto", "cpu", "cuda", "mps"] },
+        "gpu_required": { "type": "boolean" },
+        "min_ram_mb": { "type": "integer", "minimum": 0 },
+        "max_threads": { "type": "integer", "minimum": 1, "maximum": 512 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeout_s", "max_retries", "max_budget_usd"],
+      "properties": {
+        "timeout_s": { "type": "integer", "minimum": 1, "maximum": 604800 },
+        "max_retries": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "max_budget_usd": { "type": "number", "minimum": 0 }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "upload_approved"],
+      "properties": {
+        "mode": { "enum": ["local_only", "trusted_worker"] },
+        "upload_approved": { "type": "boolean" },
+        "worker_allowlist": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 128 } }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_days": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "delete_dataset_after": { "type": "boolean" }
+      }
+    },
+    "runtime": { "$ref": "common.schema.json#/$defs/runtimeRef" }
+  }
+}

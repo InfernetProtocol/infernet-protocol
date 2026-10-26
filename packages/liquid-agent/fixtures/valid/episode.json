@@ -1,0 +1,270 @@
+{
+  "capture": {
+    "app_scope": [
+      "mail"
+    ],
+    "consent_id": "synthetic",
+    "device_local": true,
+    "redaction_profile": "strict",
+    "source": "synthetic"
+  },
+  "content_hash": "sha256:252f9609047a61f694e0bba93740e561277ed10a59372fb7a6f8f7dc8a118e13",
+  "created_at": "2026-10-25T12:00:00Z",
+  "episode_id": "ep_syn_email_3_0000",
+  "kind": "episode",
+  "labels": {
+    "goal": "Reply to the unread message and save the reply as a draft",
+    "reviewed": true,
+    "risk": "low",
+    "success": true
+  },
+  "schema_version": "liquid-agent/v1",
+  "split_group": "email-s0",
+  "steps": [
+    {
+      "action": {
+        "target": {
+          "name": "Inbox",
+          "role": "link"
+        },
+        "type": "click"
+      },
+      "observation": {
+        "app": "mail",
+        "elements": [
+          {
+            "name": "Calendar",
+            "role": "link"
+          },
+          {
+            "name": "Drafts",
+            "role": "link"
+          },
+          {
+            "name": "Spam",
+            "role": "link"
+          },
+          {
+            "name": "Settings",
+            "role": "link"
+          },
+          {
+            "name": "Sent",
+            "role": "link"
+          },
+          {
+            "name": "Compose",
+            "role": "button"
+          },
+          {
+            "name": "Inbox",
+            "role": "link"
+          }
+        ],
+        "url_pattern": "mail://home"
+      },
+      "result": {
+        "status": "ok"
+      },
+      "t_ms": 0
+    },
+    {
+      "action": {
+        "target": {
+          "name": "Unread · From Ari: Contract draft",
+          "role": "row"
+        },
+        "type": "click"
+      },
+      "observation": {
+        "app": "mail",
+        "elements": [
+          {
+            "name": "From Jo: Lunch?",
+            "role": "row"
+          },
+          {
+            "name": "From Dana: Re: roadmap",
+            "role": "row"
+          },
+          {
+            "name": "Unread · From Ari: Contract draft",
+            "role": "row"
+          },
+          {
+            "name": "From Noor: Team offsite",
+            "role": "row"
+          },
+          {
+            "name": "Compose",
+            "role": "button"
+          },
+          {
+            "name": "Inbox",
+            "role": "link"
+          }
+        ],
+        "url_pattern": "mail://inbox"
+      },
+      "result": {
+        "status": "ok"
+      },
+      "t_ms": 664
+    },
+    {
+      "action": {
+        "target": {
+          "name": "Reply",
+          "role": "button"
+        },
+        "type": "click"
+      },
+      "observation": {
+        "app": "mail",
+        "elements": [
+          {
+            "name": "Delete",
+            "role": "button"
+          },
+          {
+            "name": "Mark unread",
+            "role": "button"
+          },
+          {
+            "name": "Reply",
+            "role": "button"
+          },
+          {
+            "name": "Forward",
+            "role": "button"
+          },
+          {
+            "name": "Archive",
+            "role": "button"
+          },
+          {
+            "name": "From Ari",
+            "role": "text"
+          }
+        ],
+        "url_pattern": "mail://message"
+      },
+      "result": {
+        "status": "ok"
+      },
+      "t_ms": 1878
+    },
+    {
+      "action": {
+        "target": {
+          "name": "Message body",
+          "role": "textbox"
+        },
+        "text_redacted": true,
+        "type": "type"
+      },
+      "observation": {
+        "app": "mail",
+        "elements": [
+          {
+            "name": "Save draft",
+            "role": "button"
+          },
+          {
+            "name": "Message body",
+            "role": "textbox"
+          },
+          {
+            "name": "Send",
+            "role": "button"
+          },
+          {
+            "name": "Discard",
+            "role": "button"
+          },
+          {
+            "name": "Attach",
+            "role": "button"
+          }
+        ],
+        "focus": {
+          "name": "Message body",
+          "role": "textbox"
+        },
+        "url_pattern": "mail://compose"
+      },
+      "result": {
+        "status": "ok"
+      },
+      "t_ms": 2516
+    },
+    {
+      "action": {
+        "target": {
+          "name": "Save draft",
+          "role": "button"
+        },
+        "type": "click"
+      },
+      "observation": {
+        "app": "mail",
+        "elements": [
+          {
+            "name": "Save draft",
+            "role": "button"
+          },
+          {
+            "name": "Message body",
+            "role": "textbox"
+          },
+          {
+            "name": "Send",
+            "role": "button"
+          },
+          {
+            "name": "Discard",
+            "role": "button"
+          },
+          {
+            "name": "Attach",
+            "role": "button"
+          }
+        ],
+        "focus": {
+          "name": "Message body",
+          "role": "textbox"
+        },
+        "url_pattern": "mail://compose"
+      },
+      "result": {
+        "status": "ok"
+      },
+      "t_ms": 8648
+    },
+    {
+      "action": {
+        "type": "done"
+      },
+      "observation": {
+        "app": "mail",
+        "elements": [
+          {
+            "name": "Draft saved",
+            "role": "text"
+          },
+          {
+            "name": "Inbox",
+            "role": "link"
+          }
+        ],
+        "url_pattern": "mail://compose"
+      },
+      "result": {
+        "status": "ok"
+      },
+      "t_ms": 9161
+    }
+  ],
+  "task": "email.reply_draft",
+  "variant": "v0"
+}

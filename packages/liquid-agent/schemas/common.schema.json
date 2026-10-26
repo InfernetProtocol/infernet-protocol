@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infernetprotocol.com/schemas/liquid-agent/v1/common.schema.json",
+  "title": "liquid-agent/v1 shared definitions",
+  "$defs": {
+    "schemaVersion": { "const": "liquid-agent/v1" },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "sha256OrNull": {
+      "anyOf": [
+        { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        { "type": "null" }
+      ]
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "taskId": { "type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$", "maxLength": 96 },
+    "family": { "enum": ["cfc", "ltc", "gru"] },
+    "actionType": {
+      "enum": [
+        "click",
+        "double_click",
+        "type",
+        "key",
+        "scroll",
+        "navigate",
+        "select",
+        "focus",
+        "wait",
+        "submit",
+        "send",
+        "post",
+        "publish",
+        "delete",
+        "done"
+      ]
+    },
+    "element": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "name"],
+      "properties": {
+        "role": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 160 },
+        "id": { "type": "string", "maxLength": 128 }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "$ref": "#/$defs/actionType" },
+        "target": { "$ref": "#/$defs/element" },
+        "text": { "type": "string", "maxLength": 2000 },
+        "text_redacted": { "type": "boolean" },
+        "key": { "type": "string", "maxLength": 64 },
+        "url_pattern": { "type": "string", "maxLength": 256 },
+        "amount": { "type": "number" }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app"],
+      "properties": {
+        "app": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "url_pattern": { "type": "string", "maxLength": 256 },
+        "ui_tree_ref": { "$ref": "#/$defs/sha256OrNull" },
+        "image_ref": { "$ref": "#/$defs/sha256OrNull" },
+        "focus": { "$ref": "#/$defs/element" },
+        "elements": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/element" } },
+        "loading": { "type": "boolean" }
+      }
+    },
+    "runtimeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "lock_hash"],
+      "properties": {
+        "name": { "const": "infernet-liquid" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "lock_hash": { "$ref": "#/$defs/sha256" },
+        "python": { "type": "string" },
+        "torch": { "type": "string" },
+        "ncps": { "type": "string" }
+      }
+    }
+  }
+}

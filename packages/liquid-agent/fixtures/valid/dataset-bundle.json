@@ -1,0 +1,3747 @@
+{
+  "episodes": [
+    {
+      "capture": {
+        "app_scope": [
+          "mail"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:252f9609047a61f694e0bba93740e561277ed10a59372fb7a6f8f7dc8a118e13",
+      "created_at": "2026-10-25T12:00:00Z",
+      "episode_id": "ep_syn_email_3_0000",
+      "kind": "episode",
+      "labels": {
+        "goal": "Reply to the unread message and save the reply as a draft",
+        "reviewed": true,
+        "risk": "low",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "email-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "Inbox",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Calendar",
+                "role": "link"
+              },
+              {
+                "name": "Drafts",
+                "role": "link"
+              },
+              {
+                "name": "Spam",
+                "role": "link"
+              },
+              {
+                "name": "Settings",
+                "role": "link"
+              },
+              {
+                "name": "Sent",
+                "role": "link"
+              },
+              {
+                "name": "Compose",
+                "role": "button"
+              },
+              {
+                "name": "Inbox",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://home"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Unread · From Ari: Contract draft",
+              "role": "row"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "From Jo: Lunch?",
+                "role": "row"
+              },
+              {
+                "name": "From Dana: Re: roadmap",
+                "role": "row"
+              },
+              {
+                "name": "Unread · From Ari: Contract draft",
+                "role": "row"
+              },
+              {
+                "name": "From Noor: Team offsite",
+                "role": "row"
+              },
+              {
+                "name": "Compose",
+                "role": "button"
+              },
+              {
+                "name": "Inbox",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://inbox"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 664
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Reply",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Delete",
+                "role": "button"
+              },
+              {
+                "name": "Mark unread",
+                "role": "button"
+              },
+              {
+                "name": "Reply",
+                "role": "button"
+              },
+              {
+                "name": "Forward",
+                "role": "button"
+              },
+              {
+                "name": "Archive",
+                "role": "button"
+              },
+              {
+                "name": "From Ari",
+                "role": "text"
+              }
+            ],
+            "url_pattern": "mail://message"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1878
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Message body",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Message body",
+                "role": "textbox"
+              },
+              {
+                "name": "Send",
+                "role": "button"
+              },
+              {
+                "name": "Discard",
+                "role": "button"
+              },
+              {
+                "name": "Attach",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Message body",
+              "role": "textbox"
+            },
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 2516
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Save draft",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Message body",
+                "role": "textbox"
+              },
+              {
+                "name": "Send",
+                "role": "button"
+              },
+              {
+                "name": "Discard",
+                "role": "button"
+              },
+              {
+                "name": "Attach",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Message body",
+              "role": "textbox"
+            },
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 8648
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Draft saved",
+                "role": "text"
+              },
+              {
+                "name": "Inbox",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 9161
+        }
+      ],
+      "task": "email.reply_draft",
+      "variant": "v0"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "mail"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:63462c8edd2d5627bea7318db8687334821397850dff10a923b2b708a612d72a",
+      "created_at": "2026-10-25T12:01:00Z",
+      "episode_id": "ep_syn_email_3_0001",
+      "kind": "episode",
+      "labels": {
+        "goal": "Reply to the unread message and save the reply as a draft",
+        "reviewed": true,
+        "risk": "low",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "email-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "Mail",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Sent",
+                "role": "link"
+              },
+              {
+                "name": "Archive",
+                "role": "link"
+              },
+              {
+                "name": "Drafts",
+                "role": "link"
+              },
+              {
+                "name": "New message",
+                "role": "button"
+              },
+              {
+                "name": "Mail",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://home"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Loading",
+                "role": "progressbar"
+              }
+            ],
+            "loading": true,
+            "url_pattern": "mail://inbox"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 293
+        },
+        {
+          "action": {
+            "target": {
+              "name": "New · From Kim: Design review",
+              "role": "row"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "From Lee: Design review",
+                "role": "row"
+              },
+              {
+                "name": "From Ari: Team offsite",
+                "role": "row"
+              },
+              {
+                "name": "New · From Kim: Design review",
+                "role": "row"
+              },
+              {
+                "name": "From Mei: Invoice 1042",
+                "role": "row"
+              },
+              {
+                "name": "From Jo: Contract draft",
+                "role": "row"
+              },
+              {
+                "name": "From Noor: Contract draft",
+                "role": "row"
+              },
+              {
+                "name": "New message",
+                "role": "button"
+              },
+              {
+                "name": "Mail",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://inbox"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1205
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Reply",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Archive",
+                "role": "button"
+              },
+              {
+                "name": "Reply",
+                "role": "button"
+              },
+              {
+                "name": "Delete",
+                "role": "button"
+              },
+              {
+                "name": "Forward",
+                "role": "button"
+              },
+              {
+                "name": "Mark unread",
+                "role": "button"
+              },
+              {
+                "name": "From Kim",
+                "role": "text"
+              }
+            ],
+            "url_pattern": "mail://message"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1836
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Write your reply",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Write your reply",
+                "role": "textbox"
+              },
+              {
+                "name": "Attach",
+                "role": "button"
+              },
+              {
+                "name": "Save as draft",
+                "role": "button"
+              },
+              {
+                "name": "Send",
+                "role": "button"
+              },
+              {
+                "name": "Discard",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Write your reply",
+              "role": "textbox"
+            },
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 2540
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Save as draft",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Write your reply",
+                "role": "textbox"
+              },
+              {
+                "name": "Attach",
+                "role": "button"
+              },
+              {
+                "name": "Save as draft",
+                "role": "button"
+              },
+              {
+                "name": "Send",
+                "role": "button"
+              },
+              {
+                "name": "Discard",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Write your reply",
+              "role": "textbox"
+            },
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 22869
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Draft saved",
+                "role": "text"
+              },
+              {
+                "name": "Mail",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 23933
+        }
+      ],
+      "task": "email.reply_draft",
+      "variant": "v1"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "mail"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:7b088d03d6cb1255198e70696a3c243f86bf430350fb2d3894d3652e874eaa1a",
+      "created_at": "2026-10-25T12:02:00Z",
+      "episode_id": "ep_syn_email_3_0002",
+      "kind": "episode",
+      "labels": {
+        "goal": "Reply to the unread message and save the reply as a draft",
+        "reviewed": true,
+        "risk": "low",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "email-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "All inboxes",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Spam",
+                "role": "link"
+              },
+              {
+                "name": "Compose",
+                "role": "button"
+              },
+              {
+                "name": "Archive",
+                "role": "link"
+              },
+              {
+                "name": "All inboxes",
+                "role": "link"
+              },
+              {
+                "name": "Drafts",
+                "role": "link"
+              },
+              {
+                "name": "Sent",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://home"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Unread · From Uma: Contract draft",
+              "role": "row"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "From Pat: Design review",
+                "role": "row"
+              },
+              {
+                "name": "From Dana: Invoice 1042",
+                "role": "row"
+              },
+              {
+                "name": "From Mei: Lunch?",
+                "role": "row"
+              },
+              {
+                "name": "Unread · From Uma: Contract draft",
+                "role": "row"
+              },
+              {
+                "name": "Compose",
+                "role": "button"
+              },
+              {
+                "name": "All inboxes",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://inbox"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 906
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Reply to sender",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Mark unread",
+                "role": "button"
+              },
+              {
+                "name": "Delete",
+                "role": "button"
+              },
+              {
+                "name": "Reply to sender",
+                "role": "button"
+              },
+              {
+                "name": "Archive",
+                "role": "button"
+              },
+              {
+                "name": "Forward",
+                "role": "button"
+              },
+              {
+                "name": "From Uma",
+                "role": "text"
+              }
+            ],
+            "url_pattern": "mail://message"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1566
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Body",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Body",
+                "role": "textbox"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Discard",
+                "role": "button"
+              },
+              {
+                "name": "Attach",
+                "role": "button"
+              },
+              {
+                "name": "Send",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Body",
+              "role": "textbox"
+            },
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 2297
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Save draft",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Body",
+                "role": "textbox"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Discard",
+                "role": "button"
+              },
+              {
+                "name": "Attach",
+                "role": "button"
+              },
+              {
+                "name": "Send",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Body",
+              "role": "textbox"
+            },
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 7141
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Draft saved",
+                "role": "text"
+              },
+              {
+                "name": "All inboxes",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 7604
+        }
+      ],
+      "task": "email.reply_draft",
+      "variant": "v2"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "mail"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:1fa97d4de7b6f142648fd7ad6d8b3eba1d2c77f3007c395ea0bef0dd9535760a",
+      "created_at": "2026-10-25T12:03:00Z",
+      "episode_id": "ep_syn_email_3_0003",
+      "kind": "episode",
+      "labels": {
+        "goal": "Reply to the unread message and save the reply as a draft",
+        "reviewed": true,
+        "risk": "low",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "email-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "Inbox",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Drafts",
+                "role": "link"
+              },
+              {
+                "name": "Compose",
+                "role": "button"
+              },
+              {
+                "name": "Sent",
+                "role": "link"
+              },
+              {
+                "name": "Inbox",
+                "role": "link"
+              },
+              {
+                "name": "Spam",
+                "role": "link"
+              },
+              {
+                "name": "Contacts",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://home"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Loading",
+                "role": "progressbar"
+              }
+            ],
+            "loading": true,
+            "url_pattern": "mail://inbox"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 254
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Unread · From Noor: Quick question",
+              "role": "row"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "From Kim: Contract draft",
+                "role": "row"
+              },
+              {
+                "name": "Unread · From Noor: Quick question",
+                "role": "row"
+              },
+              {
+                "name": "From Dana: Invoice 1042",
+                "role": "row"
+              },
+              {
+                "name": "From Sam: Team offsite",
+                "role": "row"
+              },
+              {
+                "name": "From Pat: Flight details",
+                "role": "row"
+              },
+              {
+                "name": "Compose",
+                "role": "button"
+              },
+              {
+                "name": "Inbox",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://inbox"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1427
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Reply",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Mark unread",
+                "role": "button"
+              },
+              {
+                "name": "Archive",
+                "role": "button"
+              },
+              {
+                "name": "Reply",
+                "role": "button"
+              },
+              {
+                "name": "Delete",
+                "role": "button"
+              },
+              {
+                "name": "Forward",
+                "role": "button"
+              },
+              {
+                "name": "From Noor",
+                "role": "text"
+              }
+            ],
+            "url_pattern": "mail://message"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 3779
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Message body",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Message body",
+                "role": "textbox"
+              },
+              {
+                "name": "Discard",
+                "role": "button"
+              },
+              {
+                "name": "Attach",
+                "role": "button"
+              },
+              {
+                "name": "Send",
+                "role": "button"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Message body",
+              "role": "textbox"
+            },
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 4193
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Save draft",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Message body",
+                "role": "textbox"
+              },
+              {
+                "name": "Discard",
+                "role": "button"
+              },
+              {
+                "name": "Attach",
+                "role": "button"
+              },
+              {
+                "name": "Send",
+                "role": "button"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Message body",
+              "role": "textbox"
+            },
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 13864
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "mail",
+            "elements": [
+              {
+                "name": "Draft saved",
+                "role": "text"
+              },
+              {
+                "name": "Inbox",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "mail://compose"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 14653
+        }
+      ],
+      "task": "email.reply_draft",
+      "variant": "v0"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "browser"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:7c5a85d86398f2a9f47189bb6b8bc54769ae417640a24c27523c458e1f528e86",
+      "created_at": "2026-11-01T10:40:00Z",
+      "episode_id": "ep_syn_reddit_3_0000",
+      "kind": "episode",
+      "labels": {
+        "goal": "Compose a post in the joined subreddit, preview it, then publish (needs approval)",
+        "reviewed": true,
+        "risk": "medium",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "reddit-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "r/homelab (joined)",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "r/homelab (joined)",
+                "role": "link"
+              },
+              {
+                "name": "Search",
+                "role": "textbox"
+              },
+              {
+                "name": "r/rust",
+                "role": "link"
+              },
+              {
+                "name": "r/linux",
+                "role": "link"
+              },
+              {
+                "name": "r/devops",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Create post",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Post: Team offsite",
+                "role": "link"
+              },
+              {
+                "name": "New",
+                "role": "link"
+              },
+              {
+                "name": "Hot",
+                "role": "link"
+              },
+              {
+                "name": "Post: Contract draft",
+                "role": "link"
+              },
+              {
+                "name": "Top",
+                "role": "link"
+              },
+              {
+                "name": "Create post",
+                "role": "button"
+              },
+              {
+                "name": "Post: Hiring update",
+                "role": "link"
+              },
+              {
+                "name": "Post: Lunch?",
+                "role": "link"
+              },
+              {
+                "name": "Joined",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 445
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Title",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Body text (optional)",
+                "role": "textbox"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              },
+              {
+                "name": "Title",
+                "role": "textbox"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Preview",
+                "role": "button"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Title",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1049
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Body text (optional)",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Body text (optional)",
+                "role": "textbox"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              },
+              {
+                "name": "Title",
+                "role": "textbox"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Preview",
+                "role": "button"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Title",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 4301
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Preview",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Body text (optional)",
+                "role": "textbox"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              },
+              {
+                "name": "Title",
+                "role": "textbox"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Preview",
+                "role": "button"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Body text (optional)",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 35182
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Edit",
+                "role": "button"
+              },
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 37189
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Post",
+              "role": "button"
+            },
+            "type": "post"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Edit",
+                "role": "button"
+              },
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 38220
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Posted",
+                "role": "text"
+              },
+              {
+                "name": "Hot",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/comments/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 38926
+        }
+      ],
+      "task": "reddit.post_compose",
+      "variant": "v0"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "browser"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:a48a28621dbec4048ad3452cb85f7aba274edb1b65daf5bc625e657666b0a9f2",
+      "created_at": "2026-11-01T10:41:00Z",
+      "episode_id": "ep_syn_reddit_3_0001",
+      "kind": "episode",
+      "labels": {
+        "goal": "Compose a post in the joined subreddit, preview it, then publish (needs approval)",
+        "reviewed": true,
+        "risk": "medium",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "reddit-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "r/webdev (joined)",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "r/selfhosted",
+                "role": "link"
+              },
+              {
+                "name": "r/webdev (joined)",
+                "role": "link"
+              },
+              {
+                "name": "Search",
+                "role": "textbox"
+              },
+              {
+                "name": "r/python",
+                "role": "link"
+              },
+              {
+                "name": "r/rust",
+                "role": "link"
+              },
+              {
+                "name": "r/homelab",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Loading",
+                "role": "progressbar"
+              }
+            ],
+            "loading": true,
+            "url_pattern": "reddit.mock/r/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 335
+        },
+        {
+          "action": {
+            "target": {
+              "name": "New post",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "New",
+                "role": "link"
+              },
+              {
+                "name": "Post: Re: roadmap",
+                "role": "link"
+              },
+              {
+                "name": "Hot",
+                "role": "link"
+              },
+              {
+                "name": "Post: Quick question",
+                "role": "link"
+              },
+              {
+                "name": "Joined",
+                "role": "button"
+              },
+              {
+                "name": "New post",
+                "role": "button"
+              },
+              {
+                "name": "Top",
+                "role": "link"
+              },
+              {
+                "name": "Post: Flight details",
+                "role": "link"
+              },
+              {
+                "name": "Post: Hiring update",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1116
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Title",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "button"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Text",
+                "role": "textbox"
+              },
+              {
+                "name": "Title",
+                "role": "textbox"
+              },
+              {
+                "name": "Publish",
+                "role": "button"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              }
+            ],
+            "focus": {
+              "name": "Title",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1687
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Text",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "button"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Text",
+                "role": "textbox"
+              },
+              {
+                "name": "Title",
+                "role": "textbox"
+              },
+              {
+                "name": "Publish",
+                "role": "button"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              }
+            ],
+            "focus": {
+              "name": "Title",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 8637
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Preview",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "button"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Text",
+                "role": "textbox"
+              },
+              {
+                "name": "Title",
+                "role": "textbox"
+              },
+              {
+                "name": "Publish",
+                "role": "button"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              }
+            ],
+            "focus": {
+              "name": "Text",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 26653
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              },
+              {
+                "name": "Publish",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 28391
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              },
+              {
+                "name": "Publish",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 28805
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              },
+              {
+                "name": "Publish",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 29407
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Publish",
+              "role": "button"
+            },
+            "type": "post"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              },
+              {
+                "name": "Publish",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 31975
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Posted",
+                "role": "text"
+              },
+              {
+                "name": "Hot",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/comments/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 32340
+        }
+      ],
+      "task": "reddit.post_compose",
+      "variant": "v1"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "browser"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:cac89cc4a373e056af096a638240054a6d1037b131bec8bd74ed6941178dd3d1",
+      "created_at": "2026-11-01T10:42:00Z",
+      "episode_id": "ep_syn_reddit_3_0002",
+      "kind": "episode",
+      "labels": {
+        "goal": "Compose a post in the joined subreddit, preview it, then publish (needs approval)",
+        "reviewed": true,
+        "risk": "medium",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "reddit-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "r/sysadmin (member)",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "r/sysadmin (member)",
+                "role": "link"
+              },
+              {
+                "name": "r/webdev",
+                "role": "link"
+              },
+              {
+                "name": "r/linux",
+                "role": "link"
+              },
+              {
+                "name": "r/python",
+                "role": "link"
+              },
+              {
+                "name": "r/rust",
+                "role": "link"
+              },
+              {
+                "name": "Search",
+                "role": "textbox"
+              }
+            ],
+            "url_pattern": "reddit.mock/"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Create a post",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Post: Quick question",
+                "role": "link"
+              },
+              {
+                "name": "Post: Quick question",
+                "role": "link"
+              },
+              {
+                "name": "Top",
+                "role": "link"
+              },
+              {
+                "name": "Joined",
+                "role": "button"
+              },
+              {
+                "name": "Post: Team offsite",
+                "role": "link"
+              },
+              {
+                "name": "Create a post",
+                "role": "button"
+              },
+              {
+                "name": "Post: Flight details",
+                "role": "link"
+              },
+              {
+                "name": "Hot",
+                "role": "link"
+              },
+              {
+                "name": "New",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 822
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Post title",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Body",
+                "role": "textbox"
+              },
+              {
+                "name": "Post title",
+                "role": "textbox"
+              },
+              {
+                "name": "Preview post",
+                "role": "button"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Post title",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1344
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Body",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Body",
+                "role": "textbox"
+              },
+              {
+                "name": "Post title",
+                "role": "textbox"
+              },
+              {
+                "name": "Preview post",
+                "role": "button"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Post title",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 9534
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Preview post",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Body",
+                "role": "textbox"
+              },
+              {
+                "name": "Post title",
+                "role": "textbox"
+              },
+              {
+                "name": "Preview post",
+                "role": "button"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Body",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 49196
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 49728
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 50633
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 50933
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Post",
+              "role": "button"
+            },
+            "type": "post"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 52337
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Posted",
+                "role": "text"
+              },
+              {
+                "name": "Hot",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/comments/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 52809
+        }
+      ],
+      "task": "reddit.post_compose",
+      "variant": "v2"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "browser"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:47db4567c3d888b41821eb305989d446da85d76fda9728e27cbd12177b376e4e",
+      "created_at": "2026-11-01T10:43:00Z",
+      "episode_id": "ep_syn_reddit_3_0003",
+      "kind": "episode",
+      "labels": {
+        "goal": "Compose a post in the joined subreddit, preview it, then publish (needs approval)",
+        "reviewed": true,
+        "risk": "medium",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "reddit-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "r/devops (joined)",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "r/homelab",
+                "role": "link"
+              },
+              {
+                "name": "r/linux",
+                "role": "link"
+              },
+              {
+                "name": "Search",
+                "role": "textbox"
+              },
+              {
+                "name": "r/rust",
+                "role": "link"
+              },
+              {
+                "name": "r/devops (joined)",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Loading",
+                "role": "progressbar"
+              }
+            ],
+            "loading": true,
+            "url_pattern": "reddit.mock/r/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 333
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Create post",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "New",
+                "role": "link"
+              },
+              {
+                "name": "Joined",
+                "role": "button"
+              },
+              {
+                "name": "Create post",
+                "role": "button"
+              },
+              {
+                "name": "Post: Quick question",
+                "role": "link"
+              },
+              {
+                "name": "Hot",
+                "role": "link"
+              },
+              {
+                "name": "Post: Design review",
+                "role": "link"
+              },
+              {
+                "name": "Top",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1169
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Title",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "button"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              },
+              {
+                "name": "Body text (optional)",
+                "role": "textbox"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Title",
+                "role": "textbox"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Title",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 3222
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Body text (optional)",
+              "role": "textbox"
+            },
+            "text_redacted": true,
+            "type": "type"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "button"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              },
+              {
+                "name": "Body text (optional)",
+                "role": "textbox"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Title",
+                "role": "textbox"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Title",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 7748
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Preview",
+              "role": "button"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "button"
+              },
+              {
+                "name": "Rules",
+                "role": "link"
+              },
+              {
+                "name": "Body text (optional)",
+                "role": "textbox"
+              },
+              {
+                "name": "Save draft",
+                "role": "button"
+              },
+              {
+                "name": "Title",
+                "role": "textbox"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "focus": {
+              "name": "Body text (optional)",
+              "role": "textbox"
+            },
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 14490
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 16349
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 16724
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Post",
+              "role": "button"
+            },
+            "type": "post"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Preview",
+                "role": "text"
+              },
+              {
+                "name": "Edit",
+                "role": "button"
+              },
+              {
+                "name": "Post",
+                "role": "button"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/submit"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 19222
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Posted",
+                "role": "text"
+              },
+              {
+                "name": "Hot",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "reddit.mock/r/*/comments/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 20169
+        }
+      ],
+      "task": "reddit.post_compose",
+      "variant": "v0"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "browser"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:0b6b3b593b1276dc3f1c6d166b6068a983089556925b828cb54341b5f557f6c3",
+      "created_at": "2026-11-08T09:20:00Z",
+      "episode_id": "ep_syn_linkedin_3_0000",
+      "kind": "episode",
+      "labels": {
+        "goal": "Open notifications, scroll to the end of the new ones and open the newest",
+        "reviewed": true,
+        "risk": "low",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "linkedin-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "Notifications",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Ravi posted: Lunch?",
+                "role": "article"
+              },
+              {
+                "name": "Jobs",
+                "role": "link"
+              },
+              {
+                "name": "Home",
+                "role": "link"
+              },
+              {
+                "name": "Sam posted: Lunch?",
+                "role": "article"
+              },
+              {
+                "name": "Kim posted: Team offsite",
+                "role": "article"
+              },
+              {
+                "name": "My Network",
+                "role": "link"
+              },
+              {
+                "name": "Messaging",
+                "role": "link"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/feed"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "type": "wait"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Loading",
+                "role": "progressbar"
+              }
+            ],
+            "loading": true,
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 339
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Ravi liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Noor endorsed you",
+                "role": "listitem"
+              },
+              {
+                "name": "Mei liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Lee liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1854
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Tom mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "Jo liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Sam shared your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 2638
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Ari liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Ravi endorsed you",
+                "role": "listitem"
+              },
+              {
+                "name": "Tom commented on your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 3145
+        },
+        {
+          "action": {
+            "target": {
+              "name": "New · Tom mentioned you",
+              "role": "listitem"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "New · Tom mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "Lee mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "No more new notifications",
+                "role": "text"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 4009
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Like",
+                "role": "button"
+              },
+              {
+                "name": "Reply",
+                "role": "button"
+              },
+              {
+                "name": "New · Tom mentioned you",
+                "role": "text"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 4683
+        }
+      ],
+      "task": "linkedin.notifications_review",
+      "variant": "v0"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "browser"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:9973221a778516739a0e4ce833de9f74220825937e3aad518de943d81f3e9b21",
+      "created_at": "2026-11-08T09:21:00Z",
+      "episode_id": "ep_syn_linkedin_3_0001",
+      "kind": "episode",
+      "labels": {
+        "goal": "Open notifications, scroll to the end of the new ones and open the newest",
+        "reviewed": true,
+        "risk": "low",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "linkedin-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "Notifications",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Notifications",
+                "role": "link"
+              },
+              {
+                "name": "Jobs",
+                "role": "link"
+              },
+              {
+                "name": "Messaging",
+                "role": "link"
+              },
+              {
+                "name": "Pat posted: Invoice 1042",
+                "role": "article"
+              },
+              {
+                "name": "My Network",
+                "role": "link"
+              },
+              {
+                "name": "Home",
+                "role": "link"
+              },
+              {
+                "name": "Noor posted: Quick question",
+                "role": "article"
+              }
+            ],
+            "url_pattern": "linkedin.mock/feed"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Dana liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Mei mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "Ari viewed your profile",
+                "role": "listitem"
+              },
+              {
+                "name": "Lee viewed your profile",
+                "role": "listitem"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 799
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Uma liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Ravi shared your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Pat shared your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1231
+        },
+        {
+          "action": {
+            "target": {
+              "name": "Unread · Ravi mentioned you",
+              "role": "listitem"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Lee mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "Unread · Ravi mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "You're all caught up",
+                "role": "text"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 2369
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Like",
+                "role": "button"
+              },
+              {
+                "name": "Reply",
+                "role": "button"
+              },
+              {
+                "name": "Unread · Ravi mentioned you",
+                "role": "text"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 2959
+        }
+      ],
+      "task": "linkedin.notifications_review",
+      "variant": "v1"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "browser"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:b0dc03a1c2d536d55f5ab90e967a90bd9e92a885d95ecfbb05b22e8106b77cb7",
+      "created_at": "2026-11-08T09:22:00Z",
+      "episode_id": "ep_syn_linkedin_3_0002",
+      "kind": "episode",
+      "labels": {
+        "goal": "Open notifications, scroll to the end of the new ones and open the newest",
+        "reviewed": true,
+        "risk": "low",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "linkedin-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "Alerts",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Alerts",
+                "role": "link"
+              },
+              {
+                "name": "Mei posted: Flight details",
+                "role": "article"
+              },
+              {
+                "name": "Ravi posted: Weekend plans",
+                "role": "article"
+              },
+              {
+                "name": "My Network",
+                "role": "link"
+              },
+              {
+                "name": "Home",
+                "role": "link"
+              },
+              {
+                "name": "Messaging",
+                "role": "link"
+              },
+              {
+                "name": "Jobs",
+                "role": "link"
+              },
+              {
+                "name": "Ari posted: Lunch?",
+                "role": "article"
+              }
+            ],
+            "url_pattern": "linkedin.mock/feed"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Pat commented on your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Lee commented on your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Kim liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Kim viewed your profile",
+                "role": "listitem"
+              },
+              {
+                "name": "Alerts",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 952
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Mei liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Ari viewed your profile",
+                "role": "listitem"
+              },
+              {
+                "name": "Kim mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "Alerts",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1443
+        },
+        {
+          "action": {
+            "target": {
+              "name": "New · Tom endorsed you",
+              "role": "listitem"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Lee liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "New · Tom endorsed you",
+                "role": "listitem"
+              },
+              {
+                "name": "No more new notifications",
+                "role": "text"
+              },
+              {
+                "name": "Alerts",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 2216
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Like",
+                "role": "button"
+              },
+              {
+                "name": "Reply",
+                "role": "button"
+              },
+              {
+                "name": "New · Tom endorsed you",
+                "role": "text"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 2586
+        }
+      ],
+      "task": "linkedin.notifications_review",
+      "variant": "v2"
+    },
+    {
+      "capture": {
+        "app_scope": [
+          "browser"
+        ],
+        "consent_id": "synthetic",
+        "device_local": true,
+        "redaction_profile": "strict",
+        "source": "synthetic"
+      },
+      "content_hash": "sha256:1dd5ca683ab10c494f2440bb6ae97bb3f13cbd5f4d0e40c30032cf29e06da9f5",
+      "created_at": "2026-11-08T09:23:00Z",
+      "episode_id": "ep_syn_linkedin_3_0003",
+      "kind": "episode",
+      "labels": {
+        "goal": "Open notifications, scroll to the end of the new ones and open the newest",
+        "reviewed": true,
+        "risk": "low",
+        "success": true
+      },
+      "schema_version": "liquid-agent/v1",
+      "split_group": "linkedin-s0",
+      "steps": [
+        {
+          "action": {
+            "target": {
+              "name": "Notifications",
+              "role": "link"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Home",
+                "role": "link"
+              },
+              {
+                "name": "Messaging",
+                "role": "link"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              },
+              {
+                "name": "Mei posted: Team offsite",
+                "role": "article"
+              },
+              {
+                "name": "My Network",
+                "role": "link"
+              },
+              {
+                "name": "Ravi posted: Weekend plans",
+                "role": "article"
+              },
+              {
+                "name": "Jobs",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/feed"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 0
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Kim endorsed you",
+                "role": "listitem"
+              },
+              {
+                "name": "Jo commented on your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Mei shared your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 504
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Lee endorsed you",
+                "role": "listitem"
+              },
+              {
+                "name": "Pat mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "Tom shared your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1035
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Jo commented on your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Jo commented on your post",
+                "role": "listitem"
+              },
+              {
+                "name": "Dana viewed your profile",
+                "role": "listitem"
+              },
+              {
+                "name": "Uma viewed your profile",
+                "role": "listitem"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 1954
+        },
+        {
+          "action": {
+            "amount": 5,
+            "type": "scroll"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Mei mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "Mei liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "Ari viewed your profile",
+                "role": "listitem"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 2852
+        },
+        {
+          "action": {
+            "target": {
+              "name": "New · Lee liked your comment",
+              "role": "listitem"
+            },
+            "type": "click"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Ari mentioned you",
+                "role": "listitem"
+              },
+              {
+                "name": "Mei shared your post",
+                "role": "listitem"
+              },
+              {
+                "name": "New · Lee liked your comment",
+                "role": "listitem"
+              },
+              {
+                "name": "No more new notifications",
+                "role": "text"
+              },
+              {
+                "name": "Notifications",
+                "role": "link"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 4271
+        },
+        {
+          "action": {
+            "type": "done"
+          },
+          "observation": {
+            "app": "browser",
+            "elements": [
+              {
+                "name": "Like",
+                "role": "button"
+              },
+              {
+                "name": "Reply",
+                "role": "button"
+              },
+              {
+                "name": "New · Lee liked your comment",
+                "role": "text"
+              }
+            ],
+            "url_pattern": "linkedin.mock/notifications/*"
+          },
+          "result": {
+            "status": "ok"
+          },
+          "t_ms": 4775
+        }
+      ],
+      "task": "linkedin.notifications_review",
+      "variant": "v0"
+    }
+  ],
+  "kind": "dataset_bundle",
+  "manifest": {
+    "consent": {
+      "consent_id": "synthetic",
+      "granted_at": "2026-10-25T12:00:00Z",
+      "purposes": [
+        "model_training",
+        "evaluation"
+      ]
+    },
+    "created_at": "2026-10-25T12:00:00Z",
+    "dataset_hash": "sha256:dce2e7d70920e254b3b04e633dd2ad1383f41d592e2d79506fb42e0c9336c6ec",
+    "dataset_id": "ds_syn_3_4",
+    "episodes": [
+      {
+        "content_hash": "sha256:252f9609047a61f694e0bba93740e561277ed10a59372fb7a6f8f7dc8a118e13",
+        "episode_id": "ep_syn_email_3_0000",
+        "split": "train",
+        "split_group": "email-s0",
+        "task": "email.reply_draft"
+      },
+      {
+        "content_hash": "sha256:63462c8edd2d5627bea7318db8687334821397850dff10a923b2b708a612d72a",
+        "episode_id": "ep_syn_email_3_0001",
+        "split": "train",
+        "split_group": "email-s0",
+        "task": "email.reply_draft"
+      },
+      {
+        "content_hash": "sha256:7b088d03d6cb1255198e70696a3c243f86bf430350fb2d3894d3652e874eaa1a",
+        "episode_id": "ep_syn_email_3_0002",
+        "split": "train",
+        "split_group": "email-s0",
+        "task": "email.reply_draft"
+      },
+      {
+        "content_hash": "sha256:1fa97d4de7b6f142648fd7ad6d8b3eba1d2c77f3007c395ea0bef0dd9535760a",
+        "episode_id": "ep_syn_email_3_0003",
+        "split": "train",
+        "split_group": "email-s0",
+        "task": "email.reply_draft"
+      },
+      {
+        "content_hash": "sha256:7c5a85d86398f2a9f47189bb6b8bc54769ae417640a24c27523c458e1f528e86",
+        "episode_id": "ep_syn_reddit_3_0000",
+        "split": "train",
+        "split_group": "reddit-s0",
+        "task": "reddit.post_compose"
+      },
+      {
+        "content_hash": "sha256:a48a28621dbec4048ad3452cb85f7aba274edb1b65daf5bc625e657666b0a9f2",
+        "episode_id": "ep_syn_reddit_3_0001",
+        "split": "train",
+        "split_group": "reddit-s0",
+        "task": "reddit.post_compose"
+      },
+      {
+        "content_hash": "sha256:cac89cc4a373e056af096a638240054a6d1037b131bec8bd74ed6941178dd3d1",
+        "episode_id": "ep_syn_reddit_3_0002",
+        "split": "train",
+        "split_group": "reddit-s0",
+        "task": "reddit.post_compose"
+      },
+      {
+        "content_hash": "sha256:47db4567c3d888b41821eb305989d446da85d76fda9728e27cbd12177b376e4e",
+        "episode_id": "ep_syn_reddit_3_0003",
+        "split": "train",
+        "split_group": "reddit-s0",
+        "task": "reddit.post_compose"
+      },
+      {
+        "content_hash": "sha256:0b6b3b593b1276dc3f1c6d166b6068a983089556925b828cb54341b5f557f6c3",
+        "episode_id": "ep_syn_linkedin_3_0000",
+        "split": "validation",
+        "split_group": "linkedin-s0",
+        "task": "linkedin.notifications_review"
+      },
+      {
+        "content_hash": "sha256:9973221a778516739a0e4ce833de9f74220825937e3aad518de943d81f3e9b21",
+        "episode_id": "ep_syn_linkedin_3_0001",
+        "split": "validation",
+        "split_group": "linkedin-s0",
+        "task": "linkedin.notifications_review"
+      },
+      {
+        "content_hash": "sha256:b0dc03a1c2d536d55f5ab90e967a90bd9e92a885d95ecfbb05b22e8106b77cb7",
+        "episode_id": "ep_syn_linkedin_3_0002",
+        "split": "validation",
+        "split_group": "linkedin-s0",
+        "task": "linkedin.notifications_review"
+      },
+      {
+        "content_hash": "sha256:1dd5ca683ab10c494f2440bb6ae97bb3f13cbd5f4d0e40c30032cf29e06da9f5",
+        "episode_id": "ep_syn_linkedin_3_0003",
+        "split": "validation",
+        "split_group": "linkedin-s0",
+        "task": "linkedin.notifications_review"
+      }
+    ],
+    "kind": "dataset_manifest",
+    "license": "CC0-1.0",
+    "name": "Synthetic mock desktop traces",
+    "provenance": {
+      "generator": "infernet-liquid synth",
+      "source": "synthetic"
+    },
+    "redaction": {
+      "profile": "strict",
+      "scanner_version": "1",
+      "secret_scan": "passed"
+    },
+    "retention": {
+      "days": null,
+      "delete_on_revoke": true
+    },
+    "schema_version": "liquid-agent/v1",
+    "splits": {
+      "counts": {
+        "test": 0,
+        "train": 8,
+        "validation": 4
+      },
+      "seed": 3,
+      "strategy": "by_session"
+    },
+    "version": 1
+  },
+  "schema_version": "liquid-agent/v1"
+}
