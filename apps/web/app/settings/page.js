@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase/auth-server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import ContactDetailsForm from "@/components/contact-details-form";
+import { creditSummary, settleInviteBonus } from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,18 @@ export default async function SettingsPage({ searchParams }) {
     const params = (await searchParams) ?? {};
     const saved = params.saved === "1";
     const error = typeof params.error === "string" ? params.error : null;
+    const creditOk = typeof params.credit_ok === "string" ? params.credit_ok : null;
+    const creditError = typeof params.credit_error === "string" ? params.credit_error : null;
+    const creditMonthly = params.monthly === "1";
+
+    // Consumer compute credits (never provider earnings, never withdrawable).
+    let credits = null;
+    try {
+        await settleInviteBonus(user.id);
+        credits = await creditSummary(user.id);
+    } catch (err) {
+        console.error("[settings] credits unavailable", err?.message ?? err);
+    }
 
     const supabase = getSupabaseServerClient();
     const [{ data: links }, { data: providers }] = await Promise.all([
@@ -55,7 +68,7 @@ export default async function SettingsPage({ searchParams }) {
                     Settings
                 </p>
                 <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                    Account &amp; node privacy
+                    Account, credits &amp; node privacy
                 </h1>
                 <p className="text-sm text-[var(--muted)]">
                     Signed in as <span className="font-mono text-white">{user.email ?? user.id}</span>.
@@ -72,6 +85,66 @@ export default async function SettingsPage({ searchParams }) {
                     {error}
                 </div>
             ) : null}
+
+            <section id="credits" className="mb-8 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6">
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                    <h2 className="text-lg font-semibold text-white">Compute credits</h2>
+                    <p className="text-sm text-[var(--muted)]">
+                        Balance:{" "}
+                        <span className="font-mono text-base text-white">
+                            {credits ? credits.balance.toLocaleString("en-US") : "unavailable"}
+                        </span>
+                    </p>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                    Credits are for using the network as a customer. They are separate from the
+                    earnings your nodes make and cannot be withdrawn.
+                </p>
+                {creditOk ? (
+                    <div className="mt-4 rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-200">
+                        Code redeemed: +{Number(creditOk).toLocaleString("en-US")} credits{creditMonthly ? " every month" : ""}.
+                    </div>
+                ) : null}
+                {creditError ? (
+                    <div className="mt-4 rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-200">
+                        {creditError}
+                    </div>
+                ) : null}
+                <form action="/api/v1/credits/redeem" method="post" className="mt-4 flex flex-col gap-3 sm:flex-row">
+                    <label className="sr-only" htmlFor="credit-code">Have a code?</label>
+                    <input
+                        id="credit-code"
+                        name="code"
+                        required
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder="Have a code? CR-XXXX-XXXX-XXXX-XXXX"
+                        className="min-w-0 flex-1 rounded-full border border-white/15 bg-[var(--panel-strong)] px-4 py-2 font-mono text-sm text-white placeholder:text-[var(--muted)]"
+                    />
+                    <button
+                        type="submit"
+                        className="rounded-full bg-[var(--accent-strong)] px-5 py-2 text-sm font-semibold text-[var(--bg)] transition hover:bg-[var(--accent)]"
+                    >
+                        Redeem
+                    </button>
+                </form>
+                {credits?.history?.length ? (
+                    <ul className="mt-4 space-y-1 text-xs text-[var(--muted)]">
+                        {credits.history.slice(0, 5).map((h, i) => (
+                            <li key={`${h.at}-${i}`}>
+                                {h.kind === "spend" ? "-" : "+"}
+                                {h.amount.toLocaleString("en-US")} · {h.source} · {h.at.slice(0, 10)}
+                            </li>
+                        ))}
+                    </ul>
+                ) : null}
+                <p className="mt-4 text-sm text-[var(--muted)]">
+                    <Link href="/invites" className="text-[var(--accent)] hover:underline">
+                        Invite someone
+                    </Link>{" "}
+                    — you both get credits when they join.
+                </p>
+            </section>
 
             <form action="/api/v1/user/settings" method="post" className="space-y-8">
                 <section className="rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6">

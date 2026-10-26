@@ -40,11 +40,14 @@ Diagnostics:
 Payments:
   payout       Earnings, withdrawals and payout address
   payments     Show recent payment transactions
+  credits      Your consumer compute credits (not earnings); redeem a code
+  redeem       Redeem a credit code: infernet redeem CR-XXXX-XXXX-XXXX-XXXX
+  invites      Scarce invites (both sides get credits) and your affiliate link
 
 Managed endpoints:
   reservation  Book a pinned operator + exact model by the hour; keys, limits,
                per-minute availability report, post-paid invoice data
-  mcp          MCP server (stdio) exposing the reservation tools
+  mcp          MCP server (stdio): reservation, credit and invite tools
 
 Other:
   help         Show this help

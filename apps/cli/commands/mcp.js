@@ -12,6 +12,7 @@
  */
 import { createInterface } from 'node:readline';
 import { resolveClientOptions, createReservationsClient } from '../lib/reservations-client.js';
+import { resolveCreditsOptions, createCreditsClient } from '../lib/credits-client.js';
 import { CURRENT_VERSION } from '../lib/version.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -83,6 +84,22 @@ export const TOOLS = [
         description: 'Post-paid invoice data: hour statuses and amount due for compliant hours only. Executes no payment.',
         inputSchema: { type: 'object', required: ['id'], properties: { id } },
         run: (c, a) => c.invoice(a.id)
+    },
+    // Consumer compute credits + invites for the `infernet login` account.
+    // Credits are never node earnings and cannot be withdrawn.
+    { name: 'credits_balance', description: 'Your consumer compute-credit balance and recent grants (signed-in account).', inputSchema: { type: 'object', properties: {} }, run: (c) => c.credits.balance() },
+    {
+        name: 'credits_redeem',
+        description: 'Redeem a credit code (CR-XXXX-XXXX-XXXX-XXXX) for consumer compute credits.',
+        inputSchema: { type: 'object', required: ['code'], properties: { code: { type: 'string' } } },
+        run: (c, a) => c.credits.redeem(a.code)
+    },
+    { name: 'invites_list', description: 'Your invites, quota, bonus and affiliate link.', inputSchema: { type: 'object', properties: {} }, run: (c) => c.credits.invites() },
+    {
+        name: 'invite_create',
+        description: 'Create a single-use invite link (shown once). Both people get credits when a new account joins on it and confirms its email.',
+        inputSchema: { type: 'object', properties: { note: { type: 'string' } } },
+        run: (c, a) => c.credits.createInvite(a.note)
     }
 ];
 
@@ -119,10 +136,11 @@ export async function handleMessage(msg, client) {
 
 export default async function mcp(args) {
     if (args.has('help') || args.has('h')) {
-        process.stdout.write('infernet mcp — MCP server (stdio) for managed-endpoint reservations\n\n  claude mcp add infernet -- infernet mcp\n');
+        process.stdout.write('infernet mcp — MCP server (stdio): managed-endpoint reservations, credits and invites\n\n  claude mcp add infernet -- infernet mcp\n');
         return 0;
     }
     const client = createReservationsClient(await resolveClientOptions({ url: args.get('url'), token: args.get('token'), buyerToken: args.get('buyer-token') }));
+    client.credits = createCreditsClient(await resolveCreditsOptions({ url: args.get('url'), token: args.get('token') }));
     const rl = createInterface({ input: process.stdin });
     for await (const line of rl) {
         if (!line.trim()) continue;

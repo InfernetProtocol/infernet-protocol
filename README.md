@@ -391,6 +391,32 @@ BTC, BCH, ETH, SOL, POL, BNB, XRP, ADA, DOGE; plus USDT on ETH/Polygon/Solana; p
 
 Provider earnings flow into the outbound direction of `payment_transactions`. Configure a payout wallet with `infernet payout set <COIN> <ADDRESS>`.
 
+### Credit codes and invites (consumer credits)
+
+Signed-in accounts hold a **consumer compute-credit balance** (`credit_ledger`, unit `credits`, from
+[`@profullstack/redeem-credits`](https://www.npmjs.com/package/@profullstack/redeem-credits)). It is a
+customer balance only: it is separate from provider earnings (`provider_earnings` / `payout_requests`), nothing
+in the payout path reads it, and it can never be withdrawn.
+
+- **Credit codes** (`CR-XXXX-XXXX-XXXX-XXXX`, stored as sha256 only) are minted by an admin and redeemed on
+  `/settings` ("Have a code?"), with `POST /api/v1/credits/redeem` or `infernet redeem <code>`.
+  Mint: `infernet credits admin mint --credits 500 --label "for X"` (or `POST /api/v1/admin/credit-codes`
+  with `Authorization: Bearer $INFERNET_ADMIN_TOKEN`); list / revoke the same way.
+- **Invites** (`INV-XXXX-XXXX-XXXX`, [`@profullstack/affiliates`](https://www.npmjs.com/package/@profullstack/affiliates)):
+  3 per account, single use, 30-day expiry, sendable once an account is 7 days old, accepted only by accounts up
+  to 7 days old, one per account. `/invites` lists them; `/i/<code>` is the landing link (the code is kept in a
+  cookie and in the signup's `user_metadata`, so the confirmation link counts from any browser). When the new
+  account has confirmed its email, both people get `INFERNET_INVITE_BONUS_CREDITS` (default 100) credits, unless
+  the two addresses are the same mailbox (`+tags`, Gmail dots), either uses a throwaway domain, or the inviter
+  already had 10 bonuses in 30 days. Each side is decided once (`invite_bonuses`).
+- **Affiliate link**: `/?ref=<code>` (shown on `/invites`); first touch is kept in the `referral_code` cookie and
+  recorded at sign-in.
+- API: `GET /api/v1/credits`, `POST /api/v1/credits/redeem`, `GET|POST /api/v1/invites`,
+  `DELETE /api/v1/invites/{id}`, `POST /api/v1/invites/accept`; admin `GET|POST /api/v1/admin/credit-codes`,
+  `DELETE /api/v1/admin/credit-codes/{id}`. CLI: `infernet credits|redeem|invites`. MCP: `credits_balance`,
+  `credits_redeem`, `invites_list`, `invite_create`.
+- Credits are not spent on anything yet (jobs are free and IP-limited, or paid per job through CoinPay).
+
 ---
 
 ## Project layout (monorepo)
@@ -471,6 +497,11 @@ Web/mobile routes are server-only — the Supabase service-role client is never 
 - **Homebrew** (scaffolded) — formula + updater script at [`tooling/dist/homebrew`](./tooling/dist/homebrew). Tap repo at [`infernetprotocol/homebrew-infernet`](https://github.com/infernetprotocol/homebrew-infernet). Activates as soon as npm ships.
 
 Tag a `v*.*.*` and [`.github/workflows/release.yml`](./.github/workflows/release.yml) builds the Docker image and creates a GitHub Release. See [`docs/RELEASING.md`](./docs/RELEASING.md) for the full flow.
+
+**Bump `apps/cli/package.json` to the tag's version before tagging.** The release workflow fails unless
+`apps/cli/package.json` equals the tag (CI only stamps the npm version), and nodes installed from git
+(`~/.infernet/source`) compare against that file: if it lags, they reinstall on every update check.
+So a CLI change ships as: bump `apps/cli/package.json` in the PR, merge, then tag `vX.Y.Z` on the merge commit.
 
 ## One-click GPU deploy
 

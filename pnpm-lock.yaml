@@ -193,6 +193,9 @@ importers:
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
+      '@profullstack/affiliates':
+        specifier: 0.3.0
+        version: 0.3.0(react@19.3.1)
       '@profullstack/favicon-generator':
         specifier: ^1.2.1
         version: 1.2.1(@types/node@26.6.5)
@@ -205,6 +208,9 @@ importers:
       '@profullstack/profile':
         specifier: 0.1.6
         version: 0.1.6(react@19.3.1)
+      '@profullstack/redeem-credits':
+        specifier: 0.2.0
+        version: 0.2.0
       '@profullstack/x402-gateway':
         specifier: ^0.13.1
         version: 0.13.1
@@ -1084,7 +1090,7 @@ packages:
 
   '@expo/bunyan@4.0.1':
     resolution: {integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==}
-    engines: {'0': node >=0.10.0}
+    engines: {node: '>=0.10.0'}
 
   '@expo/cli@0.17.13':
     resolution: {integrity: sha512-n13yxOmI3I0JidzMdFCH68tYKGDtK4XlDFk1vysZX7AIRKeDVRsSbHhma5jCla2bDt25RKmJBHA9KtzielwzAA==}
@@ -1580,6 +1586,11 @@ packages:
     resolution: {integrity: sha512-ODOov0sGMJMf3jPonOkgGqPknTsu+DdQ7kD++gz8aI+aFMOMHFbWAA2taqXXVTdP+OTOQR/znGvSpmkeI0WTYQ==}
     engines: {node: '>=14.18.0'}
 
+  '@profullstack/affiliates@0.3.0':
+    resolution: {integrity: sha512-bp0iREciWetDWrQYOsa6SJRTzviekKwgJQuATT7vql+4equu7pN76q8tb3SP1oBMczydsv6rYUMvPpS6+QT7yQ==}
+    engines: {node: '>=22.13'}
+    hasBin: true
+
   '@profullstack/favicon-generator@1.2.1':
     resolution: {integrity: sha512-1w+EcoEmi60TXXQd97Brs7kN/BmlaoOcNvE39ZombUWSCBFBNe6fFm2mA7HORXb7TM39mHklNTIoG20glLsgVA==}
     engines: {node: '>=20.0.0'}
@@ -1616,6 +1627,20 @@ packages:
         optional: true
       postgres:
         optional: true
+      react:
+        optional: true
+
+  '@profullstack/redeem-credits@0.2.0':
+    resolution: {integrity: sha512-JLowb7mWYfouIK7O522tuPPhvLjQjhdEfm6g3xEYrlNLGzLhrIADDhrYldBlGHfiVBWUFX7wefLuCSLF9fnyog==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  '@profullstack/referrals@0.1.0':
+    resolution: {integrity: sha512-u66SdBVpsv3kc0N+NWISPoYD5vjCERyv5wfD07iSkZwQeC2IA+ihX5jNA4e7Xr+Y4AUvxLycG+3b4VaROqzgRg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: '>=18'
+    peerDependenciesMeta:
       react:
         optional: true
 
@@ -8095,6 +8120,12 @@ snapshots:
       tslib: 2.8.1
       webcrypto-core: 1.9.2
 
+  '@profullstack/affiliates@0.3.0(react@19.3.1)':
+    dependencies:
+      '@profullstack/referrals': 0.1.0(react@19.3.1)
+    transitivePeerDependencies:
+      - react
+
   '@profullstack/favicon-generator@1.2.1(@types/node@26.6.5)':
     dependencies:
       inquirer: 10.2.2
@@ -8111,6 +8142,12 @@ snapshots:
   '@profullstack/keys@0.1.0': {}
 
   '@profullstack/profile@0.1.6(react@19.3.1)':
+    optionalDependencies:
+      react: 19.3.1
+
+  '@profullstack/redeem-credits@0.2.0': {}
+
+  '@profullstack/referrals@0.1.0(react@19.3.1)':
     optionalDependencies:
       react: 19.3.1
 
