@@ -50,3 +50,30 @@ a {
     width: 100%;
     margin: 0.5rem 0;
 }
+
+/* @profullstack/profile fields: same look as AuthInput. */
+.pfs-profile { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 1rem; }
+.pfs-profile__row label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pfs-profile__row input {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: var(--panel-strong);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  color: #fff;
+  outline: none;
+}
+.pfs-profile__row input::placeholder { color: var(--muted); }
+.pfs-profile__row input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.pfs-profile__optional { text-transform: none; letter-spacing: normal; }
+.pfs-profile__error { margin-top: 0.25rem; font-size: 0.875rem; color: #f87171; }

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase/auth-server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import ContactDetailsForm from "@/components/contact-details-form";
 
 export const dynamic = "force-dynamic";
 
@@ -155,6 +156,8 @@ export default async function SettingsPage({ searchParams }) {
                     Save settings
                 </button>
             </form>
+
+            <ContactDetailsForm />
         </main>
     );
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import AuthFormShell, { AuthInput, AuthButton } from "@/components/auth-form-shell";
+import SignupProfileFields from "@/components/signup-profile-fields";
 
 export const metadata = { title: "Create an account" };
 
@@ -23,6 +24,7 @@ export default async function SignupPage({ searchParams }) {
         >
             <form action="/api/auth/signup" method="post" className="space-y-4">
                 <AuthInput name="email" type="email" label="Email" required autoComplete="email" />
+                <SignupProfileFields />
                 <AuthInput name="password" type="password" label="Password (8+ characters)" required autoComplete="new-password" />
                 <AuthButton>Create account</AuthButton>
             </form>
