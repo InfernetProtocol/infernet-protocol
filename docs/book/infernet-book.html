@@ -1608,12 +1608,12 @@ to your wallet.</li>
 on it. What a job earns depends on how it was paid for.</p>
 <p><strong>Paid jobs.</strong> A client opens a CoinPay invoice for the
 job’s <code>payment_offer</code>. Your node earns its share of that
-payment after the 10% house fee (you keep 90%). The credit shows as <em>awaiting client
-payment</em> until CoinPay confirms the payment, then
-<em>confirmed</em>. A pipeline-parallel job served by several nodes is
-split the same way its Compute Payment Receipts are: the primary takes
-<code>1 / (n + 1)</code> for orchestration and the rest is weighted by
-the number of layers each slice served.</p>
+payment after the 10% house fee (you keep 90%). The credit shows as
+<em>awaiting client payment</em> until CoinPay confirms the payment,
+then <em>confirmed</em>. A pipeline-parallel job served by several nodes
+is split the same way its Compute Payment Receipts are: the primary
+takes <code>1 / (n + 1)</code> for orchestration and the rest is
+weighted by the number of layers each slice served.</p>
 <p><strong>Free jobs.</strong> The public <code>/chat</code> playground
 and other unpaid traffic carry no client payment. During the alpha that
 is all of the traffic, so the house pays a <strong>subsidy per 1,000
