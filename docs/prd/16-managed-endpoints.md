@@ -71,3 +71,26 @@ Redis-backed limiter for multi-process; per-reservation latency SLO (p95) in the
 ## Pricing (2026-10-10)
 
 Price list in `apps/web/lib/reservations/pricing.js`, public at `GET /api/v1/reservations/pricing` and `infernet reservation pricing`. Booking with `gpu_class` (l40s $1.35, a100 $1.89, h100 $3.99, h100x2 $7.99 per compliant hour) sets `price_per_hour` and `setup_fee` ($5 + one hour, for GPU warm-up); a lower `price_per_hour` is refused. Prices = dedicated-GPU cost (RunPod on-demand, Sep 2026) ÷ 0.79 (20% margin + ~1% payment fee) × 1.05 (only compliant hours are paid). Platform overhead is under 1¢/hour. Migration `20261010000000_reservation_pricing.sql` adds `gpu_class` and `setup_fee`.
+
+## Self-serve orders (2026-10-27)
+
+Anyone can book without an admin: the website (/order), the CLI (`infernet order`), the MCP server
+(`order_capacity`, `order_quote`, `order_create`, `order_status`) and the API.
+
+- `GET /api/v1/orders/capacity`: per GPU class, list price, free online nodes from the next hour, models served.
+- `POST /api/v1/orders { gpu_class, models[], hours, start_at?, email?, provider_id?, pay? }` matches ONE online,
+  non-private node that reports that GPU class (from `specs.gpus`, A100 must report >=48gb) and already serves
+  every model, with no live reservation or held order in the window. Nothing fits = 409; we never take money for
+  capacity we cannot pin.
+- Prepaid at the list price: hours x price_per_hour + setup fee. Non-compliant hours are credited or refunded
+  by hand (the report shows them).
+- x402: no proof = 402 with the offer (USDC on Base/Polygon/Ethereum, the crawl gateway's `COINPAY_X402_KEY` and
+  `CRAWL_PAY_TO`). Retry with `X-PAYMENT`/`PAYMENT-SIGNATURE` = settled at CoinPay, the reservation is created and
+  the answer carries the buyer token and a first API key. One payment fulfils one order (`payment_ref` unique).
+- `pay: "checkout"`: a CoinPay checkout (any coin, PayPal) and the buyer token. The order holds its node for
+  90 minutes. The CoinPay webhook or a `GET /api/v1/orders/:id` poll (which asks CoinPay itself) creates the
+  reservation, exactly once (the status flip is the lock).
+- The buyer token is minted with the order and is the reservation's buyer token, so the same token tracks the
+  order, reads the report and invoice, and issues keys.
+- Table `reservation_orders` (migration `20261027000000_reservation_orders.sql`).
+- Not done: paying the node's operator its share of a prepaid order is still manual.

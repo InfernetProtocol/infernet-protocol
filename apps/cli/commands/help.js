@@ -47,7 +47,8 @@ Payments:
 Managed endpoints:
   reservation  Book a pinned operator + exact model by the hour; keys, limits,
                per-minute availability report, post-paid invoice data
-  mcp          MCP server (stdio): reservation, credit and invite tools
+  order        Order a dedicated model endpoint yourself: pay by x402 or CoinPay
+  mcp          MCP server (stdio): order, reservation, credit and invite tools
 
 Other:
   help         Show this help

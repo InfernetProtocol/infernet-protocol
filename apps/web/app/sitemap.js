@@ -16,6 +16,7 @@ const ROUTES = [
     { path: "/book", priority: 0.7, changeFrequency: "weekly" },
     { path: "/chat", priority: 0.8, changeFrequency: "weekly" },
     { path: "/deploy", priority: 0.7, changeFrequency: "weekly" },
+    { path: "/order", priority: 0.7, changeFrequency: "daily" },
     { path: "/status", priority: 0.6, changeFrequency: "hourly" },
     { path: "/cpu", priority: 0.5, changeFrequency: "weekly" },
     { path: "/gpu", priority: 0.5, changeFrequency: "weekly" },
