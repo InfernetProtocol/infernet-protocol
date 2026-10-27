@@ -2,6 +2,7 @@ import "server-only";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { isNimConfigured, nimVirtualProvider } from "@infernetprotocol/nim-adapter";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
+import { matchServedModel } from "@/lib/model-names";
 
 /**
  * Pick a P2P provider to serve a chat job.
@@ -65,10 +66,9 @@ function finishPick(rows, { modelName, minTrustTier }) {
   let candidates = rows;
 
   if (typeof modelName === "string" && modelName) {
-    candidates = candidates.filter((p) => {
-      const served = Array.isArray(p?.specs?.served_models) ? p.specs.served_models : [];
-      return served.includes(modelName);
-    });
+    // Any name of the model counts: catalog id, Ollama tag, HF repo or the
+    // allmodels.io id (lib/model-names.js).
+    candidates = candidates.filter((p) => matchServedModel(p?.specs?.served_models, modelName) !== null);
   }
 
   // IPIP-0026 §2.2 — clients can require a minimum trust tier. Default
@@ -333,6 +333,12 @@ export async function createChatJob({
 
   if (!p2pProvider && !pinned) {
     p2pProvider = await pickChatProvider({ modelName, minTrustTier });
+    // Asked by another name of the model: run it under the name the node serves.
+    const servedName = p2pProvider && modelName ? matchServedModel(p2pProvider.specs?.served_models, modelName) : null;
+    if (servedName && servedName !== modelName) {
+      servedModel = servedName;
+      requestedModel = modelName;
+    }
     if (!p2pProvider && isModelAlias(modelName)) {
       const anyProvider = await pickChatProvider({ minTrustTier });
       const target = aliasTargetFor(anyProvider);

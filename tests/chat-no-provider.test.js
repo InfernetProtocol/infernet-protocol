@@ -89,6 +89,20 @@ describe("createChatJob with nothing to serve the request", () => {
         }
     );
 
+    it("another name of a served model (allmodels.io id) runs under the node's own name", async () => {
+        const tag = "huihui_ai/Qwen3.8-abliterated:27b";
+        state.providers = [
+            { id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:0.5b"] } },
+            { id: "p2", reputation: 50, specs: { served_models: [tag] } }
+        ];
+        const { job, source, requestedModel } = await createChatJob({ messages, modelName: "qwen/qwen3.8-27b-abliterated" });
+        expect(source).toBe("p2p");
+        expect(job.provider_id).toBe("p2");
+        expect(job.model_name).toBe(tag);
+        expect(job.input_spec.requested_model).toBe("qwen/qwen3.8-27b-abliterated");
+        expect(requestedModel).toBe("qwen/qwen3.8-27b-abliterated");
+    });
+
     it("an alias with no live node at all still fails cleanly", async () => {
         const { job, source } = await createChatJob({ messages, modelName: "gpt-4o-mini" });
         expect(source).toBe("none");
