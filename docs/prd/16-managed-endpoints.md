@@ -82,7 +82,10 @@ Anyone can book without an admin: the website (/order), the CLI (`infernet order
   non-private node that reports that GPU class (from `specs.gpus`, A100 must report >=48gb) and already serves
   every model, with no live reservation or held order in the window. Nothing fits = 409; we never take money for
   capacity we cannot pin.
-- Prepaid at the list price: hours x price_per_hour + setup fee. Non-compliant hours are credited or refunded
+- Priced from our cost: price_per_hour = cost_per_hour x (1 + minimum profit margin), rounded up to the cent.
+  The margin is a house setting, 1% to 2000%, default 100% (settings key `orders`, env `INFERNET_ORDER_MARGIN_PCT`),
+  set with the slider at /admin/pricing, `POST /api/v1/admin/orders/pricing` or `infernet order margin <pct>`.
+- Prepaid at that price: hours x price_per_hour + setup fee. Non-compliant hours are credited or refunded
   by hand (the report shows them).
 - x402: no proof = 402 with the offer (USDC on Base/Polygon/Ethereum, the crawl gateway's `COINPAY_X402_KEY` and
   `CRAWL_PAY_TO`). Retry with `X-PAYMENT`/`PAYMENT-SIGNATURE` = settled at CoinPay, the reservation is created and
