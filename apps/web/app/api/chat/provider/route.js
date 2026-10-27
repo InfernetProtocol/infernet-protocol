@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pickChatProvider } from "@/lib/data/chat";
+import { matchServedModel } from "@/lib/model-names";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -44,7 +45,8 @@ export async function GET(request) {
     const providerPubkey = provider.public_key ?? null;
     // IPIP-0028: prefer model-specific key so consumers encrypt to the model,
     // not the node. Falls back to null (client uses providerPubkey instead).
-    const modelPubkey = modelName ? (provider.specs?.model_keys?.[modelName] ?? null) : null;
+    const servedName = modelName ? (matchServedModel(provider.specs?.served_models, modelName) ?? modelName) : null;
+    const modelPubkey = servedName ? (provider.specs?.model_keys?.[servedName] ?? null) : null;
 
     // IPIP-0027 §7: surface E2E capability so the client knows whether
     // to encrypt and the UI can show the lock indicator. A provider with
