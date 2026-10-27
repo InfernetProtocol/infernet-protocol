@@ -71,9 +71,9 @@ export default function TermsPage() {
                             a money transmitter on your behalf, and do not act as an escrow.
                         </p>
                         <p>
-                            We do not take a platform spread above the underlying payment-processor fees.
-                            Pricing displayed for any job is the price the client agrees to pay; the
-                            operator receives the agreed amount minus the processor&apos;s fee.
+                            We take a 10% house fee on paid jobs. Pricing displayed for any job is the price
+                            the client agrees to pay; the operator receives 90% of the agreed amount, less
+                            the payment processor&apos;s fee.
                         </p>
                     </Section>
 
