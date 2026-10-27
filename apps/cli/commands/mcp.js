@@ -96,7 +96,7 @@ export const TOOLS = [
         run: (c, a) => c.invoice(a.id)
     },
     // Self-serve orders: anyone can book, no admin token. x402 pays from X402_PRIVATE_KEY.
-    { name: 'order_capacity', description: 'What can be ordered right now: per GPU class the list price, how many online nodes are free and which models they serve.', inputSchema: { type: 'object', properties: {} }, run: (c) => c.orders.capacity() },
+    { name: 'order_capacity', description: 'What can be ordered right now: per GPU class the price (our cost plus the house margin), how many online nodes are free and which models they serve.', inputSchema: { type: 'object', properties: {} }, run: (c) => c.orders.capacity() },
     {
         name: 'order_quote',
         description: 'Price an order without paying: matches an online node and returns the quote plus the x402 offer.',

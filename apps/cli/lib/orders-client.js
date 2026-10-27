@@ -41,6 +41,11 @@ export function createOrdersClient({ baseUrl, fetchImpl = fetch, x402 = createX4
 
     return {
         capacity: () => call('GET', '/api/v1/orders/capacity'),
+        /** Admin: read (pct undefined) or set the minimum profit margin. */
+        margin: (adminToken, pct) => call(pct === undefined ? 'GET' : 'POST', '/api/v1/admin/orders/pricing', {
+            body: pct === undefined ? undefined : { min_margin_pct: pct },
+            headers: { authorization: `Bearer ${adminToken}` }
+        }),
         status: (id, buyerToken) => call('GET', `/api/v1/orders/${encodeURIComponent(id)}`, { headers: { 'x-buyer-token': buyerToken } }),
         /** Quote without paying: the 402 body (offer + quote). */
         async quote(input) {

@@ -8,7 +8,7 @@ import { createOrdersClient, orderBodyFromFlags, x402KeyFrom, DEFAULT_MAX_USD } 
 const HELP = `infernet order — order a dedicated model endpoint by the hour
 
 We pin the models on one online node with the GPU class you pick, for the
-hours you book, and you get an OpenAI-compatible API key. Prepaid at the list
+hours you book, and you get an OpenAI-compatible API key. Prepaid at the quoted
 price; non-compliant hours are credited or refunded.
 
 Usage:
@@ -19,6 +19,10 @@ Usage:
         --x402                     pay now in USDC from X402_PRIVATE_KEY (or --key-file F)
               [--max-usd ${DEFAULT_MAX_USD}]        refuse to sign more than this
   infernet order status <id> --buyer-token ifr_buy_…   (or INFERNET_BUYER_TOKEN)
+
+Admin (INFERNET_ADMIN_TOKEN or --token):
+  infernet order margin [PCT]              show / set the minimum profit margin over our
+                                           GPU cost, 1-2000 (default 100 = twice our cost)
 
 After booking, manage it with \`infernet reservation\` and the same buyer token:
   INFERNET_BUYER_TOKEN=ifr_buy_… infernet reservation key-issue <reservation id>
@@ -38,7 +42,7 @@ export default async function order(args) {
         process.stdout.write(HELP);
         return sub || args.has('help') ? 0 : 1;
     }
-    const { baseUrl } = await resolveClientOptions({ url: args.get('url') });
+    const { baseUrl, adminToken } = await resolveClientOptions({ url: args.get('url'), token: args.get('token') });
     const client = createOrdersClient({ baseUrl });
     const json = args.has('json');
     const body = () => orderBodyFromFlags((k) => args.get(k));
@@ -89,6 +93,16 @@ export default async function order(args) {
             if (json) return out(o), 0;
             process.stdout.write(`${line(o)}\n`);
             if (o.reservation_id) process.stdout.write(`reservation ${o.reservation_id}: INFERNET_BUYER_TOKEN=… infernet reservation key-issue ${o.reservation_id}\n`);
+            return 0;
+        }
+        case 'margin': {
+            if (!adminToken) throw new Error('set INFERNET_ADMIN_TOKEN (or pass --token)');
+            const v = await client.margin(adminToken, a1 === undefined ? undefined : Number(a1));
+            if (json) return out(v), 0;
+            process.stdout.write(`minimum profit margin ${v.min_margin_pct}% over our cost (range ${v.range.min}-${v.range.max}%)\n`);
+            for (const c of v.classes) {
+                process.stdout.write(`${c.gpu_class.padEnd(7)} ${c.label.padEnd(13)} cost $${c.cost_per_hour.toFixed(2)}/h  sells $${c.price_per_hour.toFixed(2)}/h + $${c.setup_fee.toFixed(2)} setup\n`);
+            }
             return 0;
         }
         default:

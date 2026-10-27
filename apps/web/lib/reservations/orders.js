@@ -5,12 +5,14 @@
  * A buyer names a GPU class, the exact models, a start hour and a number of
  * hours. We sell only what is online: the order is matched to one node that
  * reports that GPU class and already serves every model, and has no other
- * booking in the window. The price is the published list price for the class,
- * prepaid: hours * price_per_hour + the setup fee.
+ * booking in the window. The price is our cost for the class plus the house
+ * minimum profit margin (lib/reservations/margin.js, default 100%), prepaid:
+ * hours * price_per_hour + the setup fee.
  *
  * Nothing here touches the database or the network.
  */
 import { GPU_TIERS, tierOf, setupFeeFor } from "./pricing.js";
+import { priceFromCost, DEFAULT_MARGIN_PCT } from "./margin.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 export const MAX_ORDER_HOURS = 168;
@@ -81,11 +83,11 @@ export function validateOrderInput(body, now = Date.now()) {
     return errors.length ? { ok: false, errors } : { ok: true, value };
 }
 
-/** The prepaid quote for a class and a number of hours. */
-export function quoteFor(gpuClass, hours) {
+/** The prepaid quote for a class and a number of hours, at a margin over our cost. */
+export function quoteFor(gpuClass, hours, marginPct = DEFAULT_MARGIN_PCT) {
     const tier = tierOf(gpuClass);
     if (!tier) return null;
-    const price = tier.price_per_hour;
+    const price = priceFromCost(tier.cost_per_hour, marginPct);
     const setup = setupFeeFor(price);
     const total = Math.round((price * hours + setup) * 100) / 100;
     return { gpu_class: gpuClass, label: tier.label, fits: tier.fits, hours, price_per_hour: price, setup_fee: setup, total_usd: total, currency: "USD" };
@@ -147,14 +149,14 @@ export function pickNode(providers, order, bookings = [], now = Date.now()) {
 }
 
 /** What is on sale right now, per class: how many nodes and which models. */
-export function capacity(providers, bookings = [], now = Date.now()) {
+export function capacity(providers, bookings = [], now = Date.now(), marginPct = DEFAULT_MARGIN_PCT) {
     const start = nextWholeHour(now).toISOString();
     return Object.keys(GPU_TIERS).map((gpu_class) => {
         const nodes = (providers ?? []).filter((p) =>
             isOnline(p, now) && (p.trust_tier ?? "public") !== "private" && classesOf(p).includes(gpu_class)
             && !bookings.some((b) => String(b.provider_id) === String(p.id) && overlaps(b.start_at, b.hours, start, 1)));
         const models = [...new Set(nodes.flatMap(servedModels))].sort();
-        return { ...quoteFor(gpu_class, 1), hours: undefined, total_usd: undefined, nodes_available: nodes.length, models };
+        return { ...quoteFor(gpu_class, 1, marginPct), hours: undefined, total_usd: undefined, nodes_available: nodes.length, models };
     });
 }
 
@@ -186,4 +188,4 @@ export function reservationFromOrder(order) {
     };
 }
 
-export const ORDER_TERMS = "Prepaid at the list price. Every minute is probed; hours the report marks non-compliant are credited or refunded.";
+export const ORDER_TERMS = "Prepaid at the quoted price. Every minute is probed; hours the report marks non-compliant are credited or refunded.";

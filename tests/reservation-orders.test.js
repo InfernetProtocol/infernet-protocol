@@ -3,6 +3,7 @@ import {
     validateOrderInput, quoteFor, classesOf, pickNode, capacity, reservationFromOrder, nextWholeHour, isOnline
 } from "../apps/web/lib/reservations/orders.js";
 import { validateReservationInput } from "../apps/web/lib/reservations/core.js";
+import { priceFromCost, resolveOrderPricing, isValidMargin, DEFAULT_MARGIN_PCT } from "../apps/web/lib/reservations/margin.js";
 import { createOrdersClient, orderBodyFromFlags } from "../apps/cli/lib/orders-client.js";
 import { handleMessage } from "../apps/cli/commands/mcp.js";
 
@@ -35,9 +36,38 @@ describe("validateOrderInput", () => {
 });
 
 describe("quoteFor", () => {
-    it("is hours at the list price plus the setup fee", () => {
-        expect(quoteFor("l40s", 3)).toMatchObject({ price_per_hour: 1.35, setup_fee: 6.35, total_usd: 10.4 });
-        expect(quoteFor("h100x2", 1).total_usd).toBe(20.98);
+    it("is hours at cost + 100% margin by default, plus the setup fee", () => {
+        // L40S costs us $0.99/h: 100% margin is $1.98/h, setup $5 + one hour.
+        expect(quoteFor("l40s", 3)).toMatchObject({ price_per_hour: 1.98, setup_fee: 6.98, total_usd: 12.92 });
+        expect(quoteFor("h100x2", 1)).toMatchObject({ price_per_hour: 11.96, total_usd: 28.92 });
+    });
+    it("follows the margin it is given", () => {
+        expect(quoteFor("l40s", 1, 1).price_per_hour).toBe(1);
+        expect(quoteFor("l40s", 1, 2000).price_per_hour).toBe(20.79);
+        expect(quoteFor("h100", 2, 50)).toMatchObject({ price_per_hour: 4.49, total_usd: 18.47 });
+    });
+});
+
+describe("order margin", () => {
+    it("defaults to 100%", () => {
+        expect(DEFAULT_MARGIN_PCT).toBe(100);
+        expect(resolveOrderPricing({ env: {} })).toEqual({ min_margin_pct: 100 });
+    });
+    it("takes env then the settings row, ignoring out-of-range values", () => {
+        expect(resolveOrderPricing({ env: { INFERNET_ORDER_MARGIN_PCT: "40" } }).min_margin_pct).toBe(40);
+        expect(resolveOrderPricing({ env: { INFERNET_ORDER_MARGIN_PCT: "40" }, settings: { min_margin_pct: 250 } }).min_margin_pct).toBe(250);
+        expect(resolveOrderPricing({ env: {}, settings: { min_margin_pct: 0 } }).min_margin_pct).toBe(100);
+        expect(resolveOrderPricing({ env: {}, settings: { min_margin_pct: 2001 } }).min_margin_pct).toBe(100);
+        expect(resolveOrderPricing({ env: { INFERNET_ORDER_MARGIN_PCT: "-5" } }).min_margin_pct).toBe(100);
+    });
+    it("validates 1..2000", () => {
+        expect([1, 100, 2000, "75"].every(isValidMargin)).toBe(true);
+        expect([0, 0.5, 2001, "x", null, undefined, NaN].some(isValidMargin)).toBe(false);
+    });
+    it("rounds up to the cent so the price never dips under the margin", () => {
+        expect(priceFromCost(0.99, 100)).toBe(1.98);
+        expect(priceFromCost(1.39, 33)).toBe(1.85); // 1.8487 -> 1.85
+        expect(priceFromCost(1, "nope")).toBe(2); // bad margin -> default
     });
 });
 
@@ -89,7 +119,8 @@ describe("capacity", () => {
     it("counts free nodes and lists their models per class", () => {
         const rows = [node("a", ["NVIDIA L40S"], ["m2", "m1"]), node("b", ["NVIDIA GeForce GTX 745"], ["m3"])];
         const c = capacity(rows, [], NOW);
-        expect(c.find((k) => k.gpu_class === "l40s")).toMatchObject({ nodes_available: 1, models: ["m1", "m2"], price_per_hour: 1.35 });
+        expect(c.find((k) => k.gpu_class === "l40s")).toMatchObject({ nodes_available: 1, models: ["m1", "m2"], price_per_hour: 1.98 });
+        expect(capacity(rows, [], NOW, 10).find((k) => k.gpu_class === "l40s").price_per_hour).toBe(1.09);
         expect(c.find((k) => k.gpu_class === "h100").nodes_available).toBe(0);
     });
 });
@@ -152,5 +183,20 @@ describe("CLI orders client", () => {
         const r = await handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/list" }, {});
         const names = r.result.tools.map((t) => t.name);
         expect(names).toEqual(expect.arrayContaining(["order_capacity", "order_quote", "order_create", "order_status"]));
+    });
+});
+
+describe("orders client margin", () => {
+    it("GETs, and POSTs a new margin with the admin bearer", async () => {
+        const calls = [];
+        const fetchImpl = async (url, init) => {
+            calls.push({ url, method: init.method, auth: init.headers.authorization, body: init.body });
+            return new Response(JSON.stringify({ data: { min_margin_pct: 100, range: { min: 1, max: 2000 }, classes: [] } }), { status: 200 });
+        };
+        const c = createOrdersClient({ baseUrl: "https://x.test", fetchImpl });
+        await c.margin("tok", undefined);
+        await c.margin("tok", 250);
+        expect(calls[0]).toMatchObject({ url: "https://x.test/api/v1/admin/orders/pricing", method: "GET", auth: "Bearer tok", body: undefined });
+        expect(calls[1]).toMatchObject({ method: "POST", body: JSON.stringify({ min_margin_pct: 250 }) });
     });
 });

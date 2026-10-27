@@ -5,6 +5,7 @@ import { onlineProviders, bookings, placeOrder, setPaymentRef, fulfilOrder, publ
 import { orderOffer, offerHeaders, paymentFrom, settleOrderPayment, settlementHeader, siteUrl, x402Configured } from "@/lib/reservations/order-payment";
 import { publicReservation } from "@/lib/data/reservations";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
+import { getOrderPricing } from "@/lib/data/order-pricing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,8 +17,8 @@ export const dynamic = "force-dynamic";
  *   POST /api/v1/orders  { gpu_class, models[], hours?, start_at?, name?, email?, provider_id?, pay? }
  *
  * The order is matched to an online node with that GPU class that already
- * serves every model, and priced from the list (hours x price + setup fee,
- * prepaid). Then, by how the caller pays:
+ * serves every model, and priced at our cost plus the house minimum margin
+ * (hours x price + setup fee, prepaid; lib/reservations/margin.js). Then, by how the caller pays:
  *
  *   - no proof, pay != "checkout"  -> 402 with an x402 offer (USDC on Base,
  *                                    Polygon or Ethereum) in the body and in
@@ -55,10 +56,10 @@ export async function POST(request) {
     const v = validateOrderInput(body);
     if (!v.ok) return fail(400, "invalid order", { details: v.errors });
     const value = v.value;
-    const quote = quoteFor(value.gpu_class, value.hours);
 
     try {
-        const [providers, booked] = await Promise.all([onlineProviders(), bookings()]);
+        const [providers, booked, pricing] = await Promise.all([onlineProviders(), bookings(), getOrderPricing()]);
+        const quote = quoteFor(value.gpu_class, value.hours, pricing.min_margin_pct);
         const node = pickNode(providers, value, booked);
         if (!node) {
             return fail(409, "no online node fits this order right now", {
