@@ -310,7 +310,7 @@ const SECTIONS = [
                 a: (
                     <>
                         Every completed job credits the node that served it in the earnings ledger. A paid job
-                        earns your share of what the client paid (90%: the house fee is 10%), confirmed once CoinPay
+                        earns your share of what the client paid (95%: the house fee is 5%), confirmed once CoinPay
                         confirms the client&apos;s payment. A free job (the /chat playground, most traffic in the
                         alpha) earns a house subsidy per 1,000 output tokens, shown as <em>pending approval</em>{" "}
                         until the rate is approved. Withdraw with <code>infernet payout request</code> or the

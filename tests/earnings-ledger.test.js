@@ -146,7 +146,7 @@ describe("earnings ledger", () => {
 
     it("a paid job's credit is confirmed when the client's payment confirms", async () => {
         await credit("j9", { payment_offer: 4 });
-        expect(table("provider_earnings")[0]).toMatchObject({ kind: "paid", status: "pending", amount_usd: 3.6, fee_usd: 0.4 });
+        expect(table("provider_earnings")[0]).toMatchObject({ kind: "paid", status: "pending", amount_usd: 3.8, fee_usd: 0.2 });
         expect(await earnings.confirmPaidJobCredits("j9")).toBe(1);
         expect(table("provider_earnings")[0].status).toBe("confirmed");
     });

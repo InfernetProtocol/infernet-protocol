@@ -59,7 +59,7 @@ export default function HomePage() {
           <Pillar
             eyebrow="For operators"
             title="Earn crypto for the GPU you already have"
-            body="Run any model you can serve — Qwen, Llama, Mistral, your own. The control plane routes paying jobs to you and pays out in whichever coin you pasted in. No native token to hold; you keep 90% of what the client pays (10% house fee)."
+            body="Run any model you can serve — Qwen, Llama, Mistral, your own. The control plane routes paying jobs to you and pays out in whichever coin you pasted in. No native token to hold; you keep 95% of what the client pays (5% house fee)."
           />
           <Pillar
             eyebrow="For clients"

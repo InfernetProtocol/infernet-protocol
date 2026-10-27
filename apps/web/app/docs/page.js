@@ -357,7 +357,7 @@ All checks passed.`}
                 <ul className="list-disc space-y-1 pl-6">
                     <li>
                         <strong>Paid jobs</strong> (the client paid an invoice through CoinPay): your share of the
-                        client&apos;s payment after the 10% house fee (you keep 90%). The credit shows as{" "}
+                        client&apos;s payment after the 5% house fee (you keep 95%). The credit shows as{" "}
                         <em>awaiting client payment</em> until CoinPay confirms the payment, then <em>confirmed</em>.
                         A job split across several nodes (pipeline-parallel) is shared the same way the CPR receipts
                         split it: the primary takes 1/(n+1), the rest is weighted by layers served.
