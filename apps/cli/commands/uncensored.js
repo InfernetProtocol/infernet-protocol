@@ -37,12 +37,14 @@ How it works:
 
 Curated models (HuggingFace / vLLM):
   ≥ 8 GB VRAM   NousResearch/Hermes-3-Llama-3.1-8B   (Apache 2.0, ~5 GB @ 4-bit)
-  ≥ 40 GB VRAM  cognitivecomputations/dolphin-2.9.4-llama3.1-70b
+  ≥ 40 GB VRAM  munekazu/Huihui-Qwen3.8-27B-abliterated-FP8
+  ≥ 256 GB      GLM-5.3 Flash / GLM-5.3 / DeepSeek V4.1 Flash abliterated
+                (multi-GPU; see --list)
 
 Curated models (Ollama):
   ≥ 4 GB VRAM   dolphin3:2b
   ≥ 6 GB VRAM   dolphin3:8b  (recommended)
-  ≥ 30 GB VRAM  dolphin-mixtral:8x7b
+  ≥ 24 GB VRAM  huihui_ai/Qwen3.8-abliterated:27b
 `;
 
 // HuggingFace models, ordered by VRAM requirement ascending
@@ -69,6 +71,38 @@ const HF_MODELS = [
         description: 'Dolphin 2.9.4 70B (Eric Hartford) — uncensored, Llama 3.1 base',
     },
     {
+        // huihui-ai abliteration of Qwen3.8 27B, FP8 (~31 GB). Newest and
+        // strongest single-GPU pick, so it outranks the 70B when both fit.
+        repoId: 'munekazu/Huihui-Qwen3.8-27B-abliterated-FP8',
+        sizeGb: 55.6,
+        sizeGb4bit: 18.0,
+        minVramGb: 40,
+        description: 'Qwen3.8 27B abliterated (huihui-ai) — uncensored, FP8 via vLLM, Apache 2.0',
+    },
+    {
+        // The open-weight abliterated models allmodels.io routes to. MoE
+        // flagships: multi-GPU only. NVFP4 builds need Blackwell (B200/GB200).
+        repoId: 'edp1096/Huihui-GLM-5.3-Flash-abliterated-NVFP4',
+        sizeGb: 204.4,
+        sizeGb4bit: 204.4,
+        minVramGb: 256,
+        description: 'GLM-5.3 Flash 321B abliterated (huihui-ai) — NVFP4, needs Blackwell GPUs (~256 GB VRAM)',
+    },
+    {
+        repoId: 'dealignai/GLM-5.3-ABLITERATED-NVFP4',
+        sizeGb: 464.8,
+        sizeGb4bit: 464.8,
+        minVramGb: 512,
+        description: 'GLM-5.3 753B abliterated — NVFP4, needs Blackwell GPUs (~512 GB VRAM)',
+    },
+    {
+        repoId: 'mrfakename/DeepSeek-V4.1-Flash-1017-abliterated',
+        sizeGb: 510.3,
+        sizeGb4bit: 510.3,
+        minVramGb: 640,
+        description: 'DeepSeek V4.1 Flash 763B abliterated — FP8, needs 8x80 GB GPUs',
+    },
+    {
         // 754B MoE, FP8 weights (~755 GB) — flagship uncensored model. Only
         // auto-selected on a cluster that can actually hold it (minVramGb set
         // so it never picks on a single GPU). Gated on HF: set HF_TOKEN to pull.
@@ -86,6 +120,8 @@ const OLLAMA_MODELS = [
     { name: 'dolphin3:2b',          sizeGb: 2.2,  minVramGb: 4,  description: 'Dolphin 3 2B — lightweight uncensored' },
     { name: 'dolphin3:8b',          sizeGb: 4.9,  minVramGb: 6,  description: 'Dolphin 3 8B — recommended uncensored (Llama 3.1)' },
     { name: 'dolphin-mixtral:8x7b', sizeGb: 26.1, minVramGb: 30, description: 'Dolphin Mixtral 8x7B — high-capacity uncensored' },
+    // Last so it wins whenever it fits: newer and stronger than Mixtral.
+    { name: 'huihui_ai/Qwen3.8-abliterated:27b', sizeGb: 18.0, minVramGb: 24, description: 'Qwen3.8 27B abliterated (huihui-ai) — recommended on 24 GB+' },
 ];
 
 function pickHfModel(vramGb) {
