@@ -246,8 +246,8 @@ exchange rate with no spread markup — the platform fee is the only deduction.
 | Party | Amount |
 |-------|--------|
 | Consumer | Pays per 1 000 tokens (prompt + completion) |
-| Operator | Receives ~95% of consumer payment |
-| Platform | Retains ~5% as protocol fee |
+| Operator | Receives ~98% of consumer payment |
+| Platform | Retains ~2% as protocol fee |
 
 Exact per-token rates are set by operators within bounds published by the
 control plane.  Operators competing for the same job tier drive rates toward

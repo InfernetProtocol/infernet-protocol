@@ -71,8 +71,8 @@ export default function TermsPage() {
                             a money transmitter on your behalf, and do not act as an escrow.
                         </p>
                         <p>
-                            We take a 5% house fee on paid jobs. Pricing displayed for any job is the price
-                            the client agrees to pay; the operator receives 95% of the agreed amount, less
+                            We take a 2% house fee on paid jobs. Pricing displayed for any job is the price
+                            the client agrees to pay; the operator receives 98% of the agreed amount, less
                             the payment processor&apos;s fee.
                         </p>
                     </Section>

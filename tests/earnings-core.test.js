@@ -13,10 +13,10 @@ import {
 const cfg = (over = {}) => ({ ...DEFAULT_EARNINGS_CONFIG, ...over });
 
 describe("resolveEarningsConfig", () => {
-    it("defaults are conservative: subsidy not approved, 5% house fee", () => {
+    it("defaults are conservative: subsidy not approved, 2% house fee", () => {
         const c = resolveEarningsConfig({ env: {} });
         expect(c.subsidy_approved).toBe(false);
-        expect(c.house_fee_pct).toBe(5);
+        expect(c.house_fee_pct).toBe(2);
         expect(c.subsidy_per_1k_output_usd).toBeGreaterThan(0);
         expect(c.min_payout_usd).toBeGreaterThan(0);
     });
@@ -30,7 +30,7 @@ describe("resolveEarningsConfig", () => {
     });
 
     it("a fee above 100% can never mint negative credits", () => {
-        expect(resolveEarningsConfig({ env: {}, settings: { house_fee_pct: 250 } }).house_fee_pct).toBe(5);
+        expect(resolveEarningsConfig({ env: {}, settings: { house_fee_pct: 250 } }).house_fee_pct).toBe(2);
     });
 });
 
@@ -77,8 +77,8 @@ describe("computeJobCredits", () => {
         ];
         const rows = computeJobCredits({ job: { ...job, payment_offer: 9 }, shares, config: cfg() });
         expect(rows.map((r) => r.provider_id)).toEqual(["p1", "p2", "p3"]);
-        expect(rows.reduce((a, r) => a + r.amount_usd, 0)).toBeCloseTo(8.55, 6);
-        expect(rows.reduce((a, r) => a + r.fee_usd, 0)).toBeCloseTo(0.45, 6);
+        expect(rows.reduce((a, r) => a + r.amount_usd, 0)).toBeCloseTo(8.82, 6);
+        expect(rows.reduce((a, r) => a + r.fee_usd, 0)).toBeCloseTo(0.18, 6);
         expect(rows[0].role).toBe("primary");
     });
 

@@ -29,8 +29,8 @@ export const DEFAULT_EARNINGS_CONFIG = Object.freeze({
     // hosted APIs, so the house is never paying more than the work is worth.
     subsidy_per_1k_output_usd: 0.0005,
     subsidy_approved: false,
-    // The published house fee: 5% of paid jobs, the operator keeps 95%.
-    house_fee_pct: 5,
+    // The published house fee: 2% of paid jobs, the operator keeps 98%.
+    house_fee_pct: 2,
     min_payout_usd: 5
 });
 
