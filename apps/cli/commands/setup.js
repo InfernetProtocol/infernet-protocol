@@ -47,6 +47,8 @@ Flags:
   --confirm, --yes       Auto-confirm every prompt. Use for unattended runs.
   --model <name>         Pre-select model to pull (e.g. qwen2.5:7b).
   --skip-pull            Skip the model-pull step.
+  --no-abliterated       Don't default to the abliterated (uncensored) model
+                         when it fits; pick the largest stock Qwen instead.
   --backend <kind>       Pin engine backend (vllm | ollama | mojo | stub). Default: auto (prefers vLLM, falls back to Ollama).
   --host <url>           Override Ollama host. Default: http://localhost:11434.
   --port <n>             P2P port to open in the firewall. Default: ${DEFAULT_P2P_PORT}.
@@ -69,14 +71,37 @@ skip the prompts.
  * is ~1.2× that for a Q4_K_M quant + KV cache. The model picker uses
  * this to decide whether a model fits the host.
  */
+// huihui-ai's abliteration of Qwen3.8 27B (Q4_K_M on Ollama; the same weights
+// are on HF as huihui-ai/Huihui-Qwen3.8-27B-abliterated for vLLM nodes).
+export const ABLITERATED_DEFAULT = "huihui_ai/Qwen3.8-abliterated:27b";
+
 const MODEL_SUGGESTIONS = [
     { name: "qwen2.5:0.5b", size_gb: 0.4,  size: "≈400 MB", note: "smoke test, runs on CPU" },
     { name: "qwen2.5:3b",   size_gb: 2.0,  size: "≈2 GB",   note: "fits 6 GB+ GPU / 8 GB+ RAM" },
     { name: "qwen2.5:7b",   size_gb: 4.4,  size: "≈4.4 GB", note: "fits 8 GB+ GPU / 12 GB+ RAM" },
     { name: "qwen2.5:14b",  size_gb: 9.0,  size: "≈9 GB",   note: "fits 16 GB+ GPU / 24 GB+ RAM" },
     { name: "qwen2.5:32b",  size_gb: 20.0, size: "≈20 GB",  note: "fits 24 GB+ GPU / 40 GB+ RAM" },
-    { name: "qwen2.5:72b",  size_gb: 40.0, size: "≈40 GB",  note: "fits 48 GB+ GPU / 80 GB+ RAM" }
+    { name: "qwen2.5:72b",  size_gb: 40.0, size: "≈40 GB",  note: "fits 48 GB+ GPU / 80 GB+ RAM" },
+    { name: ABLITERATED_DEFAULT, size_gb: 18.0, size: "≈18 GB", note: "abliterated (uncensored), fits 24 GB+ GPU", abliterated: true }
 ];
+
+/**
+ * Default pick for a self-hosted node. CPU-only hosts get the smallest model.
+ * GPU hosts get the abliterated model when it fits (unless the operator opts
+ * out), otherwise the largest stock model that fits.
+ */
+export function pickDefaultSuggestion(evaluated, { isCpuOnly, abliterated = true } = {}) {
+    if (isCpuOnly) return MODEL_SUGGESTIONS[0].name;
+    const fitting = evaluated.filter((m) => m.fits);
+    if (abliterated) {
+        const abl = fitting.find((m) => m.abliterated);
+        if (abl) return abl.name;
+    }
+    const stock = fitting.filter((m) => !m.abliterated);
+    return stock.length > 0 ? stock[stock.length - 1].name : MODEL_SUGGESTIONS[0].name;
+}
+
+export { MODEL_SUGGESTIONS };
 
 // modelFits wraps checkFits: maps ok→fits and passes through unknown sizes.
 export function modelFits({ size_gb, vram_gb, ram_gb }) {
@@ -392,7 +417,9 @@ async function verifyModelPulled(host, name) {
         clearTimeout(t);
         if (!res.ok) return false;
         const body = await res.json();
-        const have = (body.models ?? []).some((m) => (m.name ?? m.model) === name);
+        // Ollama may report namespaced tags in lower case.
+        const want = name.toLowerCase();
+        const have = (body.models ?? []).some((m) => String(m.name ?? m.model).toLowerCase() === want);
         return have;
     } catch {
         return false;
@@ -408,15 +435,11 @@ async function chooseModel(installed, opts) {
         const f = checkFits({ size_gb: m.size_gb, vram_gb: vramGb, ram_gb: ramGb });
         return { ...m, fits: f.ok, mode: f.mode, ceiling_gb: f.ceiling_gb };
     });
-    const fittingOnly = evaluated.filter((m) => m.fits);
     const isCpuOnly = !(Number.isFinite(vramGb) && vramGb > 0);
     // CPU-only: default to smallest model — large models are impractically
-    // slow on CPU and will lock the machine. GPU: largest fitting model.
-    const defaultModel = isCpuOnly
-        ? MODEL_SUGGESTIONS[0].name   // qwen2.5:0.5b
-        : fittingOnly.length > 0
-            ? fittingOnly[fittingOnly.length - 1].name
-            : MODEL_SUGGESTIONS[0].name;
+    // slow on CPU and will lock the machine. GPU: the abliterated model if it
+    // fits, else the largest fitting stock model.
+    const defaultModel = pickDefaultSuggestion(evaluated, { isCpuOnly, abliterated: opts.abliterated !== false });
 
     if (opts.preselected) {
         const m = evaluated.find((x) => x.name === opts.preselected);
@@ -441,7 +464,7 @@ async function chooseModel(installed, opts) {
             ? ""
             : `  [✗ won't fit on this host — ${m.mode} ceiling ≈ ${m.ceiling_gb} GB]`;
         process.stdout.write(
-            `    ${i + 1}) ${m.name.padEnd(16)} ${m.size.padEnd(10)} ${m.note}${installedFlag}${fitFlag}\n`
+            `    ${i + 1}) ${m.name.padEnd(34)} ${m.size.padEnd(10)} ${m.note}${installedFlag}${fitFlag}\n`
         );
     });
     process.stdout.write(`    ${MODEL_SUGGESTIONS.length + 1}) other (enter manually)\n`);
@@ -679,6 +702,7 @@ export default async function setup(args) {
             chosenModel = await chooseModel(installedNames, {
                 yes,
                 preselected: preselectedModel,
+                abliterated: !args.has("no-abliterated"),
                 capacity: { vramGb, ramGb }
             });
             if (!chosenModel) {

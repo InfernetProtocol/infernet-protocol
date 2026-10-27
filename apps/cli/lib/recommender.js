@@ -52,7 +52,13 @@ export const CATALOG = [
     // ── MoE (high VRAM, vLLM only) ──
     { id: "mixtral-8x7b",    name: "Mixtral 8x7B",       paramsB: 47,  vramMin: 30, ramMin: 64, pullName: "dolphin-mixtral:8x7b",  backend: "ollama", quality: 9, speed: 5,  useCases: ["chat","coding","uncensored"], uncensored: true },
 
+    // ── abliterated (the open-weight models allmodels.io routes as "abliterated") ──
+    { id: "qwen3.8-27b-abliterated", name: "Qwen3.8 27B abliterated (uncensored)", paramsB: 27.8, vramMin: 24, ramMin: 32, pullName: "huihui_ai/Qwen3.8-abliterated:27b", backend: "ollama", quality: 10, speed: 5, useCases: ["chat","uncensored","coding","agents","study"], uncensored: true, abliterated: true, notes: "huihui-ai abliteration; default for 24 GB+ self-hosted nodes." },
+
     // ── flagship / cluster-tier (multi-GPU or cloud; won't fit a single card) ──
+    { id: "glm-5.3-flash-abliterated", name: "GLM-5.3 Flash 321B NVFP4 (abliterated)", paramsB: 321, vramMin: 256, ramMin: 256, pullName: "hf:edp1096/Huihui-GLM-5.3-Flash-abliterated-NVFP4", backend: "vllm", quality: 10, speed: 3, useCases: ["chat","uncensored","coding","agents"], uncensored: true, abliterated: true, notes: "NVFP4 needs Blackwell GPUs." },
+    { id: "glm-5.3-abliterated", name: "GLM-5.3 753B NVFP4 (abliterated)", paramsB: 753, vramMin: 512, ramMin: 512, pullName: "hf:dealignai/GLM-5.3-ABLITERATED-NVFP4", backend: "vllm", quality: 10, speed: 2, useCases: ["chat","uncensored","coding","agents"], uncensored: true, abliterated: true, notes: "NVFP4 needs Blackwell GPUs." },
+    { id: "deepseek-v4.1-flash-abliterated", name: "DeepSeek V4.1 Flash 763B (abliterated)", paramsB: 763, vramMin: 640, ramMin: 640, pullName: "hf:mrfakename/DeepSeek-V4.1-Flash-1017-abliterated", backend: "vllm", quality: 10, speed: 2, useCases: ["chat","uncensored","coding","agents","reasoning"], uncensored: true, abliterated: true },
     { id: "glm-5.2-uncensored", name: "GLM-5.2 754B FP8 (uncensored)", paramsB: 754, vramMin: 768, ramMin: 768, pullName: "hf:zandenAI/GLM-5.2-FP8-Uncensored", backend: "vllm", quality: 10, speed: 2, useCases: ["chat","uncensored","cybersecurity","agents"], uncensored: true, gated: true }
 ];
 
@@ -78,6 +84,8 @@ function scoreModel(m, { vramGb, ramGb, useCase }) {
     // Quality bias for use-case match
     score += m.quality * 4;
     if (useCase && m.useCases?.includes(useCase)) score += 25;
+    // Self-hosted default: prefer an abliterated model whenever it fits.
+    if (m.abliterated && (m.vramMin === 0 || vramGb >= m.vramMin)) score += 20;
 
     // CPU-only systems prefer speed
     if (vramGb === 0) score += m.speed * 3 - m.paramsB * 2;
