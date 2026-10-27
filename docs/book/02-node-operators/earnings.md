@@ -4,7 +4,7 @@
 
 Every job your node completes is credited to it in the **earnings ledger**: one row per job, per node that worked on it. What a job earns depends on how it was paid for.
 
-**Paid jobs.** A client opens a CoinPay invoice for the job's `payment_offer`. Your node earns its share of that payment after the house fee (0% today; the site promises no platform spread above gateway fees). The credit shows as *awaiting client payment* until CoinPay confirms the payment, then *confirmed*. A pipeline-parallel job served by several nodes is split the same way its Compute Payment Receipts are: the primary takes `1 / (n + 1)` for orchestration and the rest is weighted by the number of layers each slice served.
+**Paid jobs.** A client opens a CoinPay invoice for the job's `payment_offer`. Your node earns its share of that payment after the 10% house fee (you keep 90%). The credit shows as *awaiting client payment* until CoinPay confirms the payment, then *confirmed*. A pipeline-parallel job served by several nodes is split the same way its Compute Payment Receipts are: the primary takes `1 / (n + 1)` for orchestration and the rest is weighted by the number of layers each slice served.
 
 **Free jobs.** The public `/chat` playground and other unpaid traffic carry no client payment. During the alpha that is all of the traffic, so the house pays a **subsidy per 1,000 output tokens** for it. Subsidy credits show as *pending approval* until the subsidy rate is approved; after that they become *confirmed* at the rate recorded on each job. Jobs completed before the ledger existed (October 2026) were credited retroactively at the same rate.
 

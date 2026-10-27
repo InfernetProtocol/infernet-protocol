@@ -13,10 +13,10 @@ import {
 const cfg = (over = {}) => ({ ...DEFAULT_EARNINGS_CONFIG, ...over });
 
 describe("resolveEarningsConfig", () => {
-    it("defaults are conservative: subsidy not approved, no house fee", () => {
+    it("defaults are conservative: subsidy not approved, 10% house fee", () => {
         const c = resolveEarningsConfig({ env: {} });
         expect(c.subsidy_approved).toBe(false);
-        expect(c.house_fee_pct).toBe(0);
+        expect(c.house_fee_pct).toBe(10);
         expect(c.subsidy_per_1k_output_usd).toBeGreaterThan(0);
         expect(c.min_payout_usd).toBeGreaterThan(0);
     });
@@ -30,7 +30,7 @@ describe("resolveEarningsConfig", () => {
     });
 
     it("a fee above 100% can never mint negative credits", () => {
-        expect(resolveEarningsConfig({ env: {}, settings: { house_fee_pct: 250 } }).house_fee_pct).toBe(0);
+        expect(resolveEarningsConfig({ env: {}, settings: { house_fee_pct: 250 } }).house_fee_pct).toBe(10);
     });
 });
 
@@ -69,7 +69,7 @@ describe("computeJobCredits", () => {
         expect(confirmed.status).toBe("confirmed");
     });
 
-    it("multi-provider jobs split by share and sum to the job total", () => {
+    it("multi-provider jobs split by share and sum to the job total less the house fee", () => {
         const shares = [
             { provider_id: "p1", share: 1 / 3, role: "primary" },
             { provider_id: "p2", share: 2 / 9, role: "slice" },
@@ -77,7 +77,8 @@ describe("computeJobCredits", () => {
         ];
         const rows = computeJobCredits({ job: { ...job, payment_offer: 9 }, shares, config: cfg() });
         expect(rows.map((r) => r.provider_id)).toEqual(["p1", "p2", "p3"]);
-        expect(rows.reduce((a, r) => a + r.amount_usd, 0)).toBeCloseTo(9, 6);
+        expect(rows.reduce((a, r) => a + r.amount_usd, 0)).toBeCloseTo(8.1, 6);
+        expect(rows.reduce((a, r) => a + r.fee_usd, 0)).toBeCloseTo(0.9, 6);
         expect(rows[0].role).toBe("primary");
     });
 
