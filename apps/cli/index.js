@@ -49,6 +49,7 @@ import inference from './commands/inference.js';
 import rpc from './commands/rpc.js';
 import uncensored from './commands/uncensored.js';
 import reservation from './commands/reservation.js';
+import order from './commands/order.js';
 import mcp from './commands/mcp.js';
 import credits, { invites, redeem } from './commands/credits.js';
 
@@ -112,11 +113,11 @@ const COMMANDS = {
     // aliases
     uninstall: remove,
     start, status, stop, restart, stats, logs,
-    payout, payments, gpu, firewall, chat, setup, model, train, publish, inference, rpc, uncensored, reservation, reservations: reservation, mcp, credits, invites, redeem, tui, doctor, service, pubkey, debug, deploy, console: consoleCmd, help
+    payout, payments, gpu, firewall, chat, setup, model, train, publish, inference, rpc, uncensored, reservation, reservations: reservation, order, orders: order, mcp, credits, invites, redeem, tui, doctor, service, pubkey, debug, deploy, console: consoleCmd, help
 };
 
 // Commands that can run without a loaded config.
-const NO_CONFIG = new Set(['init', 'login', 'help', 'stats', 'logs', 'stop', 'restart', 'gpu', 'firewall', 'chat', 'setup', 'model', 'train', 'publish', 'inference', 'rpc', 'uncensored', 'reservation', 'reservations', 'mcp', 'credits', 'invites', 'redeem', 'tui', 'doctor', 'service', 'pubkey', 'debug', 'deploy', 'console', 'upgrade', 'update', 'remove', 'uninstall']);
+const NO_CONFIG = new Set(['init', 'login', 'help', 'stats', 'logs', 'stop', 'restart', 'gpu', 'firewall', 'chat', 'setup', 'model', 'train', 'publish', 'inference', 'rpc', 'uncensored', 'reservation', 'reservations', 'order', 'orders', 'mcp', 'credits', 'invites', 'redeem', 'tui', 'doctor', 'service', 'pubkey', 'debug', 'deploy', 'console', 'upgrade', 'update', 'remove', 'uninstall']);
 // Commands that need a config but not a control-plane client (none today
 // — kept as a future escape hatch).
 const NO_CLIENT = new Set();

@@ -1,7 +1,7 @@
 {
   "name": "@infernetprotocol/cli",
-  "version": "0.1.68",
-  "description": "GPU-node CLI / daemon for the Infernet Protocol \u2014 register a GPU server with a Supabase control plane and start earning.",
+  "version": "0.1.69",
+  "description": "GPU-node CLI / daemon for the Infernet Protocol — register a GPU server with a Supabase control plane and start earning.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -35,6 +35,7 @@
     "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
+    "@profullstack/x402-client": "^0.3.0",
     "blessed": "^0.1.81",
     "dotenv": "^18.0.9",
     "ora": "^9.4.1",

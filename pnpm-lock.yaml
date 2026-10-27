@@ -70,6 +70,9 @@ importers:
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
+      '@profullstack/x402-client':
+        specifier: ^0.3.0
+        version: 0.3.0
       blessed:
         specifier: ^0.1.81
         version: 0.1.81
@@ -1643,6 +1646,11 @@ packages:
     peerDependenciesMeta:
       react:
         optional: true
+
+  '@profullstack/x402-client@0.3.0':
+    resolution: {integrity: sha512-ytKhBrnjXFef2X2vgORw6d25tZfmo1qinxk/1mXlpeVticHP5UxidElFtjdjSt1LcHVlAEQR6m/+p4obmxDzJQ==}
+    engines: {node: '>=20.19'}
+    hasBin: true
 
   '@profullstack/x402-gateway@0.13.1':
     resolution: {integrity: sha512-V7liSO0tShZRlp8dancuDuUSF/rqrr5YF3bzLoZy9wn6ixf1RIRPYTepe72s36JOdSVzi3wfuhaZFm9y0RpV4w==}
@@ -8150,6 +8158,11 @@ snapshots:
   '@profullstack/referrals@0.1.0(react@19.3.1)':
     optionalDependencies:
       react: 19.3.1
+
+  '@profullstack/x402-client@0.3.0':
+    dependencies:
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
 
   '@profullstack/x402-gateway@0.13.1':
     dependencies:

@@ -7,12 +7,14 @@ const PUBLIC_NAV = [
     { href: "/docs", label: "Docs" },
     { href: "/chat", label: "Chat" },
     { href: "/deploy", label: "Deploy" },
+    { href: "/order", label: "Order" },
     { href: "/status", label: "Status" }
 ];
 
 const SIGNED_IN_NAV = [
     { href: "/dashboard", label: "Dashboard" },
     { href: "/deploy", label: "Deploy" },
+    { href: "/order", label: "Order" },
     { href: "/chat", label: "Chat" },
     { href: "/status", label: "Status" },
     { href: "/invites", label: "Invites" },

@@ -12,6 +12,7 @@ Infernet is the protocol layer — matchmaking, escrow, reputation (CPR), and pa
 - [The book](https://infernetprotocol.com/book): Full long-form explanation of the protocol and its design.
 - [Chat playground](https://infernetprotocol.com/chat): Public playground that routes prompts through real provider nodes.
 - [Deploy](https://infernetprotocol.com/deploy): Deploy providers to cloud GPU platforms.
+- [Order](https://infernetprotocol.com/order): Book a dedicated model endpoint on an online node by the hour. Agents: GET /api/v1/orders/capacity, then POST /api/v1/orders answers 402 with an x402 offer (USDC); pay and get the reservation plus an API key back. People: pay: "checkout" for a CoinPay checkout URL.
 - [Live status](https://infernetprotocol.com/status): Live network state — online nodes, jobs, providers.
 
 ## Reference

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { confirmPaidJobCredits } from "@/lib/data/earnings";
+import { orderByPaymentRef, getOrder, fulfilOrder } from "@/lib/data/reservation-orders";
 import {
   verifyWebhookSignature,
   parseWebhookPayload,
@@ -71,6 +72,19 @@ export async function POST(request) {
     job = data;
   }
   if (!job) {
+    // Not a job: maybe a self-serve reservation order (POST /api/v1/orders, pay: "checkout").
+    try {
+      const order = (await orderByPaymentRef(refs)) ?? (event.orderId ? await getOrder(String(event.orderId)) : null);
+      if (order) {
+        if (event.status !== "confirmed") {
+          return NextResponse.json({ ok: true, settled: false, reason: `order ${order.id}: status ${event.providerStatus || event.status}` });
+        }
+        const done = await fulfilOrder(order);
+        return NextResponse.json({ ok: true, settled: true, orderId: order.id, reservationId: done.order?.reservation_id ?? null });
+      }
+    } catch (err) {
+      return errorResponse(500, "Failed to settle reservation order", err?.message ?? String(err));
+    }
     // Not ours (or a test event): acknowledge so CoinPay stops retrying.
     return NextResponse.json({ ok: true, settled: false, reason: "unknown payment" });
   }

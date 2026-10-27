@@ -30,7 +30,12 @@ function normalize(row) {
     };
 }
 
-export async function createReservation(value, { createdBy } = {}) {
+/**
+ * `buyerTokenHash` lets a self-serve order hand the buyer their token when the
+ * order is placed: the reservation is then created with that hash and no new
+ * token (buyerToken comes back null).
+ */
+export async function createReservation(value, { createdBy, buyerTokenHash = null } = {}) {
     if (value.target_kind === "node") {
         const { data: node, error } = await db().from("providers").select("id, name").eq("id", value.provider_id).maybeSingle();
         if (error) throw error;
@@ -40,7 +45,7 @@ export async function createReservation(value, { createdBy } = {}) {
             throw e;
         }
     }
-    const report = newBuyerToken();
+    const report = buyerTokenHash ? { token: null, hash: buyerTokenHash } : newBuyerToken();
     const row = {
         name: value.name,
         buyer: value.buyer,

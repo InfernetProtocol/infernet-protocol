@@ -12,12 +12,22 @@
  */
 import { createInterface } from 'node:readline';
 import { resolveClientOptions, createReservationsClient } from '../lib/reservations-client.js';
+import { createOrdersClient, x402KeyFrom, DEFAULT_MAX_USD } from '../lib/orders-client.js';
 import { resolveCreditsOptions, createCreditsClient } from '../lib/credits-client.js';
 import { CURRENT_VERSION } from '../lib/version.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
 
 const id = { type: 'string', description: 'reservation id (uuid)' };
+const ORDER_PROPS = {
+    gpu_class: { type: 'string', enum: ['l40s', 'a100', 'h100', 'h100x2'] },
+    models: { type: 'array', items: { type: 'string' }, description: 'exact model ids, from order_capacity' },
+    hours: { type: 'integer', minimum: 1, maximum: 168 },
+    start_at: { type: 'string', description: 'whole UTC hour, ISO; default the next hour' },
+    email: { type: 'string' },
+    name: { type: 'string' }
+};
+const orderInput = (a) => Object.fromEntries(['gpu_class', 'models', 'hours', 'start_at', 'email', 'name'].filter((k) => a[k] !== undefined).map((k) => [k, a[k]]));
 
 export const TOOLS = [
     {
@@ -85,6 +95,31 @@ export const TOOLS = [
         inputSchema: { type: 'object', required: ['id'], properties: { id } },
         run: (c, a) => c.invoice(a.id)
     },
+    // Self-serve orders: anyone can book, no admin token. x402 pays from X402_PRIVATE_KEY.
+    { name: 'order_capacity', description: 'What can be ordered right now: per GPU class the list price, how many online nodes are free and which models they serve.', inputSchema: { type: 'object', properties: {} }, run: (c) => c.orders.capacity() },
+    {
+        name: 'order_quote',
+        description: 'Price an order without paying: matches an online node and returns the quote plus the x402 offer.',
+        inputSchema: { type: 'object', required: ['gpu_class', 'models'], properties: ORDER_PROPS },
+        run: (c, a) => c.orders.quote(orderInput(a))
+    },
+    {
+        name: 'order_create',
+        description: 'Order a dedicated model endpoint (prepaid). pay="x402" pays now in USDC from the X402_PRIVATE_KEY wallet (refuses above max_usd) and returns the reservation, buyer token and an API key. pay="checkout" returns a CoinPay checkout URL for a person to pay (any coin or PayPal) and the buyer token; poll order_status.',
+        inputSchema: {
+            type: 'object', required: ['gpu_class', 'models', 'pay'],
+            properties: { ...ORDER_PROPS, pay: { type: 'string', enum: ['x402', 'checkout'] }, max_usd: { type: 'number', description: `x402 spend ceiling, default ${DEFAULT_MAX_USD}` } }
+        },
+        run: (c, a) => (a.pay === 'checkout'
+            ? c.orders.checkout(orderInput(a))
+            : c.orders.payX402(orderInput(a), { key: x402KeyFrom(), maxUsd: a.max_usd ?? DEFAULT_MAX_USD }))
+    },
+    {
+        name: 'order_status',
+        description: 'An order and, once paid, its reservation. Needs the buyer token the order returned.',
+        inputSchema: { type: 'object', required: ['id', 'buyer_token'], properties: { id: { type: 'string' }, buyer_token: { type: 'string' } } },
+        run: (c, a) => c.orders.status(a.id, a.buyer_token)
+    },
     // Consumer compute credits + invites for the `infernet login` account.
     // Credits are never node earnings and cannot be withdrawn.
     { name: 'credits_balance', description: 'Your consumer compute-credit balance and recent grants (signed-in account).', inputSchema: { type: 'object', properties: {} }, run: (c) => c.credits.balance() },
@@ -136,10 +171,11 @@ export async function handleMessage(msg, client) {
 
 export default async function mcp(args) {
     if (args.has('help') || args.has('h')) {
-        process.stdout.write('infernet mcp — MCP server (stdio): managed-endpoint reservations, credits and invites\n\n  claude mcp add infernet -- infernet mcp\n');
+        process.stdout.write('infernet mcp — MCP server (stdio): self-serve orders, managed-endpoint reservations, credits and invites\n\n  claude mcp add infernet -- infernet mcp\n');
         return 0;
     }
     const client = createReservationsClient(await resolveClientOptions({ url: args.get('url'), token: args.get('token'), buyerToken: args.get('buyer-token') }));
+    client.orders = createOrdersClient({ baseUrl: (await resolveClientOptions({ url: args.get('url') })).baseUrl });
     client.credits = createCreditsClient(await resolveCreditsOptions({ url: args.get('url'), token: args.get('token') }));
     const rl = createInterface({ input: process.stdin });
     for await (const line of rl) {
