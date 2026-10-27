@@ -22,7 +22,8 @@ function fail(status, error) {
 
 async function paidAtCoinpay(ref, totalUsd) {
     const apiKey = env("COINPAY_API_KEY") || env("COINPAYPORTAL_API_KEY");
-    const baseUrl = (env("COINPAY_API_URL") || "https://coinpayportal.com").replace(/\/+$/, "");
+    // COINPAY_API_URL carries an /api suffix; checkout paths add their own.
+    const baseUrl = (env("COINPAY_API_URL") || "https://coinpayportal.com").replace(/\/+$/, "").replace(/\/api$/, "");
     if (!apiKey || !ref) return false;
     try {
         const session = await checkoutClient({ apiKey, baseUrl }).get(ref);

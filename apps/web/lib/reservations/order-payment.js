@@ -14,7 +14,8 @@ const env = (name) => process.env[name];
 const nonceOf = (payment) => payment?.payload?.authorization?.nonce ?? null;
 
 export const siteUrl = () => (env("SITE_URL") || env("NEXT_PUBLIC_APP_URL") || "https://infernetprotocol.com").replace(/\/+$/, "");
-const coinpayBase = () => (env("COINPAY_API_URL") || "https://coinpayportal.com").replace(/\/+$/, "");
+// COINPAY_API_URL is set with its /api suffix (the payments package wants that); x402 paths add their own.
+const coinpayBase = () => (env("COINPAY_API_URL") || "https://coinpayportal.com").replace(/\/+$/, "").replace(/\/api$/, "");
 
 export function x402Configured() {
     return Boolean(env("COINPAY_X402_KEY") && env("CRAWL_PAY_TO"));
