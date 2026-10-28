@@ -97,3 +97,29 @@ Anyone can book without an admin: the website (/order), the CLI (`infernet order
   order, reads the report and invoice, and issues keys.
 - Table `reservation_orders` (migration `20261027000000_reservation_orders.sql`).
 - Not done: paying the node's operator its share of a prepaid order is still manual.
+
+## Consumer GPUs on SaladCloud (2026-10-28)
+
+Fifteen consumer-card classes (`rtx5090`, `rtx4090`, ... `rtx4060ti`) sell through the same
+`POST /api/v1/orders` flow, on demand: no network node has to be online. Our cost is
+SaladCloud's per-GPU-hour price at the High priority tier, effective 2026-11-01 (table in
+`apps/web/lib/reservations/salad.js`), and the price is that cost times the order margin
+(default 100%, so twice Salad's price: RTX 4090 $0.88/h, RTX 5090 $1.20/h).
+
+We sell an inference service that runs on Salad, never raw Salad compute: SaladCloud's terms
+(section 6, item 20) forbid reselling compute without a written agreement and allow selling
+your own inference service. The buyer gets an Infernet reservation and Infernet API keys; one
+Salad container group runs vLLM serving the single model they booked (an ungated Qwen 2.5 model
+that fits the card), behind Salad's gateway with gateway auth off and a vLLM key only Infernet
+holds.
+
+- Paid order -> container group created stopped, reservation targets its gateway URL.
+- Cron (`/api/cron/reservations`, every minute) starts it an hour before `start_at` (the setup
+  fee covers that hour) and deletes it when the window ends.
+- Consumer nodes can be interrupted; the per-minute probes and the existing terms (non-compliant
+  hours are credited or refunded) cover that.
+- Salad is prepaid. The buyer's payment arrives first; Salad credits (card, or USDC on Solana,
+  $5-$10,000) have to cover the hours before the group starts. A start that fails is logged on
+  the order (`error`) and refunded by hand.
+- On sale only when `SALAD_API_KEY`, `SALAD_ORG` and `SALAD_PROJECT` are set; until then
+  capacity lists the classes as `available: false` and orders get 503.

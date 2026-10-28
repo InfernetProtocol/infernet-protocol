@@ -3,6 +3,9 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { createReservation, issueKey, publicReservation, getReservation } from "@/lib/data/reservations";
 import { newBuyerToken, sha256 } from "@/lib/reservations/core";
 import { reservationFromOrder } from "@/lib/reservations/orders";
+import { isSaladClass } from "@/lib/reservations/salad";
+import { createOrderGroup } from "@/lib/data/salad";
+import { randomBytes } from "node:crypto";
 
 /**
  * Self-serve reservation orders — database access
@@ -14,7 +17,7 @@ import { reservationFromOrder } from "@/lib/reservations/orders";
 
 export const HOLD_MS = 90 * 60 * 1000;
 
-const COLUMNS = "id, status, rail, gpu_class, models, provider_id, operator_name, start_at, hours, price_per_hour, setup_fee, total_usd, name, email, buyer_token_hash, payment_ref, payer, reservation_id, error, created_at, paid_at, updated_at";
+const COLUMNS = "id, status, rail, gpu_class, models, provider_id, operator_name, start_at, hours, price_per_hour, setup_fee, total_usd, name, email, buyer_token_hash, payment_ref, payer, reservation_id, error, salad_group, salad_state, created_at, paid_at, updated_at";
 const PROVIDER_COLUMNS = "id, name, status, last_seen, reputation, gpu_model, specs, trust_tier";
 
 function db() {
@@ -60,6 +63,7 @@ export async function bookings(now = Date.now()) {
  * Record an order. Returns { order, buyerToken }; the token is shown once and
  * reads the order and, once paid, the reservation.
  */
+/** Salad orders have no node: provider is null and the operator is us, on SaladCloud. */
 export async function placeOrder({ value, quote, provider, rail, paymentRef = null, payer = null }) {
     const token = newBuyerToken();
     const row = {
@@ -67,8 +71,8 @@ export async function placeOrder({ value, quote, provider, rail, paymentRef = nu
         rail,
         gpu_class: value.gpu_class,
         models: value.models,
-        provider_id: provider.id,
-        operator_name: provider.name || `node ${provider.id}`,
+        provider_id: provider ? provider.id : null,
+        operator_name: provider ? (provider.name || `node ${provider.id}`) : "Infernet on SaladCloud",
         start_at: value.start_at,
         hours: value.hours,
         price_per_hour: quote.price_per_hour,
@@ -125,7 +129,15 @@ export async function fulfilOrder(order, { withKey = false, payer = null } = {})
     if (error) throw error;
     if (!claimed) return { order: await getOrder(order.id), already: true };
     try {
-        const { reservation } = await createReservation(reservationFromOrder(normalize(claimed)), {
+        // A Salad order gets its container group now, stopped; the cron starts it an hour before start_at.
+        let endpoint = null;
+        if (isSaladClass(claimed.gpu_class)) {
+            const apiKey = randomBytes(24).toString("base64url");
+            const group = await createOrderGroup({ orderId: order.id, gpuClass: claimed.gpu_class, model: claimed.models[0], apiKey });
+            await db().from("reservation_orders").update({ salad_group: group.name, salad_state: "created", updated_at: new Date().toISOString() }).eq("id", order.id);
+            endpoint = { url: group.url, apiKey };
+        }
+        const { reservation } = await createReservation(reservationFromOrder(normalize(claimed), endpoint), {
             createdBy: `order:${order.id}`,
             buyerTokenHash: claimed.buyer_token_hash
         });
@@ -164,4 +176,19 @@ export async function publicOrder(order, now = Date.now()) {
         error: order.status === "failed" ? order.error : undefined,
         created_at: order.created_at
     };
+}
+
+/** Paid Salad orders whose container group still exists, for the cron. */
+export async function saladOrdersToTend() {
+    const { data, error } = await db().from("reservation_orders").select(COLUMNS)
+        .eq("status", "fulfilled").not("salad_group", "is", null).in("salad_state", ["created", "started"]);
+    if (error) throw error;
+    return (data ?? []).map(normalize);
+}
+
+export async function setSaladState(id, state, err = null) {
+    const patch = { salad_state: state, updated_at: new Date().toISOString() };
+    if (err) patch.error = String(err).slice(0, 500);
+    const { error } = await db().from("reservation_orders").update(patch).eq("id", id);
+    if (error) throw error;
 }

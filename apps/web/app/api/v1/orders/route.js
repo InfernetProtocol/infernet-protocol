@@ -6,6 +6,8 @@ import { orderOffer, offerHeaders, paymentFrom, settleOrderPayment, settlementHe
 import { publicReservation } from "@/lib/data/reservations";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { getOrderPricing } from "@/lib/data/order-pricing";
+import { isSaladClass } from "@/lib/reservations/salad";
+import { saladOnSale } from "@/lib/data/salad";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +35,8 @@ export const dynamic = "force-dynamic";
  *                                    GET /api/v1/orders/:id)
  *
  * 409 when nothing online fits: we never take money for capacity we cannot pin.
+ * Consumer-card classes (rtx4090 ...) run on SaladCloud on demand instead of
+ * on a network node (lib/reservations/salad.js); 503 until Salad is configured.
  */
 
 const limit = rateLimit({ windowMs: 60 * 60 * 1000, max: 60 });
@@ -60,14 +64,16 @@ export async function POST(request) {
     try {
         const [providers, booked, pricing] = await Promise.all([onlineProviders(), bookings(), getOrderPricing()]);
         const quote = quoteFor(value.gpu_class, value.hours, pricing.min_margin_pct);
-        const node = pickNode(providers, value, booked);
-        if (!node) {
+        const salad = isSaladClass(value.gpu_class);
+        if (salad && !saladOnSale()) return fail(503, `${value.gpu_class} is not on sale yet`, { hint: "GET /api/v1/orders/capacity shows which classes are available" });
+        const node = salad ? null : pickNode(providers, value, booked);
+        if (!salad && !node) {
             return fail(409, "no online node fits this order right now", {
                 hint: "GET /api/v1/orders/capacity lists the GPU classes and models on sale",
                 order: { gpu_class: value.gpu_class, models: value.models, start_at: value.start_at, hours: value.hours }
             });
         }
-        const summary = { ...quote, start_at: value.start_at, models: value.models, provider_id: node.id, operator_name: node.name, terms: ORDER_TERMS };
+        const summary = { ...quote, start_at: value.start_at, models: value.models, provider_id: node?.id ?? null, operator_name: node ? node.name : "Infernet on SaladCloud", terms: ORDER_TERMS };
 
         if (body?.pay === "checkout") {
             const c = checkoutLimit.check(getClientIp(request));

@@ -348,7 +348,8 @@ describe("pricing", () => {
 
     it("publishes the list with setup fees", () => {
         const l = priceList();
-        expect(l.tiers.map((t) => t.gpu_class)).toEqual(["l40s", "a100", "h100", "h100x2"]);
+        expect(l.tiers.map((t) => t.gpu_class).slice(0, 4)).toEqual(["l40s", "a100", "h100", "h100x2"]);
+        expect(l.tiers.map((t) => t.gpu_class)).toContain("rtx4090");
         expect(l.tiers[0].setup_fee).toBe(6.35);
     });
 });

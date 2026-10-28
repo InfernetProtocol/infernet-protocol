@@ -19,7 +19,7 @@ export default function OrderView() {
         fetch("/api/v1/orders/capacity").then((r) => r.json()).then((b) => {
             if (!b?.data) throw new Error(b?.error ?? "capacity lookup failed");
             setCap(b.data);
-            const first = b.data.classes.find((c) => c.nodes_available > 0);
+            const first = b.data.classes.find((c) => c.available);
             if (first) setGpu(first.gpu_class);
         }).catch((e) => setError(e?.message ?? String(e)));
     }, []);
@@ -54,8 +54,8 @@ export default function OrderView() {
                 <p className="text-xs font-semibold uppercase tracking-[0.4em] text-[var(--accent)]">Order</p>
                 <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Book a dedicated model endpoint</h1>
                 <p className="max-w-2xl text-sm leading-6 text-[var(--muted)]">
-                    Pick a GPU class and the models. We pin them on one online node for the hours you book and give you an
-                    OpenAI-compatible API key. {cap?.terms}
+                    Pick a GPU class and the models. We pin them on one online node, or start a consumer card for you on demand,
+                    for the hours you book and give you an OpenAI-compatible API key. {cap?.terms}
                 </p>
             </header>
 
@@ -70,18 +70,18 @@ export default function OrderView() {
                             <button
                                 key={c.gpu_class}
                                 type="button"
-                                disabled={c.nodes_available === 0}
+                                disabled={!c.available}
                                 onClick={() => { setGpu(c.gpu_class); setModels([]); }}
                                 className={`rounded-xl border p-4 text-left transition disabled:opacity-40 ${gpu === c.gpu_class ? "border-[var(--accent)] bg-white/5" : "border-white/10 hover:border-white/30"}`}
                             >
                                 <div className="font-semibold text-white">{c.label}</div>
                                 <div className="text-xs text-[var(--muted)]">{c.fits}</div>
                                 <div className="mt-2 text-sm text-white">${c.price_per_hour.toFixed(2)}/h + ${c.setup_fee.toFixed(2)} setup</div>
-                                <div className="text-xs text-[var(--muted)]">{c.nodes_available ? `${c.nodes_available} node${c.nodes_available > 1 ? "s" : ""} free` : "none online right now"}</div>
+                                <div className="text-xs text-[var(--muted)]">{c.source === "salad" ? (c.available ? "on demand, one model per order" : "coming soon") : c.nodes_available ? `${c.nodes_available} node${c.nodes_available > 1 ? "s" : ""} free` : "none online right now"}</div>
                             </button>
                         ))}
                     </div>
-                    {cap.classes.every((c) => c.nodes_available === 0) ? (
+                    {cap.classes.every((c) => !c.available) ? (
                         <p className="mt-4 text-sm text-amber-100">
                             No node with these GPUs is online right now, so nothing can be booked. Operators: run a node with
                             one of these cards and it goes on sale here automatically.
@@ -90,14 +90,14 @@ export default function OrderView() {
                 </section>
             ) : null}
 
-            {cls && cls.nodes_available > 0 ? (
+            {cls && cls.available ? (
                 <section className={panel}>
                     <h2 className="text-lg font-semibold text-white">2. Models and hours</h2>
                     <div className="mt-4 flex flex-wrap gap-2">
                         {cls.models.map((m) => (
                             <label key={m} className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-sm text-white">
                                 <input type="checkbox" checked={models.includes(m)}
-                                    onChange={(e) => setModels(e.target.checked ? [...models, m] : models.filter((x) => x !== m))} />
+                                    onChange={(e) => setModels(cls.models_per_order === 1 ? (e.target.checked ? [m] : []) : e.target.checked ? [...models, m] : models.filter((x) => x !== m))} />
                                 <span className="font-mono">{m}</span>
                             </label>
                         ))}
