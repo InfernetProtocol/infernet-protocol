@@ -5,6 +5,7 @@ import {
     computeJobCredits,
     summariseBalance,
     checkPayoutRequest,
+    isAutoApprovable,
     OPEN_PAYOUT_STATUSES
 } from "@/lib/earnings/core";
 
@@ -12,7 +13,8 @@ import {
  * Provider earnings ledger + payout requests (DB half). The math lives in
  * lib/earnings/core.js; see the header there for the model.
  *
- * Money only leaves through approvePayoutRequest(), which an admin calls.
+ * Money only leaves through approvePayoutRequest(): an admin calls it, or
+ * requestPayout() does for a request at or below auto_approve_max_usd.
  */
 
 const SETTINGS_KEY = "earnings";
@@ -197,7 +199,8 @@ export function publicConfig(config) {
         subsidy_per_1k_output_usd: config.subsidy_per_1k_output_usd,
         subsidy_approved: config.subsidy_approved,
         house_fee_pct: config.house_fee_pct,
-        min_payout_usd: config.min_payout_usd
+        min_payout_usd: config.min_payout_usd,
+        auto_approve_max_usd: config.auto_approve_max_usd
     };
 }
 
@@ -220,9 +223,11 @@ export async function getEarningsForNode({ pubkey, recent = 20 }) {
 
 /**
  * Queue a withdrawal. Snapshots the default payout address so a later
- * address change cannot redirect an approved payout.
+ * address change cannot redirect an approved payout. A request at or below
+ * auto_approve_max_usd is approved and sent right away; if that send does not
+ * go out it stays queued for an admin, and the request itself still stands.
  */
-export async function requestPayout({ providerId, amountUsd = null, via = "cli" }) {
+export async function requestPayout({ providerId, amountUsd = null, via = "cli", send } = {}) {
     const supabase = db();
     const [config, { data: addresses, error: addrErr }, summary] = await Promise.all([
         getEarningsConfig(supabase),
@@ -265,6 +270,14 @@ export async function requestPayout({ providerId, amountUsd = null, via = "cli" 
             throw withStatus("a payout request is already waiting for approval", 409);
         }
         throw withStatus(error.message, 500);
+    }
+    if (isAutoApprovable(data.amount_usd, config)) {
+        try {
+            const out = await approvePayoutRequest(data.id, { actor: "auto-approve", send });
+            return { request: out.request, outcome: out.outcome, auto_approved: true, balance: summary.balance };
+        } catch (err) {
+            console.warn(`payout auto-approve ${data.id} failed: ${err?.message ?? err}`);
+        }
     }
     return { request: data, balance: summary.balance };
 }
@@ -387,9 +400,21 @@ export async function approvePayoutRequest(id, { actor, send } = {}) {
     }
 
     const done = new Date().toISOString();
+    const notSent = outcome.outcome === "failed" && !outcome.payoutId;
     let patch;
     if (outcome.outcome === "sent") {
         patch = { status: "sent", sent_at: done, tx_hash: outcome.txHash, gateway_payout_id: outcome.payoutId ?? null, error: null };
+    } else if (notSent) {
+        // CoinPay refused before creating a payout (no send wallet, house
+        // balance short, rate lookup): nothing left. Put it back in the queue
+        // so it can be approved again once that is fixed, instead of failing
+        // the provider's request for a problem on our side.
+        patch = {
+            status: "requested",
+            approved_by: null,
+            approved_at: null,
+            error: `not sent: ${String(outcome.error ?? "payout refused").slice(0, 480)}`
+        };
     } else if (outcome.outcome === "failed") {
         patch = { status: "failed", error: String(outcome.error ?? "payout failed").slice(0, 500), gateway_payout_id: outcome.payoutId ?? null };
     } else {
@@ -424,7 +449,7 @@ export async function approvePayoutRequest(id, { actor, send } = {}) {
             metadata: { payout_request_id: id }
         }).then(({ error: e }) => e && console.warn(`payout audit row failed: ${e.message}`));
     }
-    return { request: updated, outcome: outcome.outcome };
+    return { request: updated, outcome: notSent ? "not_sent" : outcome.outcome };
 }
 
 export async function rejectPayoutRequest(id, { actor, reason } = {}) {

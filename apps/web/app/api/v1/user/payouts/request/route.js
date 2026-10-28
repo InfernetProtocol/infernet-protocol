@@ -9,7 +9,8 @@ import { appUrl } from "@/lib/auth/app-url";
  *   provider_id   a node the signed-in user owns (checked via pubkey_links)
  *   amount_usd    optional; empty = the whole available balance
  *
- * Queues the withdrawal for admin approval and redirects back.
+ * Queues the withdrawal for admin approval (or sends it now when it is within
+ * the auto-approve amount) and redirects back.
  */
 export async function POST(request) {
     const user = await getCurrentUser();
@@ -26,8 +27,8 @@ export async function POST(request) {
         return back({ payout_error: "That node is not linked to your account." });
     }
     try {
-        await requestPayout({ providerId, amountUsd: rawAmount ? Number(rawAmount) : null, via: "dashboard" });
-        return back({ payout: "requested" });
+        const out = await requestPayout({ providerId, amountUsd: rawAmount ? Number(rawAmount) : null, via: "dashboard" });
+        return back({ payout: out.request?.status === "sent" ? "sent" : "requested" });
     } catch (err) {
         return back({ payout_error: err.message });
     }

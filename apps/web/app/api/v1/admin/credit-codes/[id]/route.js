@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 /** DELETE /api/v1/admin/credit-codes/{id} — revoke a code (idempotent). Admin only. */
 export async function DELETE(request, { params }) {
-    const { error } = requireAdmin(request);
+    const { error } = await requireAdmin(request);
     if (error) return error;
     const { id } = await params;
     try {

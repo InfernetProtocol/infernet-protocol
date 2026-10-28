@@ -10,13 +10,13 @@ export const dynamic = "force-dynamic";
  * Authorization: Bearer $INFERNET_ADMIN_TOKEN
  */
 export async function GET(request) {
-    const { error } = requireAdmin(request);
+    const { error } = await requireAdmin(request);
     if (error) return error;
     return ok(pricingView(await getOrderPricing()));
 }
 
 export async function POST(request) {
-    const { actor, error } = requireAdmin(request);
+    const { actor, error } = await requireAdmin(request);
     if (error) return error;
     const body = await request.json().catch(() => ({}));
     try {

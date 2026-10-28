@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  * → { rows, totals }
  */
 export async function GET(request) {
-    const { error } = requireAdmin(request);
+    const { error } = await requireAdmin(request);
     if (error) return error;
     try {
         const status = new URL(request.url).searchParams.get("status") ?? "requested";

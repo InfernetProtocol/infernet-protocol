@@ -22,7 +22,7 @@ export async function GET(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
-    const auth = requireAdmin(request);
+    const auth = await requireAdmin(request);
     if (auth.error) return auth.error;
     const { id } = await params;
     let body;
