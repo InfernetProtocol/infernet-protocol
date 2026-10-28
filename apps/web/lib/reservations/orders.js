@@ -3,7 +3,8 @@
  * "Self-serve orders").
  *
  * A buyer names a GPU class, the exact models, a start hour and a number of
- * hours. We sell only what is online: the order is matched to one node that
+ * hours. Consumer-card classes (rtx4090 ...) run on SaladCloud instead of a
+ * network node: see salad.js; they serve one model each. We sell only what is online: the order is matched to one node that
  * reports that GPU class and already serves every model, and has no other
  * booking in the window. The price is our cost for the class plus the house
  * minimum profit margin (lib/reservations/margin.js, default 100%), prepaid:
@@ -11,7 +12,8 @@
  *
  * Nothing here touches the database or the network.
  */
-import { GPU_TIERS, tierOf, setupFeeFor } from "./pricing.js";
+import { GPU_TIERS, ALL_TIERS, tierOf, setupFeeFor } from "./pricing.js";
+import { SALAD_TIERS, isSaladClass, saladModelError, modelsFitting } from "./salad.js";
 import { priceFromCost, DEFAULT_MARGIN_PCT } from "./margin.js";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -48,11 +50,15 @@ export function validateOrderInput(body, now = Date.now()) {
     const value = {};
 
     const gpu = typeof b.gpu_class === "string" ? b.gpu_class.trim().toLowerCase() : "";
-    if (!tierOf(gpu)) errors.push(`gpu_class must be one of ${Object.keys(GPU_TIERS).join(", ")}`);
+    if (!tierOf(gpu)) errors.push(`gpu_class must be one of ${Object.keys(ALL_TIERS).join(", ")}`);
     value.gpu_class = gpu;
 
     value.models = cleanModels(b.models).slice(0, 8);
     if (value.models.length === 0) errors.push("models[] is required (exact model ids, see GET /api/v1/orders/capacity)");
+    else if (isSaladClass(gpu)) {
+        const e = saladModelError(gpu, value.models);
+        if (e) errors.push(e);
+    }
 
     const hours = typeof b.hours === "string" && b.hours.trim() !== "" ? Number(b.hours) : (b.hours ?? 1);
     if (!Number.isInteger(hours) || hours < 1 || hours > MAX_ORDER_HOURS) {
@@ -148,28 +154,40 @@ export function pickNode(providers, order, bookings = [], now = Date.now()) {
     return fits[0] ?? null;
 }
 
-/** What is on sale right now, per class: how many nodes and which models. */
-export function capacity(providers, bookings = [], now = Date.now(), marginPct = DEFAULT_MARGIN_PCT) {
+/**
+ * What is on sale right now, per class: how many nodes and which models.
+ * Salad classes are on demand (no node count) and on sale only when `salad`
+ * is true, i.e. the Salad account is configured.
+ */
+export function capacity(providers, bookings = [], now = Date.now(), marginPct = DEFAULT_MARGIN_PCT, { salad = false } = {}) {
     const start = nextWholeHour(now).toISOString();
-    return Object.keys(GPU_TIERS).map((gpu_class) => {
+    const onDemand = Object.entries(SALAD_TIERS).map(([gpu_class, t]) => ({
+        ...quoteFor(gpu_class, 1, marginPct), hours: undefined, total_usd: undefined,
+        source: "salad", available: salad, nodes_available: null, models: modelsFitting(t.vram_gb), models_per_order: 1
+    }));
+    return [...Object.keys(GPU_TIERS).map((gpu_class) => {
         const nodes = (providers ?? []).filter((p) =>
             isOnline(p, now) && (p.trust_tier ?? "public") !== "private" && classesOf(p).includes(gpu_class)
             && !bookings.some((b) => String(b.provider_id) === String(p.id) && overlaps(b.start_at, b.hours, start, 1)));
         const models = [...new Set(nodes.flatMap(servedModels))].sort();
-        return { ...quoteFor(gpu_class, 1, marginPct), hours: undefined, total_usd: undefined, nodes_available: nodes.length, models };
-    });
+        return { ...quoteFor(gpu_class, 1, marginPct), hours: undefined, total_usd: undefined, source: "network", available: nodes.length > 0, nodes_available: nodes.length, models };
+    }), ...onDemand];
 }
 
-/** The reservation an order becomes once paid. Limits are the self-serve defaults. */
-export function reservationFromOrder(order) {
+/**
+ * The reservation an order becomes once paid. Limits are the self-serve
+ * defaults. A Salad order passes `endpoint` (its container group's base URL
+ * and the vLLM key only Infernet holds) instead of pinning a node.
+ */
+export function reservationFromOrder(order, endpoint = null) {
     return {
         name: order.name || `order ${order.id}`,
         buyer: order.email ?? null,
         operator_name: order.operator_name,
-        target_kind: "node",
-        provider_id: order.provider_id,
-        endpoint_url: null,
-        endpoint_api_key: null,
+        target_kind: endpoint ? "endpoint" : "node",
+        provider_id: endpoint ? null : order.provider_id,
+        endpoint_url: endpoint ? endpoint.url : null,
+        endpoint_api_key: endpoint ? endpoint.apiKey : null,
         models: order.models,
         start_at: order.start_at,
         hours: order.hours,

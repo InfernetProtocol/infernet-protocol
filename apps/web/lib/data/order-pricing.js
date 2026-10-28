@@ -1,7 +1,7 @@
 import "server-only";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveOrderPricing, isValidMargin, MIN_MARGIN_PCT, MAX_MARGIN_PCT } from "@/lib/reservations/margin";
-import { GPU_TIERS } from "@/lib/reservations/pricing";
+import { ALL_TIERS } from "@/lib/reservations/pricing";
 import { quoteFor } from "@/lib/reservations/orders";
 
 /** Self-serve order pricing knob (settings row key 'orders'). Math in lib/reservations/margin.js. */
@@ -28,7 +28,7 @@ export function pricingView(config) {
     return {
         ...config,
         range: { min: MIN_MARGIN_PCT, max: MAX_MARGIN_PCT },
-        classes: Object.entries(GPU_TIERS).map(([gpu_class, t]) => {
+        classes: Object.entries(ALL_TIERS).map(([gpu_class, t]) => {
             const q = quoteFor(gpu_class, 1, config.min_margin_pct);
             return { gpu_class, label: t.label, cost_per_hour: t.cost_per_hour, price_per_hour: q.price_per_hour, setup_fee: q.setup_fee };
         })

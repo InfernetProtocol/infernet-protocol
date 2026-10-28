@@ -6,7 +6,7 @@
  * refused) can be unit-tested and read in one place.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { tierOf, floorPrice, setupFeeFor } from "./pricing.js";
+import { tierOf, floorPrice, setupFeeFor, ALL_TIERS } from "./pricing.js";
 
 export const KEY_PREFIX = "ifr_res_";
 export const BUYER_TOKEN_PREFIX = "ifr_buy_";
@@ -130,7 +130,7 @@ export function validateReservationInput(body) {
     } else {
         const tier = tierOf(b.gpu_class);
         if (!tier) {
-            errors.push("gpu_class must be one of l40s, a100, h100, h100x2");
+            errors.push(`gpu_class must be one of ${Object.keys(ALL_TIERS).join(", ")}`);
             value.gpu_class = null;
         } else {
             value.gpu_class = String(b.gpu_class).trim().toLowerCase();

@@ -13,7 +13,7 @@ price; non-compliant hours are credited or refunded.
 
 Usage:
   infernet order capacity                  what is on sale now: classes, prices, free nodes, models
-  infernet order quote  --gpu l40s --models m1[,m2] [--hours 1] [--start 2026-10-28T15:00:00Z]
+  infernet order quote  --gpu l40s|rtx4090 --models m1[,m2] [--hours 1] [--start 2026-10-28T15:00:00Z]
   infernet order create --gpu l40s --models m1[,m2] [--hours 1] [--start ISO] [--email you@x]
         --checkout                 pay at CoinPay (any coin or PayPal): prints the checkout URL
         --x402                     pay now in USDC from X402_PRIVATE_KEY (or --key-file F)

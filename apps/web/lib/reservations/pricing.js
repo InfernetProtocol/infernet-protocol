@@ -16,6 +16,8 @@
  * price, because the GPU has to be warm before the first reserved hour.
  */
 
+import { SALAD_TIERS } from "./salad.js";
+
 export const MARGIN = 0.2;
 export const PAYMENT_FEE = 0.01;
 export const COMPLIANCE_BUFFER = 0.05;
@@ -33,9 +35,13 @@ export function floorPrice(cost) {
     return Math.ceil((cost / (1 - MARGIN - PAYMENT_FEE)) * (1 + COMPLIANCE_BUFFER) * 100) / 100;
 }
 
+/** Datacenter tiers plus the consumer cards we run on SaladCloud (salad.js). */
+export const ALL_TIERS = Object.freeze({ ...GPU_TIERS, ...SALAD_TIERS });
+
 export function tierOf(gpuClass) {
     if (typeof gpuClass !== "string") return null;
-    return GPU_TIERS[gpuClass.trim().toLowerCase()] ?? null;
+    const id = gpuClass.trim().toLowerCase();
+    return Object.hasOwn(ALL_TIERS, id) ? ALL_TIERS[id] : null;
 }
 
 export function setupFeeFor(pricePerHour) {
@@ -48,7 +54,7 @@ export function priceList() {
         currency: "USD",
         basis: "per compliant hour, post-paid; non-compliant hours are owed nothing",
         setup_fee: `$${SETUP_FEE_BASE} + one hour at the tier price, once per booking (GPU warm-up)`,
-        tiers: Object.entries(GPU_TIERS).map(([gpu_class, t]) => ({
+        tiers: Object.entries(ALL_TIERS).map(([gpu_class, t]) => ({
             gpu_class,
             label: t.label,
             fits: t.fits,
