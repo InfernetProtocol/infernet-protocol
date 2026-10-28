@@ -122,7 +122,7 @@ export function apiOrigin(base = env("COINPAY_API_URL", "COINPAYPORTAL_API_BASE_
     }
 }
 
-async function raw(path, { method = "GET", body, headers = {}, timeoutMs = 15_000 } = {}) {
+async function raw(path, { method = "GET", body, headers = {}, timeoutMs = 15_000, key = null } = {}) {
     const url = `${apiOrigin()}${path}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -130,7 +130,7 @@ async function raw(path, { method = "GET", body, headers = {}, timeoutMs = 15_00
         return await fetch(url, {
             method,
             headers: {
-                authorization: `Bearer ${apiKey()}`,
+                authorization: `Bearer ${key ?? apiKey()}`,
                 "content-type": "application/json",
                 accept: "application/json",
                 ...headers
@@ -452,7 +452,11 @@ export async function getPayment(paymentId) {
  * @param {string} p.cryptocurrency   CoinPay code, e.g. "USDC_POL"
  * @param {object} [p.metadata]
  */
-export async function createPayout({ recipientEmail, recipientWallet, amountUsd, cryptocurrency, metadata = {} }) {
+export async function createPayout({ recipientEmail, recipientWallet, amountUsd, cryptocurrency, metadata = {}, apiKey: payoutKey }) {
+    // Payouts move money, so they use the operator's SEALED payout key, passed in
+    // by the caller after an operator unlock (apps/web/lib/operator-vault.js).
+    // Never the environment key: there is no fallback.
+    if (!payoutKey) throw new Error("[coinpayportal] createPayout: the operator payout key is required (operator vault)");
     if (!recipientWallet) throw new Error("[coinpayportal] createPayout: recipientWallet is required");
     if (!(Number(amountUsd) > 0)) throw new Error("[coinpayportal] createPayout: amountUsd must be > 0");
     let response;
@@ -460,6 +464,7 @@ export async function createPayout({ recipientEmail, recipientWallet, amountUsd,
         response = await raw("/api/payouts/create", {
             method: "POST",
             timeoutMs: 90_000,
+            key: payoutKey,
             body: {
                 recipient_email: recipientEmail,
                 recipient_wallet: recipientWallet,

@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { bytesToBase64, createSealer, wipe } from "@profullstack/sealed-secrets";
+
+// Must match apps/web/lib/operator-vault.js.
+const operatorSealer = createSealer({ app: "infernet", scope: "operator" });
 
 const TOKEN_KEY = "infernet-admin-token";
 
@@ -130,6 +134,8 @@ export default function AdminPayouts({ session = false }) {
         <div className="space-y-8">
             {error ? <p className="rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-200">{error}</p> : null}
 
+            <OperatorVault call={call} />
+
             <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {[
                     ["Subsidy pending approval", totals["subsidy:pending_approval"]],
@@ -249,5 +255,113 @@ export default function AdminPayouts({ session = false }) {
                 </form>
             ) : null}
         </div>
+    );
+}
+
+/**
+ * The operator vault: the CoinPay payout key, sealed with a passphrase only the
+ * operators know. The crypto runs here; the server receives the sealed record
+ * and, on unlock, only the derived data key, kept in memory (7 days by default).
+ * While it is locked no payout is sent, auto-approved ones included.
+ */
+function OperatorVault({ call }) {
+    const [v, setV] = useState(null);
+    const [pass, setPass] = useState("");
+    const [recovery, setRecovery] = useState(false);
+    const [ttl, setTtl] = useState("7d");
+    const [payoutKey, setPayoutKey] = useState("");
+    const [note, setNote] = useState("");
+    const [err, setErr] = useState("");
+
+    const load = useCallback(() => call("/api/v1/admin/operator-vault").then(setV).catch((e) => setErr(e.message)), [call]);
+    useEffect(() => { load(); }, [load]);
+
+    const post = (body) => call("/api/v1/admin/operator-vault", { method: "POST", body: JSON.stringify(body) });
+    const run = (fn) => async (e) => {
+        e?.preventDefault?.();
+        setErr("");
+        setNote("");
+        try {
+            setNote(await fn());
+            await load();
+        } catch (x) {
+            setErr(x.message);
+        }
+    };
+    const sendUnlock = async (dek) => {
+        try {
+            const out = await post({ action: "unlock", dek: bytesToBase64(dek), ttl });
+            return `Unlocked until ${new Date(out.expiresAt).toLocaleString()}.`;
+        } finally {
+            wipe(dek);
+        }
+    };
+    const create = run(async () => {
+        const made = await operatorSealer.createSeal(pass, "operator");
+        try {
+            await post({ action: "create", seal: made.seal });
+        } catch (x) {
+            wipe(made.dek);
+            throw x;
+        }
+        window.prompt("Operator recovery key. Store it in the team vault now; it is shown only once:", made.recoveryKey);
+        setPass("");
+        return sendUnlock(made.dek);
+    });
+    const unlock = run(async () => {
+        const dek = recovery
+            ? await operatorSealer.unlockSealWithRecovery(v.seal, pass.trim(), "operator")
+            : await operatorSealer.unlockSeal(v.seal, pass, "operator");
+        setPass("");
+        return sendUnlock(dek);
+    });
+    const lock = run(async () => { await post({ action: "lock" }); return "Locked. Payouts wait until the next unlock."; });
+    const seal = run(async () => { await post({ action: "set_payout_key", key: payoutKey }); setPayoutKey(""); return "Payout key sealed."; });
+
+    if (!v) return err ? <p className="text-sm text-red-200">{err}</p> : null;
+    const box = "w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white";
+    const btn = "rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black";
+    return (
+        <section className="space-y-3 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-5">
+            <h2 className="text-lg font-semibold">Operator vault</h2>
+            <p className="text-sm text-[var(--muted)]">
+                The CoinPay payout key is sealed with a passphrase only operators know; it is not in the server environment.
+                Payouts, auto-approved ones included, are sent only while this is unlocked. A restart locks it again.
+                If both the passphrase and the recovery key are lost, the sealed key is gone and a new payout key must be issued.
+            </p>
+            <p className="text-sm">
+                {!v.exists ? "No vault yet." : v.unlocked ? `Unlocked until ${new Date(v.expiresAt).toLocaleString()}.` : "Locked."}
+                {v.exists ? (v.hasPayoutKey ? " Payout key sealed." : " No payout key sealed yet.") : ""}
+            </p>
+            {note ? <p className="text-sm text-emerald-300">{note}</p> : null}
+            {err ? <p className="text-sm text-red-200">{err}</p> : null}
+            {v.exists && v.unlocked ? (
+                <div className="space-y-2">
+                    <button type="button" className={btn} onClick={lock}>Lock now</button>
+                    <form onSubmit={seal} className="flex gap-2">
+                        <input type="password" autoComplete="off" placeholder="CoinPay payout API key" value={payoutKey}
+                            onChange={(e) => setPayoutKey(e.target.value)} className={box} />
+                        <button type="submit" className={btn} disabled={payoutKey.trim().length < 10}>Seal key</button>
+                    </form>
+                </div>
+            ) : (
+                <form onSubmit={v.exists ? unlock : create} className="space-y-2">
+                    <input type="password" autoComplete={v.exists ? "current-password" : "new-password"} value={pass}
+                        onChange={(e) => setPass(e.target.value)} className={box}
+                        placeholder={v.exists ? (recovery ? "Recovery key" : "Passphrase") : "New passphrase (10+ characters)"} />
+                    {v.exists ? (
+                        <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                            <input type="checkbox" checked={recovery} onChange={(e) => setRecovery(e.target.checked)} /> Use the recovery key
+                        </label>
+                    ) : null}
+                    <select value={ttl} onChange={(e) => setTtl(e.target.value)} className={box}>
+                        <option value="8h">Stay unlocked 8 hours</option>
+                        <option value="1d">1 day</option>
+                        <option value="7d">7 days</option>
+                    </select>
+                    <button type="submit" className={btn} disabled={pass.length < 10}>{v.exists ? "Unlock" : "Create vault"}</button>
+                </form>
+            )}
+        </section>
     );
 }

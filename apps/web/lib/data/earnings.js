@@ -372,6 +372,11 @@ export async function approvePayoutRequest(id, { actor, send } = {}) {
         throw withStatus(`balance no longer covers $${reqRow.amount_usd}`, 409);
     }
 
+    // Real money: the sealed operator payout key must be open BEFORE the request
+    // is claimed, so a locked vault leaves it 'requested' (423 to the admin).
+    let payoutKey = null;
+    if (!send) payoutKey = await (await import("@/lib/operator-vault")).payoutKey();
+
     const now = new Date().toISOString();
     // Claim it: only one approver can move requested -> sending.
     const { data: claimed, error: claimErr } = await supabase
@@ -383,7 +388,8 @@ export async function approvePayoutRequest(id, { actor, send } = {}) {
     if (claimErr) throw withStatus(claimErr.message, 500);
     if (!claimed?.length) throw withStatus("payout request was already handled", 409);
 
-    const sender = send ?? (await import("@infernetprotocol/payments")).createPayout;
+    const createPayout = (await import("@infernetprotocol/payments")).createPayout;
+    const sender = send ?? ((p) => createPayout({ ...p, apiKey: payoutKey }));
     const { toCoinpayMethod } = await import("@infernetprotocol/payments");
     const cryptocurrency = toCoinpayMethod(reqRow.coin, reqRow.network);
     let outcome;
