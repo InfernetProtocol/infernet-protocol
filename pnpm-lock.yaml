@@ -204,7 +204,7 @@ importers:
         version: 1.2.1(@types/node@26.6.5)
       '@profullstack/footer':
         specifier: latest
-        version: 0.4.0(react@19.3.1)
+        version: 0.5.0(react@19.3.1)
       '@profullstack/form-guard':
         specifier: ^0.2.2
         version: 0.2.2
@@ -214,6 +214,9 @@ importers:
       '@profullstack/redeem-credits':
         specifier: 0.2.0
         version: 0.2.0
+      '@profullstack/sealed-secrets':
+        specifier: 0.1.0
+        version: 0.1.0
       '@profullstack/x402-gateway':
         specifier: ^0.13.1
         version: 0.13.1
@@ -1599,8 +1602,8 @@ packages:
     engines: {node: '>=20.0.0'}
     hasBin: true
 
-  '@profullstack/footer@0.4.0':
-    resolution: {integrity: sha512-EJZnMUQmWDi9Gzx6BAjogloeaPFFSSCHtHJuC9dsXiOz8M87hfn6Z+Zx9AMYWk8s6xemPrPlkXKGB3PZugkcEA==}
+  '@profullstack/footer@0.5.0':
+    resolution: {integrity: sha512-TrllS87nK7J0c/UgYckaFIWVhLOtr6m73XXFSHIuSfOg7NfuWUdwjtsfMXGaZiiUnmMYj3zhGcfzW0DicDwl8w==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -1646,6 +1649,10 @@ packages:
     peerDependenciesMeta:
       react:
         optional: true
+
+  '@profullstack/sealed-secrets@0.1.0':
+    resolution: {integrity: sha512-6LRa+yUT7PQ5tZNoYEnf3VVxsyw/dqHqAtYpk/aS/bntxf3mQH+2MwNjQoBd7fCqdN97TvZup8qhrpfUcZlfng==}
+    engines: {node: '>=20'}
 
   '@profullstack/x402-client@0.3.0':
     resolution: {integrity: sha512-ytKhBrnjXFef2X2vgORw6d25tZfmo1qinxk/1mXlpeVticHP5UxidElFtjdjSt1LcHVlAEQR6m/+p4obmxDzJQ==}
@@ -8141,7 +8148,7 @@ snapshots:
     transitivePeerDependencies:
       - '@types/node'
 
-  '@profullstack/footer@0.4.0(react@19.3.1)':
+  '@profullstack/footer@0.5.0(react@19.3.1)':
     optionalDependencies:
       react: 19.3.1
 
@@ -8158,6 +8165,8 @@ snapshots:
   '@profullstack/referrals@0.1.0(react@19.3.1)':
     optionalDependencies:
       react: 19.3.1
+
+  '@profullstack/sealed-secrets@0.1.0': {}
 
   '@profullstack/x402-client@0.3.0':
     dependencies:
