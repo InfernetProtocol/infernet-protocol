@@ -7,35 +7,40 @@
  * the table) stay in sync.
  *
  * DO NOT modify without direct instruction — these are treasury addresses.
+ *
+ * Rotated 2026-10-28: the previous set derived from a leaked web-wallet seed.
+ * The new set derives from INFERNET_TREASURY_MNEMONIC (logicsrc vault
+ * treasury--prod, never in app.env): BIP44 index N per coin = treasury-(N+1);
+ * EVM/token rows use the ETH index-0 address.
  */
 
 export const DEPOSIT_ADDRESSES = [
-  { coin: "BTC",  network: "bitcoin",      address: "1HvEHWHAYW53cP6aQxWEcNaPb35sZZKFwF",                                     label: "treasury-1"    },
-  { coin: "BTC",  network: "bitcoin",      address: "17xz382FDrKZj25aFkkc5CZuFpQcbFAgur",                                     label: "treasury-2"    },
-  { coin: "BTC",  network: "bitcoin",      address: "1GTB6S6UGn9rkrKSTGpcEhpHi8SzXzWx6q",                                     label: "treasury-3"    },
-  { coin: "ETH",  network: "ethereum",     address: "0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5",                             label: "treasury-1"    },
-  { coin: "ETH",  network: "ethereum",     address: "0xdDeef601c86C651DD20d6EE3FE4318fC4343D95f",                             label: "treasury-2"    },
-  { coin: "SOL",  network: "solana",       address: "B3zn7yeoL6NP8JCpis9ikGX8U4uCbrybCu5QeFyqkKpr",                           label: "treasury-1"    },
-  { coin: "SOL",  network: "solana",       address: "7tKgJsSWPQGKk3wSijwbLf4qL8Tno4GPXrwGvkmiz39g",                           label: "treasury-2"    },
-  { coin: "POL",  network: "polygon",      address: "0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5",                             label: "treasury-1"    },
-  { coin: "BCH",  network: "bitcoin-cash", address: "bitcoincash:qryu0va3022eafyv6dhmdd7kylxszm5myqncfxjkaj",                 label: "treasury-1"    },
-  { coin: "BCH",  network: "bitcoin-cash", address: "bitcoincash:qpw9mk5gmalaj9mjnndjkyenjz3rxgtt8grllxcmvd",                 label: "treasury-2"    },
-  { coin: "BCH",  network: "bitcoin-cash", address: "bitcoincash:qqppxsqwekrpsn5lk56sjjpvhpv424zetudh8szzx7",                 label: "treasury-3"    },
-  { coin: "DOGE", network: "dogecoin",     address: "DPsNhvoJT5h7FGyh9uiWLeFJLsyLh7f3Wf",                                     label: "treasury-1"    },
-  { coin: "DOGE", network: "dogecoin",     address: "DSKkQtcPirS2H5kGyc5pU8PHSVqx6DdUyV",                                     label: "treasury-2"    },
-  { coin: "XRP",  network: "ripple",       address: "r4MoVnbkHbeJGiDx7GyVCCCHyhSPoqXfHR",                                     label: "treasury-1"    },
-  { coin: "XRP",  network: "ripple",       address: "rsmeBkmDYGPxtYmbad8iBxnikePABUEZJx",                                     label: "treasury-2"    },
-  { coin: "XRP",  network: "ripple",       address: "rKduygNv5nAP9u7y952Fhs9EPHTzgHguUi",                                     label: "treasury-3"    },
-  { coin: "ADA",  network: "cardano",      address: "addr1v9j4u56udhkav64gm9qrp48lsymvwu3qm649vq9s0hnmzrqumlavc",             label: "treasury-1"    },
-  { coin: "ADA",  network: "cardano",      address: "addr1v9euqha76gav45zwne6tu06gdu9mf3c8hqxlnx07km6xfxc4u9pyl",             label: "treasury-2"    },
-  { coin: "BNB",  network: "bsc",          address: "0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5",                             label: "treasury-1"    },
-  { coin: "USDT", network: "ethereum",     address: "0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5",                             label: "usdt-erc20"    },
-  { coin: "USDT", network: "polygon",      address: "0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5",                             label: "usdt-polygon"  },
-  { coin: "USDT", network: "solana",       address: "B3zn7yeoL6NP8JCpis9ikGX8U4uCbrybCu5QeFyqkKpr",                           label: "usdt-spl"      },
-  { coin: "USDC", network: "ethereum",     address: "0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5",                             label: "usdc-erc20"    },
-  { coin: "USDC", network: "polygon",      address: "0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5",                             label: "usdc-polygon"  },
-  { coin: "USDC", network: "solana",       address: "B3zn7yeoL6NP8JCpis9ikGX8U4uCbrybCu5QeFyqkKpr",                           label: "usdc-spl"      },
-  { coin: "USDC", network: "base",         address: "0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5",                             label: "usdc-base"     }
+  { coin: "BTC",  network: "bitcoin",      address: "1GgVNyRW3cXzB6WL6h7JkKSnXav4gPgp6P",                                     label: "treasury-1"    },
+  { coin: "BTC",  network: "bitcoin",      address: "16M4j1WZs8M4pAyqRHK5pJN3GHyYArZgzo",                                     label: "treasury-2"    },
+  { coin: "BTC",  network: "bitcoin",      address: "14uM1fkrQPx7GpAk53uEx73KKYjmvhhaWR",                                     label: "treasury-3"    },
+  { coin: "ETH",  network: "ethereum",     address: "0xc3f4ff2925ecEE9B884E7FA118F10Fc221C7a141",                             label: "treasury-1"    },
+  { coin: "ETH",  network: "ethereum",     address: "0xaED143Dc3db189d014b90d30d7670D529D2457Cc",                             label: "treasury-2"    },
+  { coin: "SOL",  network: "solana",       address: "E2m6WB1nrRBKLUY5ubbknFYPeg8FVS3MWFszhJDreRpA",                           label: "treasury-1"    },
+  { coin: "SOL",  network: "solana",       address: "EQRrc1Hy1PzbZirAvb4yrq32ToNNjwrBFgMvR7wx9e69",                           label: "treasury-2"    },
+  { coin: "POL",  network: "polygon",      address: "0xc3f4ff2925ecEE9B884E7FA118F10Fc221C7a141",                             label: "treasury-1"    },
+  { coin: "BCH",  network: "bitcoin-cash", address: "bitcoincash:qre8fncc7s0hmqu06mn39zcwe8l7gnn3cgjfggtsrw",                 label: "treasury-1"    },
+  { coin: "BCH",  network: "bitcoin-cash", address: "bitcoincash:qqd47dyq2tfv52dkghfn4d0ykltvf0fkqy694t67n9",                 label: "treasury-2"    },
+  { coin: "BCH",  network: "bitcoin-cash", address: "bitcoincash:qz6ykagvtkjxccjr39k6rkd37lqjqmjmsu9y6ppsp9",                 label: "treasury-3"    },
+  { coin: "DOGE", network: "dogecoin",     address: "DQWTRtCawtSjSYz4fa6WadERWFsjXMyQrw",                                     label: "treasury-1"    },
+  { coin: "DOGE", network: "dogecoin",     address: "DFmrtyvJiUqdVZXQoNAhnjzCUoUivLECTz",                                     label: "treasury-2"    },
+  { coin: "XRP",  network: "ripple",       address: "rNXmN6FqeNursJ8ym44YPVU9kGsd3PV6VA",                                     label: "treasury-1"    },
+  { coin: "XRP",  network: "ripple",       address: "rhYZrfMVrHMYW6ed8yB3ZsLpW2wtgxMyLo",                                     label: "treasury-2"    },
+  { coin: "XRP",  network: "ripple",       address: "rG15CSH4CP4FGiYYQvnHXP5WaKrWGuckE4",                                     label: "treasury-3"    },
+  { coin: "ADA",  network: "cardano",      address: "addr1vxa87c88rjnt00uhsmp99mdzz8293g3q8l9drhf3kk62p6cp5937y",             label: "treasury-1"    },
+  { coin: "ADA",  network: "cardano",      address: "addr1v8dsrh8tvz455zzrmy43l3d0ac0vgtuytgxzatjk4es6q6gqw8z2w",             label: "treasury-2"    },
+  { coin: "BNB",  network: "bsc",          address: "0xc3f4ff2925ecEE9B884E7FA118F10Fc221C7a141",                             label: "treasury-1"    },
+  { coin: "USDT", network: "ethereum",     address: "0xc3f4ff2925ecEE9B884E7FA118F10Fc221C7a141",                             label: "usdt-erc20"    },
+  { coin: "USDT", network: "polygon",      address: "0xc3f4ff2925ecEE9B884E7FA118F10Fc221C7a141",                             label: "usdt-polygon"  },
+  { coin: "USDT", network: "solana",       address: "E2m6WB1nrRBKLUY5ubbknFYPeg8FVS3MWFszhJDreRpA",                           label: "usdt-spl"      },
+  { coin: "USDC", network: "ethereum",     address: "0xc3f4ff2925ecEE9B884E7FA118F10Fc221C7a141",                             label: "usdc-erc20"    },
+  { coin: "USDC", network: "polygon",      address: "0xc3f4ff2925ecEE9B884E7FA118F10Fc221C7a141",                             label: "usdc-polygon"  },
+  { coin: "USDC", network: "solana",       address: "E2m6WB1nrRBKLUY5ubbknFYPeg8FVS3MWFszhJDreRpA",                           label: "usdc-spl"      },
+  { coin: "USDC", network: "base",         address: "0xc3f4ff2925ecEE9B884E7FA118F10Fc221C7a141",                             label: "usdc-base"     }
 ];
 
 export function getAddressesFor(coin, network) {
