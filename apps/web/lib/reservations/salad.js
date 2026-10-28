@@ -141,7 +141,9 @@ export function containerGroupSpec({ orderId, gpuClassId, model, apiKey, image }
         },
         // Gateway auth off: vLLM checks the bearer key itself, and only Infernet holds it.
         networking: { auth: false, port, protocol: "http", load_balancer: "least_number_of_connections", client_request_timeout: 100000, server_response_timeout: 100000 },
-        startup_probe: { http: { path: "/health", port, scheme: "http", headers: [] }, initial_delay_seconds: 30, period_seconds: 10, timeout_seconds: 5, success_threshold: 1, failure_threshold: 180 },
+        // Salad caps probes (failure_threshold <= 20, period_seconds <= 120), so the model
+        // download + load gets 60 s + 20 x 60 s, about 21 minutes, inside the warm-up hour.
+        startup_probe: { http: { path: "/health", port, scheme: "http", headers: [] }, initial_delay_seconds: 60, period_seconds: 60, timeout_seconds: 5, success_threshold: 1, failure_threshold: 20 },
         readiness_probe: { http: { path: "/health", port, scheme: "http", headers: [] }, initial_delay_seconds: 0, period_seconds: 10, timeout_seconds: 5, success_threshold: 1, failure_threshold: 3 }
     };
 }

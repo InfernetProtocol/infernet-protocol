@@ -127,6 +127,22 @@ describe("Salad API helpers", () => {
         expect(spec.container.command).toEqual(expect.arrayContaining(["--model", "Qwen/Qwen2.5-7B-Instruct", "--api-key", "sek", "--host", "::"]));
         expect(groupName("a".repeat(36))).toMatch(/^[a-z][a-z0-9-]{1,62}$/);
     });
+
+    it("stays inside SaladCloud's API limits (a 400 here would fail every paid order)", () => {
+        const spec = containerGroupSpec({ orderId: "x", gpuClassId: "g", model: "m", apiKey: "k", image: "i" });
+        for (const probe of [spec.startup_probe, spec.readiness_probe]) {
+            expect(probe.failure_threshold).toBeGreaterThanOrEqual(1);
+            expect(probe.failure_threshold).toBeLessThanOrEqual(20);
+            expect(probe.success_threshold).toBeLessThanOrEqual(10);
+            expect(probe.period_seconds).toBeLessThanOrEqual(120);
+            expect(probe.initial_delay_seconds).toBeLessThanOrEqual(1200);
+        }
+        const s = spec.startup_probe;
+        expect((s.initial_delay_seconds + s.period_seconds * s.failure_threshold) * 1000).toBeLessThan(WARMUP_MS);
+        expect(spec.container.resources.memory).toBeGreaterThanOrEqual(1024);
+        expect(spec.display_name.length).toBeLessThanOrEqual(63);
+        expect(spec.networking.client_request_timeout).toBeLessThanOrEqual(100000);
+    });
 });
 
 describe("lifecycleAction", () => {

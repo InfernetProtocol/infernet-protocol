@@ -43,6 +43,8 @@ async function tendSalad(now) {
             }
             return { order: o.id, action };
         } catch (e) {
+            // Salad refuses to start a group it is still preparing (status Pending); the next minute retries.
+            if (action === "start" && /current_status|Pending/.test(e?.message ?? "")) return { order: o.id, action, waiting: "pending" };
             console.error(`[reservations] salad ${action} ${o.salad_group} failed: ${e?.message ?? e}`);
             await setSaladState(o.id, o.salad_state, `salad ${action}: ${e?.message ?? e}`).catch(() => {});
             return { order: o.id, action, error: e?.message ?? String(e) };
