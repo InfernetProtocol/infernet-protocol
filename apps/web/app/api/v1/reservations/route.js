@@ -15,13 +15,13 @@ export const dynamic = "force-dynamic";
  * the compliance report and invoice view themselves.
  */
 export async function GET(request) {
-    const auth = requireAdmin(request);
+    const auth = await requireAdmin(request);
     if (auth.error) return auth.error;
     return guard(async () => ok((await listReservations()).map((r) => publicReservation(r))));
 }
 
 export async function POST(request) {
-    const auth = requireAdmin(request);
+    const auth = await requireAdmin(request);
     if (auth.error) return auth.error;
     let body;
     try { body = await request.json(); } catch { return fail(400, "invalid JSON body"); }

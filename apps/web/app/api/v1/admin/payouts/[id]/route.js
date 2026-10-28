@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  *       { action: "mark_failed" }
  */
 export async function POST(request, { params }) {
-    const { actor, error } = requireAdmin(request);
+    const { actor, error } = await requireAdmin(request);
     if (error) return error;
     const { id } = await params;
     const body = await request.json().catch(() => ({}));

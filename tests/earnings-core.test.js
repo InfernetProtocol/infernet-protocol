@@ -7,6 +7,7 @@ import {
     outputTokensFor,
     normaliseShares,
     fmtAmount,
+    isAutoApprovable,
     DEFAULT_EARNINGS_CONFIG
 } from "@/lib/earnings/core";
 
@@ -140,5 +141,19 @@ describe("fmtAmount", () => {
         expect(fmtAmount(0.000135)).toBe("0.000135");
         expect(fmtAmount(0.0042)).toBe("0.0042");
         expect(fmtAmount(12.5)).toBe("12.50");
+    });
+});
+
+describe("auto-approve config", () => {
+    it("defaults off, reads env and settings, ignores garbage", () => {
+        expect(resolveEarningsConfig({ env: {} }).auto_approve_max_usd).toBe(0);
+        expect(resolveEarningsConfig({ env: { INFERNET_AUTO_APPROVE_MAX_USD: "2" } }).auto_approve_max_usd).toBe(2);
+        expect(resolveEarningsConfig({ env: {}, settings: { auto_approve_max_usd: 1 } }).auto_approve_max_usd).toBe(1);
+        expect(resolveEarningsConfig({ env: {}, settings: { auto_approve_max_usd: -5 } }).auto_approve_max_usd).toBe(0);
+        const cfg = { auto_approve_max_usd: 1 };
+        expect(isAutoApprovable(0.05564, cfg)).toBe(true);
+        expect(isAutoApprovable(1, cfg)).toBe(true);
+        expect(isAutoApprovable(1.01, cfg)).toBe(false);
+        expect(isAutoApprovable(0.5, { auto_approve_max_usd: 0 })).toBe(false);
     });
 });

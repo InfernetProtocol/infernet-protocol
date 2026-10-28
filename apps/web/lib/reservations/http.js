@@ -4,14 +4,17 @@ import { timingSafeEqual } from "node:crypto";
 import { verifyBearerHeader } from "@/lib/auth/bearer";
 import { bearerFrom } from "@/lib/reservations/core";
 import { getReservation, buyerTokenMatches } from "@/lib/data/reservations";
+import { isAdminUser, isSameOriginRequest } from "@/lib/auth/admin";
 
 /**
  * Auth + response helpers for /api/v1/reservations/*.
  *
- * Admin (create, keys, pricing): either
- *   - Authorization: Bearer $INFERNET_ADMIN_TOKEN, or
+ * Admin (create, keys, pricing, payouts): any of
+ *   - Authorization: Bearer $INFERNET_ADMIN_TOKEN,
  *   - a CLI bearer (`infernet login`) whose email is in INFERNET_ADMIN_EMAILS
- *     or whose user id is in INFERNET_ADMIN_USER_IDS (comma lists).
+ *     or whose user id is in INFERNET_ADMIN_USER_IDS (comma lists), or
+ *   - the site's own sign-in cookie for such a user, on a same-origin request
+ *     (that is how the /admin pages work in a browser).
  * Buyer (one reservation only: show, report, invoice, and issue / list /
  *   revoke that reservation's keys for its own customers): the reservation's
  *   buyer token, as X-Buyer-Token or ?token=. It cannot create, reprice or
@@ -50,9 +53,21 @@ export function ok(data, status = 200) {
     return NextResponse.json({ data }, { status, headers: { "cache-control": "no-store" } });
 }
 
-export function requireAdmin(request) {
-    const actor = adminActor(request);
-    return actor ? { actor } : { error: fail(401, "admin authorization required") };
+/** An admin signed in to the site in this browser, or null. */
+export async function sessionAdminActor(request) {
+    if (!isSameOriginRequest(request.headers)) return null;
+    try {
+        const { getCurrentUser } = await import("@/lib/supabase/auth-server");
+        const user = await getCurrentUser();
+        return isAdminUser(user) ? `user:${user.id}` : null;
+    } catch {
+        return null;
+    }
+}
+
+export async function requireAdmin(request) {
+    const actor = adminActor(request) ?? (await sessionAdminActor(request));
+    return actor ? { actor } : { error: fail(401, "admin authorization required: sign in at /auth/login with an admin account") };
 }
 
 /** Load a reservation for an admin or for the buyer holding its token. */

@@ -6,20 +6,21 @@ export const dynamic = "force-dynamic";
 /**
  * GET  /api/v1/admin/earnings/settings → live earnings config
  * POST /api/v1/admin/earnings/settings
- *   Body (any subset): { subsidy_per_1k_output_usd, subsidy_approved, house_fee_pct, min_payout_usd }
+ *   Body (any subset): { subsidy_per_1k_output_usd, subsidy_approved, house_fee_pct, min_payout_usd, auto_approve_max_usd }
  *   Approving the subsidy confirms every subsidy credit still pending approval.
- * Authorization: Bearer $INFERNET_ADMIN_TOKEN
+ *   auto_approve_max_usd > 0 sends requests up to that amount without review.
+ * Authorization: Bearer $INFERNET_ADMIN_TOKEN, or an admin's sign-in cookie
  */
 export async function GET(request) {
-    const { error } = requireAdmin(request);
+    const { error } = await requireAdmin(request);
     if (error) return error;
     return ok(publicConfig(await getEarningsConfig()));
 }
 
-const KEYS = ["subsidy_per_1k_output_usd", "subsidy_approved", "house_fee_pct", "min_payout_usd"];
+const KEYS = ["subsidy_per_1k_output_usd", "subsidy_approved", "house_fee_pct", "min_payout_usd", "auto_approve_max_usd"];
 
 export async function POST(request) {
-    const { actor, error } = requireAdmin(request);
+    const { actor, error } = await requireAdmin(request);
     if (error) return error;
     const body = await request.json().catch(() => ({}));
     const patch = Object.fromEntries(KEYS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));

@@ -4,6 +4,7 @@ import { getSupabaseAuthClient } from "@/lib/supabase/auth-server";
 import { parseAuthBody, wantsRedirect } from "@/lib/auth/parse-body";
 import { appUrl } from "@/lib/auth/app-url";
 import { afterSignIn } from "@/lib/credits/sign-in";
+import { safeNext } from "@/lib/auth/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +18,13 @@ export async function POST(request) {
     const wantHtml = wantsRedirect(request);
     const email = String(body.email ?? "").trim();
     const password = body.password ? String(body.password) : null;
+    const next = safeNext(body.next);
+    const retry = (msg) => `/auth/login?error=${encodeURIComponent(msg)}${next === "/dashboard" ? "" : `&next=${encodeURIComponent(next)}`}`;
 
     if (!email) {
         return wantHtml
             ? NextResponse.redirect(
-                new URL(`/auth/login?error=${encodeURIComponent("email required")}`, appUrl()),
+                new URL(retry("email required"), appUrl()),
                 { status: 303 }
             )
             : NextResponse.json({ error: "email required" }, { status: 400 });
@@ -34,7 +37,7 @@ export async function POST(request) {
         if (error) {
             return wantHtml
                 ? NextResponse.redirect(
-                    new URL(`/auth/login?error=${encodeURIComponent(error.message)}`, appUrl()),
+                    new URL(retry(error.message), appUrl()),
                     { status: 303 }
                 )
                 : NextResponse.json({ error: error.message }, { status: 401 });
@@ -44,19 +47,19 @@ export async function POST(request) {
         revalidatePath("/", "layout");
         await afterSignIn(request, signedIn?.user);
         return wantHtml
-            ? NextResponse.redirect(new URL("/dashboard", appUrl()), { status: 303 })
+            ? NextResponse.redirect(new URL(next, appUrl()), { status: 303 })
             : NextResponse.json({ ok: true });
     }
 
     // Magic link path
     const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: `${appUrl()}/api/auth/callback?next=/dashboard` }
+        options: { emailRedirectTo: `${appUrl()}/api/auth/callback?next=${encodeURIComponent(next)}` }
     });
     if (error) {
         return wantHtml
             ? NextResponse.redirect(
-                new URL(`/auth/login?error=${encodeURIComponent(error.message)}`, appUrl()),
+                new URL(retry(error.message), appUrl()),
                 { status: 303 }
             )
             : NextResponse.json({ error: error.message }, { status: 400 });

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeNext } from "@/lib/auth/admin";
 import { revalidatePath } from "next/cache";
 import { getSupabaseAuthClient } from "@/lib/supabase/auth-server";
 import { appUrl } from "@/lib/auth/app-url";
@@ -21,7 +22,7 @@ export async function GET(request) {
     // outbound redirects against appUrl() so we don't leak proxy hosts.
     const url = new URL(request.url);
     const code = url.searchParams.get("code");
-    const next = url.searchParams.get("next") || "/dashboard";
+    const next = safeNext(url.searchParams.get("next"));
 
     if (!code) {
         return NextResponse.redirect(

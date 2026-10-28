@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 /** POST /api/v1/reservations/:id/buyer-token — issue a new buyer token; the old one stops working. */
 export async function POST(request, { params }) {
-    const auth = requireAdmin(request);
+    const auth = await requireAdmin(request);
     if (auth.error) return auth.error;
     const { id } = await params;
     return guard(async () => {

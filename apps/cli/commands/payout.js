@@ -24,7 +24,8 @@ Every completed job credits your node. Free (playground) jobs earn a house
 subsidy per 1k output tokens, "pending approval" until the rate is approved;
 paid jobs earn your share of the client's payment once it is confirmed.
 Earnings accrue with or without a payout address: you only need one to
-withdraw. Withdrawals are queued and sent through CoinPay after approval.
+withdraw. Withdrawals are sent through CoinPay after approval; small ones
+(up to the network's auto-approve amount) go out as soon as you ask.
 
 Admin (needs INFERNET_ADMIN_TOKEN or --token):
   infernet payout admin list [--status requested|sending|sent|all]
@@ -32,7 +33,10 @@ Admin (needs INFERNET_ADMIN_TOKEN or --token):
   infernet payout admin reject <request-id> [--reason <text>]
   infernet payout admin mark-sent <request-id> --tx <hash>
   infernet payout admin mark-failed <request-id>
-  infernet payout admin settings [--rate <usd per 1k>] [--fee <pct>] [--min <usd>] [--approve-subsidy]
+  infernet payout admin settings [--rate <usd per 1k>] [--fee <pct>] [--min <usd>]
+                               [--auto-approve-max <usd>] [--approve-subsidy]
+
+Or sign in to the website with the admin account and use /admin/payouts.
 
 Supported coins: ${PAYMENT_COIN_CODES.join(', ')}
 `;
@@ -161,9 +165,14 @@ async function runRequest(args, ctx) {
     try {
         const out = await client.requestPayout(amount);
         const r = out?.request ?? {};
+        const to = `${r.coin}${r.network ? ` (${r.network})` : ''} ${r.address}`;
+        if (r.status === 'sent') {
+            process.stdout.write(`Sent ${fmtUsd(r.amount_usd)} to ${to}.\ntx ${r.tx_hash}\n`);
+            return 0;
+        }
         process.stdout.write(
-            `Requested ${fmtUsd(r.amount_usd)} to ${r.coin}${r.network ? ` (${r.network})` : ''} ${r.address}.\n` +
-            `Request ${r.id} is waiting for approval; \`infernet payout list\` shows its status.\n`
+            `Requested ${fmtUsd(r.amount_usd)} to ${to}.\n` +
+            `Request ${r.id} is ${r.status === 'sending' ? 'being sent' : 'waiting for approval'}; \`infernet payout list\` shows its status.\n`
         );
         return 0;
     } catch (err) {
@@ -214,7 +223,8 @@ async function runAdmin(args, positional) {
             );
             const c = t.config ?? {};
             process.stdout.write(
-                `Config: subsidy ${fmtUsd(c.subsidy_per_1k_output_usd)}/1k (${c.subsidy_approved ? 'approved' : 'NOT approved'}), fee ${c.house_fee_pct}%, minimum ${fmtUsd(c.min_payout_usd)}\n\n`
+                `Config: subsidy ${fmtUsd(c.subsidy_per_1k_output_usd)}/1k (${c.subsidy_approved ? 'approved' : 'NOT approved'}), fee ${c.house_fee_pct}%, minimum ${fmtUsd(c.min_payout_usd)}, ` +
+                `auto-approve ${Number(c.auto_approve_max_usd) > 0 ? `up to ${fmtUsd(c.auto_approve_max_usd)}` : 'off'}\n\n`
             );
             const rows = data?.rows ?? [];
             if (!rows.length) {
@@ -235,6 +245,7 @@ async function runAdmin(args, positional) {
             if (args.get('rate') != null) body.subsidy_per_1k_output_usd = Number(args.get('rate'));
             if (args.get('fee') != null) body.house_fee_pct = Number(args.get('fee'));
             if (args.get('min') != null) body.min_payout_usd = Number(args.get('min'));
+            if (args.get('auto-approve-max') != null) body.auto_approve_max_usd = Number(args.get('auto-approve-max'));
             if (args.has('approve-subsidy')) body.subsidy_approved = true;
             if (args.has('unapprove-subsidy')) body.subsidy_approved = false;
             const data = Object.keys(body).length
@@ -265,7 +276,7 @@ async function runAdmin(args, positional) {
         const data = await adminCall(opts, 'POST', `/api/v1/admin/payouts/${enc(id)}`, body);
         const r = data?.request ?? {};
         process.stdout.write(`${r.id}: ${r.status}${data?.outcome ? ` (outcome ${data.outcome})` : ''}${r.tx_hash ? ` tx ${r.tx_hash}` : ''}${r.error ? ` ${r.error}` : ''}\n`);
-        return r.status === 'failed' ? 1 : 0;
+        return r.status === 'failed' || data?.outcome === 'not_sent' ? 1 : 0;
     } catch (err) {
         process.stderr.write(`payout admin ${action ?? 'list'} failed: ${err?.message ?? err}\n`);
         return 1;

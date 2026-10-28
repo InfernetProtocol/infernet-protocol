@@ -4,6 +4,7 @@ import RealtimeRefresh from "@/components/realtime-refresh";
 import PushModelButton from "@/components/push-model-button";
 import RevealTitle from "@/components/reveal-title";
 import { getCurrentUser } from "@/lib/supabase/auth-server";
+import { isAdminUser } from "@/lib/auth/admin";
 import { fmtUsdPrecise, EARNING_STATUS_LABELS } from "@/lib/earnings/core";
 import {
     getEarningsSummary,
@@ -64,6 +65,14 @@ export default async function DashboardPage({ searchParams }) {
                     <div className="flex flex-wrap items-center gap-2">
                         <RealtimeRefresh tables={["providers", "jobs"]} />
                         <CopyableUserId id={user.id} />
+                        {isAdminUser(user) ? (
+                            <Link
+                                href="/admin/payouts"
+                                className="rounded-full border border-[var(--accent)] px-4 py-2 text-sm text-[var(--accent)] hover:bg-white/10"
+                            >
+                                Payout approvals
+                            </Link>
+                        ) : null}
                         <form action="/api/auth/logout" method="post">
                             <button
                                 type="submit"
@@ -388,6 +397,10 @@ function EarningsPanel({ providers, earnings, notice, error }) {
             {notice === "requested" ? (
                 <p className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-emerald-100">
                     Withdrawal requested. It is sent after an admin approves it.
+                </p>
+            ) : notice === "sent" ? (
+                <p className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-emerald-100">
+                    Withdrawal sent. The transaction is listed below.
                 </p>
             ) : null}
             {error ? (

@@ -20,9 +20,12 @@ function usd(n) {
 /**
  * /admin/payouts client: lists pending withdrawal requests with one Approve
  * action each, the ledger totals, and the earnings settings (subsidy rate,
- * house fee, minimum payout, subsidy approval).
+ * house fee, minimum payout, auto-approve cap, subsidy approval).
+ *
+ * `session`: the page already checked the signed-in user is an admin, so
+ * calls ride the sign-in cookie and no token is asked for.
  */
-export default function AdminPayouts() {
+export default function AdminPayouts({ session = false }) {
     const [token, setToken] = useState("");
     const [status, setStatus] = useState("requested");
     const [data, setData] = useState(null);
@@ -35,7 +38,12 @@ export default function AdminPayouts() {
     const call = useCallback(async (path, init = {}) => {
         const res = await fetch(path, {
             ...init,
-            headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(init.headers ?? {}) }
+            credentials: "same-origin",
+            headers: {
+                ...(token ? { authorization: `Bearer ${token}` } : {}),
+                "content-type": "application/json",
+                ...(init.headers ?? {})
+            }
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
@@ -43,7 +51,7 @@ export default function AdminPayouts() {
     }, [token]);
 
     const load = useCallback(async () => {
-        if (!token) return;
+        if (!token && !session) return;
         setError(null);
         try {
             const [list, cfg] = await Promise.all([
@@ -55,7 +63,7 @@ export default function AdminPayouts() {
         } catch (err) {
             setError(err.message);
         }
-    }, [call, status, token]);
+    }, [call, session, status, token]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -81,6 +89,7 @@ export default function AdminPayouts() {
             subsidy_per_1k_output_usd: Number(form.get("subsidy_per_1k_output_usd")),
             house_fee_pct: Number(form.get("house_fee_pct")),
             min_payout_usd: Number(form.get("min_payout_usd")),
+            auto_approve_max_usd: Number(form.get("auto_approve_max_usd")),
             subsidy_approved: form.get("subsidy_approved") === "on"
         };
         if (body.subsidy_approved && !config?.subsidy_approved &&
@@ -96,7 +105,7 @@ export default function AdminPayouts() {
         }
     }
 
-    if (!token) {
+    if (!token && !session) {
         return (
             <form
                 className="max-w-md space-y-3 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6"
@@ -148,8 +157,10 @@ export default function AdminPayouts() {
                                 {s}
                             </button>
                         ))}
-                        <button type="button" onClick={() => { saveToken(""); setToken(""); }}
-                            className="rounded-full border border-white/15 px-3 py-1 text-[var(--muted)]">lock</button>
+                        {session ? null : (
+                            <button type="button" onClick={() => { saveToken(""); setToken(""); }}
+                                className="rounded-full border border-white/15 px-3 py-1 text-[var(--muted)]">lock</button>
+                        )}
                     </div>
                 </div>
                 {!data?.rows?.length ? (
@@ -210,7 +221,7 @@ export default function AdminPayouts() {
             {config ? (
                 <form onSubmit={saveConfig} className="rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6">
                     <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.25em] text-[var(--muted)]">Earnings settings</h2>
-                    <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <label className="text-sm text-white">Subsidy, USD per 1k output tokens
                             <input name="subsidy_per_1k_output_usd" type="number" step="0.000001" min="0" defaultValue={config.subsidy_per_1k_output_usd}
                                 className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2" />
@@ -223,12 +234,16 @@ export default function AdminPayouts() {
                             <input name="min_payout_usd" type="number" step="0.01" min="0" defaultValue={config.min_payout_usd}
                                 className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2" />
                         </label>
+                        <label className="text-sm text-white">Auto-approve up to, USD (0 = off)
+                            <input name="auto_approve_max_usd" type="number" step="0.01" min="0" defaultValue={config.auto_approve_max_usd ?? 0}
+                                className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2" />
+                        </label>
                     </div>
                     <label className="mt-4 flex items-center gap-2 text-sm text-white">
                         <input name="subsidy_approved" type="checkbox" defaultChecked={config.subsidy_approved} />
                         Subsidy approved (pending-approval credits become confirmed and withdrawable)
                     </label>
-                    <p className="mt-2 text-xs text-[var(--muted)]">Changing the rate re-prices every credit still pending approval (including the backfilled ones); confirmed credits keep the rate they were confirmed at.</p>
+                    <p className="mt-2 text-xs text-[var(--muted)]">Changing the rate re-prices every credit still pending approval (including the backfilled ones); confirmed credits keep the rate they were confirmed at. A request at or below the auto-approve amount is sent the moment the provider makes it; anything larger waits here.</p>
                     <button type="submit" disabled={busy === "config"}
                         className="mt-4 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">Save settings</button>
                 </form>

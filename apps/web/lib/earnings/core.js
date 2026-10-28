@@ -31,7 +31,10 @@ export const DEFAULT_EARNINGS_CONFIG = Object.freeze({
     subsidy_approved: false,
     // The published house fee: 2% of paid jobs, the operator keeps 98%.
     house_fee_pct: 2,
-    min_payout_usd: 5
+    min_payout_usd: 5,
+    // Requests at or below this many USD are approved and sent the moment
+    // they are made. 0 = every request waits for an admin.
+    auto_approve_max_usd: 0
 });
 
 function num(v, fallback) {
@@ -55,14 +58,16 @@ export function resolveEarningsConfig({ env = process.env, settings = null } = {
         subsidy_per_1k_output_usd: num(env.INFERNET_SUBSIDY_PER_1K_OUTPUT_USD, d.subsidy_per_1k_output_usd),
         subsidy_approved: bool(env.INFERNET_SUBSIDY_APPROVED, d.subsidy_approved),
         house_fee_pct: num(env.INFERNET_HOUSE_FEE_PCT, d.house_fee_pct),
-        min_payout_usd: num(env.INFERNET_MIN_PAYOUT_USD, d.min_payout_usd)
+        min_payout_usd: num(env.INFERNET_MIN_PAYOUT_USD, d.min_payout_usd),
+        auto_approve_max_usd: num(env.INFERNET_AUTO_APPROVE_MAX_USD, d.auto_approve_max_usd)
     };
     const s = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
     const out = {
         subsidy_per_1k_output_usd: num(s.subsidy_per_1k_output_usd, fromEnv.subsidy_per_1k_output_usd),
         subsidy_approved: bool(s.subsidy_approved, fromEnv.subsidy_approved),
         house_fee_pct: num(s.house_fee_pct, fromEnv.house_fee_pct),
-        min_payout_usd: num(s.min_payout_usd, fromEnv.min_payout_usd)
+        min_payout_usd: num(s.min_payout_usd, fromEnv.min_payout_usd),
+        auto_approve_max_usd: num(s.auto_approve_max_usd, fromEnv.auto_approve_max_usd)
     };
     if (out.house_fee_pct > 100) out.house_fee_pct = fromEnv.house_fee_pct <= 100 ? fromEnv.house_fee_pct : 0;
     return out;
@@ -179,6 +184,13 @@ export function summariseBalance(earnings = [], payouts = []) {
         available_usd: roundUsd(Math.max(0, confirmed - open - paid)),
         jobs_credited: earnings.filter((e) => e.status !== "void").length
     };
+}
+
+/** Whether a new request of this amount is sent without waiting for an admin. */
+export function isAutoApprovable(amountUsd, config) {
+    const cap = Number(config?.auto_approve_max_usd) || 0;
+    const amount = Number(amountUsd);
+    return cap > 0 && Number.isFinite(amount) && amount > 0 && amount <= cap + 1e-9;
 }
 
 /** Validate a withdrawal request against the balance and config. */

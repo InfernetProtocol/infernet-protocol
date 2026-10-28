@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  *      → 201 { data: { code, id, ... } }   the plaintext code is returned ONCE (only its sha256 is stored)
  */
 export async function GET(request) {
-    const { error } = requireAdmin(request);
+    const { error } = await requireAdmin(request);
     if (error) return error;
     try {
         return ok(await getCreditDeps().credits.list());
@@ -23,7 +23,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-    const { actor, error } = requireAdmin(request);
+    const { actor, error } = await requireAdmin(request);
     if (error) return error;
     let body;
     try {
