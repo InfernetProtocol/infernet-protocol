@@ -9,13 +9,14 @@
 # `pnpm install --frozen-lockfile` for an hour on Railway).
 
 # ---------------------------------------------------------------------------
-# Base — corepack-managed pnpm so the version is pinned & reproducible.
+# Base — pnpm pinned to the packageManager version. Node 26 (lts since
+# 2026-10) no longer ships corepack, so pnpm comes from npm.
 # ---------------------------------------------------------------------------
 FROM node:lts-alpine AS base
 WORKDIR /app
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH
-RUN corepack enable && corepack prepare pnpm@10.6.5 --activate
+RUN npm install -g pnpm@10.6.5 && pnpm --version
 
 # ---------------------------------------------------------------------------
 # Deps — install everything @infernetprotocol/web's dep cone needs.
