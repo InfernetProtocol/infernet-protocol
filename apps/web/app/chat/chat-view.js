@@ -730,6 +730,48 @@ function CopyButton({ text }) {
   );
 }
 
+function Readm3Button({ text }) {
+  const [state, setState] = useState("idle");
+
+  const openReadm3 = useCallback(async () => {
+    if (state === "loading") return;
+    setState("loading");
+    // Open synchronously so popup blockers do not treat the eventual API
+    // response as an unsolicited window.
+    const tab = window.open("about:blank", "_blank", "noopener,noreferrer");
+    try {
+      const res = await fetch("/api/chat/readm3", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: text, title: "infernet-answer.md" })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || typeof body.url !== "string") {
+        throw new Error(body.error ?? "Readm3 could not create the document");
+      }
+      if (tab) tab.location = body.url;
+      else window.open(body.url, "_blank", "noopener,noreferrer");
+      setState("done");
+    } catch {
+      if (tab) tab.close();
+      setState("error");
+      setTimeout(() => setState("idle"), 2500);
+    }
+  }, [state, text]);
+
+  return (
+    <button
+      type="button"
+      onClick={openReadm3}
+      disabled={state === "loading"}
+      title="Open this Markdown in readm3.com"
+      className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-0.5 text-[10px] uppercase tracking-[0.15em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white disabled:opacity-60"
+    >
+      {state === "loading" ? "Opening…" : state === "done" ? "Opened" : state === "error" ? "Retry" : "Readm3 ↗"}
+    </button>
+  );
+}
+
 function Bubble({ message }) {
   const { role, content, provider, pending, failed, status, sources, webNote } = message;
   const isUser = role === "user";
@@ -765,8 +807,9 @@ function Bubble({ message }) {
           </ol>
         ) : null}
         {!isUser && content && !pending ? (
-          <div className="mt-2 flex justify-end">
+          <div className="mt-2 flex justify-end gap-2">
             <CopyButton text={content} />
+            <Readm3Button text={content} />
           </div>
         ) : null}
       </div>
