@@ -321,7 +321,7 @@ export default async function DashboardPage({ searchParams }) {
                                                 ) : j.status === "completed" ? "crediting…" : "—"}
                                             </td>
                                             <td className="py-2 pr-3 text-[var(--muted)]">
-                                                {relTime(j.completed_at ?? j.created_at)}
+                                                <JobTime iso={j.completed_at ?? j.created_at} />
                                             </td>
                                         </tr>
                                     ))}
@@ -357,7 +357,7 @@ export default async function DashboardPage({ searchParams }) {
                                             <td className="py-2 pr-3 text-[var(--muted)]">{j.model_name || "—"}</td>
                                             <td className="py-2 pr-3"><StatusPill status={j.status} /></td>
                                             <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsd(j.payment_offer)}</td>
-                                            <td className="py-2 pr-3 text-[var(--muted)]">{relTime(j.created_at)}</td>
+                                            <td className="py-2 pr-3 text-[var(--muted)]"><JobTime iso={j.created_at} /></td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -423,6 +423,7 @@ function EarningsPanel({ providers, earnings, notice, error }) {
                             <th className="py-2 pr-3 font-medium">Confirmed</th>
                             <th className="py-2 pr-3 font-medium">Paid out</th>
                             <th className="py-2 pr-3 font-medium">Available</th>
+                            <th className="py-2 pr-3 font-medium">Date</th>
                             <th className="py-2 pr-3 font-medium" />
                         </tr>
                     </thead>
@@ -444,6 +445,9 @@ function EarningsPanel({ providers, earnings, notice, error }) {
                                     <td className="py-2 pr-3 text-white">{fmtUsdPrecise(b.confirmed_usd)}</td>
                                     <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsdPrecise(b.paid_usd)}</td>
                                     <td className="py-2 pr-3 text-white">{fmtUsdPrecise(b.available_usd)}</td>
+                                    <td className="py-2 pr-3 whitespace-nowrap text-[var(--muted)]">
+                                        {formatDateTime(b.latest_earned_at)}
+                                    </td>
                                     <td className="py-2 pr-3">
                                         {open ? (
                                             <span className="text-xs text-amber-200">{fmtUsdPrecise(open.amount_usd)} {open.status}</span>
@@ -473,7 +477,7 @@ function EarningsPanel({ providers, earnings, notice, error }) {
                     <ul className="space-y-1 text-xs text-[var(--muted)]">
                         {earnings.payouts.map((r) => (
                             <li key={r.id}>
-                                {new Date(r.created_at).toISOString().slice(0, 10)} · {fmtUsdPrecise(r.amount_usd)} {r.coin} · {r.status}
+                                {formatDateTime(r.created_at)} · {fmtUsdPrecise(r.amount_usd)} {r.coin} · {r.status}
                                 {r.tx_hash ? ` · tx ${r.tx_hash.slice(0, 14)}…` : ""}
                                 {r.status === "rejected" && r.error ? ` · ${r.error}` : ""}
                             </li>
@@ -565,6 +569,30 @@ function relTime(iso) {
     if (h < 48) return `${h}h ago`;
     const d = Math.floor(h / 24);
     return `${d}d ago`;
+}
+
+function formatDateTime(iso) {
+    if (!iso) return "—";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "—";
+    return new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "UTC",
+        timeZoneName: "short"
+    }).format(date);
+}
+
+function JobTime({ iso }) {
+    return (
+        <span title={formatDateTime(iso)}>
+            <span className="block">{relTime(iso)}</span>
+            <span className="block text-[10px]">{formatDateTime(iso)}</span>
+        </span>
+    );
 }
 
 function nodeGpuLabel(p) {

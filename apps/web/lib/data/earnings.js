@@ -161,10 +161,14 @@ export async function getEarningsForProviders(providerIds, { recent = 20 } = {})
     ]);
     const perProvider = {};
     for (const id of ids) {
-        perProvider[id] = summariseBalance(
-            earnings.filter((e) => e.provider_id === id),
-            payouts.filter((p) => p.provider_id === id)
-        );
+        const providerEarnings = earnings.filter((e) => e.provider_id === id);
+        perProvider[id] = {
+            ...summariseBalance(
+                providerEarnings,
+                payouts.filter((p) => p.provider_id === id)
+            ),
+            latest_earned_at: providerEarnings[0]?.earned_at ?? null
+        };
     }
     return {
         balance: summariseBalance(earnings, payouts),
