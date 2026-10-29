@@ -95,6 +95,12 @@ export async function createOllamaBackend({
                     model: resolvedModel,
                     messages: Array.isArray(messages) ? messages : [],
                     stream: true,
+                    // Qwen 3.5 and other reasoning models can spend the
+                    // entire num_predict budget in their private thinking
+                    // channel, leaving message.content empty.  Infernet's
+                    // protocol carries the user-visible answer, not chain
+                    // of thought, so request a normal answer stream.
+                    think: false,
                     options: {}
                 };
                 if (typeof temperature === "number") body.options.temperature = temperature;

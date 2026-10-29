@@ -70,4 +70,24 @@ describe("Ollama backend — default num_thread cap", () => {
         for await (const _ of gen.stream) { /* noop */ }
         expect(captured?.options?.num_thread).toBe(5);
     });
+
+    it("disables private reasoning so the answer fits the output stream", async () => {
+        let captured = null;
+        const fetchImpl = async (_url, init) => {
+            captured = JSON.parse(init.body);
+            return {
+                ok: true,
+                body: {
+                    getReader: () => ({
+                        read: async () => ({ done: true, value: undefined }),
+                        cancel: async () => {}
+                    })
+                }
+            };
+        };
+        const engine = await createOllamaBackend({ skipProbe: true, fetchImpl });
+        const gen = engine.generate({ model: "qwen3.5:2b", messages: [] });
+        for await (const _ of gen.stream) { /* noop */ }
+        expect(captured?.think).toBe(false);
+    });
 });
