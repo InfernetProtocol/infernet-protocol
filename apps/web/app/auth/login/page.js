@@ -1,8 +1,11 @@
 import Link from "next/link";
 import AuthFormShell, { AuthInput, AuthButton } from "@/components/auth-form-shell";
 import { safeNext } from "@/lib/auth/admin";
+import CoinpaySigninButton from "@/components/coinpay-signin-button";
 
 export const metadata = { title: "Sign in" };
+
+export const dynamic = "force-dynamic";
 
 export default async function LoginPage({ searchParams }) {
     const params = (await searchParams) ?? {};
@@ -27,6 +30,7 @@ export default async function LoginPage({ searchParams }) {
                 </>
             }
         >
+            <CoinpaySigninButton next={next} />
             <form action="/api/auth/login" method="post" className="space-y-4">
                 {next !== "/dashboard" ? <input type="hidden" name="next" value={next} /> : null}
                 <AuthInput name="email" type="email" label="Email" required autoComplete="email" />

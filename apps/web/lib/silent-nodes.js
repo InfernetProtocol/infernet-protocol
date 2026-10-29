@@ -1,4 +1,5 @@
 import "server-only";
+import { isPlaceholderEmail } from "@/lib/auth/coinpay-placeholder";
 
 /**
  * "Your node went offline" email (docs/prd/01-live-supply.md req 4). Run by the
@@ -92,7 +93,8 @@ export async function emailSilentNodes(supabase, { now = new Date(), apiKey = pr
             if (!link?.user_id) { out.skipped += 1; continue; }
             const { data: userData } = await supabase.auth.admin.getUserById(link.user_id);
             const email = userData?.user?.email;
-            if (!email) { out.skipped += 1; continue; }
+            // A CoinPay-only account's placeholder address receives no mail.
+            if (!email || isPlaceholderEmail(email)) { out.skipped += 1; continue; }
             try {
                 await sendEmail({ to: email, apiKey, fetchImpl, ...buildSilentNodeEmail({ node, role }) });
                 out.emailed += 1;

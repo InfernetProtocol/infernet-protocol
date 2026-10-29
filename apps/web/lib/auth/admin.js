@@ -1,3 +1,5 @@
+import { isPlaceholderEmail } from "./coinpay-placeholder.js";
+
 /**
  * Who is an Infernet admin. Pure (env in, answer out) so routes, pages and
  * tests agree on one rule:
@@ -15,7 +17,8 @@ export function isAdminUser(user, env = process.env) {
     if (!user?.id) return false;
     if (list(env.INFERNET_ADMIN_USER_IDS).includes(String(user.id).toLowerCase())) return true;
     const email = String(user.email ?? "").toLowerCase();
-    const confirmed = Boolean(user.email_confirmed_at ?? user.confirmed_at);
+    // A CoinPay-only account's placeholder address proves nothing.
+    const confirmed = Boolean(user.email_confirmed_at ?? user.confirmed_at) && !isPlaceholderEmail(email);
     return Boolean(email) && confirmed && list(env.INFERNET_ADMIN_EMAILS).includes(email);
 }
 
