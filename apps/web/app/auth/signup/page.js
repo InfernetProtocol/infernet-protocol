@@ -1,6 +1,7 @@
 import Link from "next/link";
 import AuthFormShell, { AuthInput, AuthButton } from "@/components/auth-form-shell";
 import SignupProfileFields from "@/components/signup-profile-fields";
+import CoinpaySigninButton from "@/components/coinpay-signin-button";
 import { cookies } from "next/headers";
 import { INVITE_COOKIE, looksLikeCode, inviteBonusCredits } from "@/lib/credits/core";
 
@@ -35,6 +36,7 @@ export default async function SignupPage({ searchParams }) {
                     You were invited. Confirm your email and you both get {bonus} compute credits.
                 </div>
             ) : null}
+            <CoinpaySigninButton label="Sign up with CoinPay" />
             <form action="/api/auth/signup" method="post" className="space-y-4">
                 {invite ? <input type="hidden" name="invite_code" value={invite} /> : null}
                 <AuthInput name="email" type="email" label="Email" required autoComplete="email" />

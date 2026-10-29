@@ -2,6 +2,7 @@ import "server-only";
 import { Credits, supabaseStore as creditStore } from "@profullstack/redeem-credits";
 import { Affiliates, supabaseStore as affiliateStore } from "@profullstack/affiliates";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { isPlaceholderEmail } from "@/lib/auth/coinpay-placeholder";
 import {
     CREDIT_UNIT,
     INVITE_QUOTA,
@@ -119,7 +120,9 @@ async function authUser(db, userId) {
         return {
             id: u.id,
             email: u.email ?? null,
-            confirmed: Boolean(u.email_confirmed_at ?? u.confirmed_at),
+            // A CoinPay-only account's placeholder address is "confirmed" for
+            // Supabase's sake but proves nothing: it never settles an invite bonus.
+            confirmed: Boolean(u.email_confirmed_at ?? u.confirmed_at) && !isPlaceholderEmail(u.email),
             createdAt: u.created_at ?? null
         };
     } catch {

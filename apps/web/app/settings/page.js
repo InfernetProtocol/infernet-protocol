@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/supabase/auth-server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import ContactDetailsForm from "@/components/contact-details-form";
 import { creditSummary, settleInviteBonus } from "@/lib/credits";
+import { coinpayConfig, isPlaceholderEmail, supabaseCoinpayStore } from "@/lib/auth/coinpay-signin";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,20 @@ export default async function SettingsPage({ searchParams }) {
 
     const defaultIsPublic = links?.[0]?.default_is_public ?? true;
 
+    // Sign in with CoinPay: the identity bound to this account, if any.
+    const coinpayOn = Boolean(coinpayConfig());
+    const coinpayOnly = isPlaceholderEmail(user.email);
+    let coinpay = null;
+    if (coinpayOn) {
+        try {
+            coinpay = await supabaseCoinpayStore(supabase).identityByUser(user.id);
+        } catch (err) {
+            console.error("[settings] coinpay identity unavailable", err?.message ?? err);
+        }
+    }
+    const coinpayConnected = params.coinpay === "connected";
+    const coinpayDisconnected = params.coinpay === "disconnected";
+
     return (
         <main className="mx-auto w-full max-w-3xl px-6 py-12 lg:px-10">
             <header className="mb-8 space-y-3">
@@ -71,7 +86,7 @@ export default async function SettingsPage({ searchParams }) {
                     Account, credits &amp; node privacy
                 </h1>
                 <p className="text-sm text-[var(--muted)]">
-                    Signed in as <span className="font-mono text-white">{user.email ?? user.id}</span>.
+                    Signed in as <span className="font-mono text-white">{coinpayOnly ? "your CoinPay account" : (user.email ?? user.id)}</span>.
                 </p>
             </header>
 
@@ -145,6 +160,49 @@ export default async function SettingsPage({ searchParams }) {
                     — you both get credits when they join.
                 </p>
             </section>
+
+            {coinpayOn ? (
+                <section id="coinpay" className="mb-8 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6">
+                    <h2 className="text-lg font-semibold text-white">CoinPay</h2>
+                    {coinpayConnected ? (
+                        <div className="mt-4 rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-200">
+                            CoinPay connected. You can sign in with it now.
+                        </div>
+                    ) : null}
+                    {coinpayDisconnected ? (
+                        <div className="mt-4 rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-200">
+                            CoinPay disconnected.
+                        </div>
+                    ) : null}
+                    {coinpay ? (
+                        <>
+                            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                                Connected: you can sign in with CoinPay.
+                                {coinpayOnly ? " It is how you sign in to this account, so it stays connected." : ""}
+                            </p>
+                            {coinpayOnly ? null : (
+                                <form action="/api/v1/coinpay/disconnect" method="post" className="mt-4">
+                                    <button type="submit" className="rounded-full border border-white/15 px-5 py-2 text-sm text-white transition hover:border-red-400/60">
+                                        Disconnect CoinPay
+                                    </button>
+                                </form>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                                Sign in to Infernet with your CoinPay account.
+                            </p>
+                            <form action="/api/v1/coinpay/oauth/start" method="post" className="mt-4">
+                                <input type="hidden" name="mode" value="connect" />
+                                <button type="submit" className="rounded-full bg-[var(--accent-strong)] px-5 py-2 text-sm font-semibold text-[var(--bg)] transition hover:bg-[var(--accent)]">
+                                    Connect CoinPay
+                                </button>
+                            </form>
+                        </>
+                    )}
+                </section>
+            ) : null}
 
             <form action="/api/v1/user/settings" method="post" className="space-y-8">
                 <section className="rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6">
