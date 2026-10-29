@@ -44,7 +44,20 @@ export default async function DashboardPage({ searchParams }) {
 
     const hardware = summarizeHardware(providers);
     const fabric = summarizeInterconnects(providers);
-    const noProviders = providers.length === 0;
+    const registeredProviderKeys = new Set(providers.map((p) => p.public_key));
+    const unregisteredNodes = pubkeys
+        .filter((k) => k.role === "provider" && !registeredProviderKeys.has(k.pubkey))
+        .map((k) => ({
+            id: `linked-${k.pubkey}`,
+            name: k.label || `${k.pubkey.slice(0, 10)}…`,
+            status: "unregistered",
+            public_key: k.pubkey,
+            specs: {},
+            last_seen: null,
+            isUnregistered: true
+        }));
+    const allNodes = [...providers, ...unregisteredNodes];
+    const noProviders = allNodes.length === 0;
     const noClients = clients.length === 0;
 
     return (
@@ -158,7 +171,7 @@ export default async function DashboardPage({ searchParams }) {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {providers.map((p) => (
+                                    {allNodes.map((p) => (
                                         <tr key={p.id} className="border-t border-white/5">
                                             <td className="py-2 pr-3 text-white">{p.name}</td>
                                             <td className="py-2 pr-3 text-[var(--muted)]">{nodeGpuLabel(p)}</td>
@@ -167,7 +180,11 @@ export default async function DashboardPage({ searchParams }) {
                                             <td className="py-2 pr-3 text-[var(--muted)]">{relTime(p.last_seen)}</td>
                                             <td className="py-2 pr-3 text-[var(--muted)] text-xs">{p.specs?.cli_version ?? "—"}</td>
                                             <td className="relative py-2 pr-3">
-                                                {p.public_key ? <PushModelButton pubkey={p.public_key} servedModels={p.specs?.served_models ?? []} specs={p.specs} /> : <span className="text-xs text-[var(--muted)]">—</span>}
+                                                {p.isUnregistered ? (
+                                                    <span className="text-xs text-amber-200">not registered</span>
+                                                ) : p.public_key ? (
+                                                    <PushModelButton pubkey={p.public_key} servedModels={p.specs?.served_models ?? []} specs={p.specs} />
+                                                ) : <span className="text-xs text-[var(--muted)]">—</span>}
                                             </td>
                                         </tr>
                                     ))}
