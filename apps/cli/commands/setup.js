@@ -76,7 +76,7 @@ skip the prompts.
 export const ABLITERATED_DEFAULT = "huihui_ai/Qwen3.8-abliterated:27b";
 
 const MODEL_SUGGESTIONS = [
-    { name: "qwen2.5:0.5b", size_gb: 0.4,  size: "≈400 MB", note: "smoke test, runs on CPU" },
+    { name: "qwen2.5:0.5b", size_gb: 0.4,  size: "≈400 MB", note: "small-memory fallback / smoke test, runs on CPU", cpuFallback: true },
     { name: "qwen2.5:3b",   size_gb: 2.0,  size: "≈2 GB",   note: "fits 6 GB+ GPU / 8 GB+ RAM" },
     { name: "qwen2.5:7b",   size_gb: 4.4,  size: "≈4.4 GB", note: "fits 8 GB+ GPU / 12 GB+ RAM" },
     { name: "qwen2.5:14b",  size_gb: 9.0,  size: "≈9 GB",   note: "fits 16 GB+ GPU / 24 GB+ RAM" },
@@ -91,7 +91,14 @@ const MODEL_SUGGESTIONS = [
  * out), otherwise the largest stock model that fits.
  */
 export function pickDefaultSuggestion(evaluated, { isCpuOnly, abliterated = true } = {}) {
-    if (isCpuOnly) return MODEL_SUGGESTIONS[0].name;
+    if (isCpuOnly) {
+        // Prefer a useful small model on CPU; keep the 0.5B option for hosts
+        // that cannot fit 3B in RAM.
+        const cpuDefault = evaluated.find((m) => m.name === "qwen2.5:3b");
+        if (cpuDefault?.fits) return cpuDefault.name;
+        return evaluated.find((m) => m.cpuFallback && m.fits)?.name
+            ?? MODEL_SUGGESTIONS[0].name;
+    }
     const fitting = evaluated.filter((m) => m.fits);
     if (abliterated) {
         const abl = fitting.find((m) => m.abliterated);
