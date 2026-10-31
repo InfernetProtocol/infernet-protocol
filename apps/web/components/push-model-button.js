@@ -32,11 +32,9 @@ export default function PushModelButton({ pubkey, servedModels = [], specs }) {
     // Privacy-sanitized telemetry only carries vram_tier strings, mapped to
     // representative GB inside vramFromSpecs.
     const vramGb = useMemo(() => vramFromSpecs(specs), [specs]);
-    // Show the FULL catalog (filtered by use case), best-fit first — not a
-    // truncated top-N. Users expect "Any" to list every model they can push,
-    // including ones they just added; capping at 6 silently hid them.
+    // Show the top three hardware-aware picks for the selected use case.
     const recommendations = useMemo(
-        () => recommendModels({ vramGb, useCase, limit: Infinity }),
+        () => recommendModels({ vramGb, useCase, limit: 3 }),
         [vramGb, useCase]
     );
 

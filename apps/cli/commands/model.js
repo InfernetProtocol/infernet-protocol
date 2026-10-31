@@ -39,7 +39,7 @@ Usage:
                                          (node id or row id, public nodes only).
                                            --url <control-plane>   default infernetprotocol.com
   infernet model recommend [flags]       Recommend models for your hardware.
-                                           --use-case <chat|coding|study|agents|uncensored|vision>
+                                           --use-case <chat|marketing|research|coding|study|agents|uncensored|vision>
                                            --uncensored
                                            --install            install the top pick
                                            --install-all        install everything that fits on disk
@@ -183,7 +183,7 @@ async function cmdListNode(nodeId, args) {
 async function cmdRecommend(args) {
     const useCase = args.get("use-case") ?? args.get("for") ?? null;
     const uncensoredOnly = args.has("uncensored");
-    const limit = Number.parseInt(args.get("limit") ?? "5", 10);
+    const limit = Number.parseInt(args.get("limit") ?? "3", 10);
     const wantInstall = args.has("install") || args.has("i");
     const wantInstallAll = args.has("install-all");
 
