@@ -92,7 +92,7 @@ live queries (see \`infernet status\`, \`infernet stats\`, \`infernet logs\`).
 
 const DEFAULT_HEARTBEAT_MS = 30_000;
 const DEFAULT_POLL_MS = 15_000;
-const UPDATE_CHECK_MS = 5 * 60 * 1000; // 5 minutes
+const UPDATE_CHECK_MS = 60_000; // 60 seconds
 const UPDATE_DRAIN_MS = 10 * 60 * 1000; // wait for in-flight jobs before restarting
 const UPDATE_PAUSE_MS = 6 * 60 * 60 * 1000; // after an update that installed nothing newer
 const SHUTDOWN_DEADLINE_MS = 5_000; // hard exit: a half-shut daemon must never outlive its pidfile
@@ -1630,7 +1630,7 @@ async function runDaemon(args, ctx) {
         if (typeof trainingTimer.unref === 'function') trainingTimer.unref();
     }
 
-    // Self-update: check npm registry every 5 minutes. If a newer version is
+    // Self-update: check the GitHub release feed every 60 seconds. If a newer version is
     // available, pull the installer, re-generate any missing keys + re-register
     // specs (idempotent), then re-exec so the new code is running immediately.
     let isUpgrading = false;
@@ -1640,7 +1640,7 @@ async function runDaemon(args, ctx) {
     // version. For a second daemon on the same install, e.g. an aggregator, so
     // two daemons never run the installer at once.
     const followOnly = process.env.INFERNET_AUTO_UPDATE === 'follow';
-    const updateTimer = setInterval(async () => {
+    const checkForUpdate = async () => {
         if (shuttingDown || isUpgrading || Date.now() < updatePausedUntil) return;
         // Never start an upgrade under a running job; the next check retries.
         if (stats.activeJobIds.size > 0) return;
@@ -1660,7 +1660,7 @@ async function runDaemon(args, ctx) {
             }
             // The installer can succeed without changing this install (a git checkout
             // whose package.json lagged the release, or npm writing to another
-            // prefix). Restarting then would rerun the same update every 5 minutes
+            // prefix). Restarting then would rerun the same update every 60 seconds
             // forever, so keep serving and try again much later.
             const installed = readInstalledVersion();
             if (!isNewerVersion(CURRENT_VERSION, installed)) {
@@ -1735,8 +1735,11 @@ async function runDaemon(args, ctx) {
         }).unref();
 
         process.exit(0);
-    }, UPDATE_CHECK_MS);
+    };
+    const updateTimer = setInterval(checkForUpdate, UPDATE_CHECK_MS);
     if (typeof updateTimer.unref === 'function') updateTimer.unref();
+    // Check immediately on startup, then repeat on the 60-second cadence.
+    void checkForUpdate();
 
     await new Promise(() => {});
     return 0;
