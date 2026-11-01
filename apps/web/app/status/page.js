@@ -68,6 +68,17 @@ export default async function HomePage() {
           emptyMessage="No jobs found."
         />
         <ResourceTable
+          title="Live models, including LLMs"
+          description="Models live providers are advertising right now."
+          columns={[
+            { key: "name", label: "Model" },
+            { key: "providers", label: "Providers" },
+            { key: "freshest_seen", label: "Last heartbeat" }
+          ]}
+          rows={models}
+          emptyMessage="No models advertised. Online providers haven't sent a fresh specs.served_models yet."
+        />
+        <ResourceTable
           title="Providers"
           description="Online first, then most recently seen. Click a provider for its location, hardware, models and jobs. Verified = aggregators that reached it in the last hour."
           columns={[
@@ -81,17 +92,6 @@ export default async function HomePage() {
           ]}
           rows={providers}
           emptyMessage="No providers found."
-        />
-        <ResourceTable
-          title="Models served"
-          description="Models live providers are advertising right now."
-          columns={[
-            { key: "name", label: "Model" },
-            { key: "providers", label: "Providers" },
-            { key: "freshest_seen", label: "Last heartbeat" }
-          ]}
-          rows={models}
-          emptyMessage="No models advertised. Online providers haven't sent a fresh specs.served_models yet."
         />
         <ResourceTable
           title="Clients"
