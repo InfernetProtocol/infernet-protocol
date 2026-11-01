@@ -47,6 +47,18 @@ export default function ChatView({ initialModels = [] }) {
     try { localStorage.setItem("infernet.chat.web", on ? "1" : "0"); } catch { /* storage blocked */ }
   }
   const [error, setError] = useState(null);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [voiceCatalog, setVoiceCatalog] = useState(null);
+  const [voiceEngine, setVoiceEngine] = useState("kokoro");
+  const [voiceId, setVoiceId] = useState("af_sarah");
+  const [voiceLocale, setVoiceLocale] = useState("en-US");
+  const [voiceAccent, setVoiceAccent] = useState("");
+  const [voiceProfile, setVoiceProfile] = useState("custom");
+  const [voicePersona, setVoicePersona] = useState("");
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voicePlaying, setVoicePlaying] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("");
+  const [voiceError, setVoiceError] = useState(null);
   const [provider, setProvider] = useState(null);
   const [e2eActive, setE2eActive] = useState(false);
   // IPIP-0027 §7: provider's advertised E2E capability, learned from
@@ -101,12 +113,50 @@ export default function ChatView({ initialModels = [] }) {
   const ephemeralRef = useRef(null);
   // Per-job conversation key: Map<jobId, Uint8Array>
   const convKeysRef = useRef(new Map());
+  const streamedTextRef = useRef("");
+  const recorderRef = useRef(null);
+  const mediaStreamRef = useRef(null);
+  const audioRef = useRef(null);
+  const audioUrlRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/chat/voice/catalog")
+      .then(async (response) => {
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.error ?? "Voice service is unavailable");
+        return body;
+      })
+      .then((catalog) => {
+        if (cancelled) return;
+        setVoiceCatalog(catalog);
+        const firstEngine = catalog?.engines?.[0];
+        const firstVoice = firstEngine?.voices?.[0];
+        if (firstEngine && firstVoice) {
+          setVoiceEngine(firstEngine.id);
+          setVoiceId(firstVoice.id);
+        }
+        setVoiceError(null);
+      })
+      .catch((err) => {
+        if (!cancelled) setVoiceError(err?.message ?? "Voice service is unavailable");
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     return () => {
       if (esRef.current) {
         try { esRef.current.close(); } catch { /* ignore */ }
       }
+      if (recorderRef.current?.state === "recording") {
+        try { recorderRef.current.stop(); } catch { /* ignore */ }
+      }
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      if (audioRef.current) {
+        try { audioRef.current.pause(); } catch { /* ignore */ }
+      }
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     };
   }, []);
 
@@ -125,6 +175,132 @@ export default function ChatView({ initialModels = [] }) {
     return ephemeralRef.current;
   }
 
+  function stopVoicePlayback() {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+    setVoicePlaying(false);
+  }
+
+  async function speakAssistant(text) {
+    if (!text || !voiceMode) return;
+    setVoiceError(null);
+    setVoiceStatus("Generating speech on c0mpute CPU nodes…");
+    try {
+      const response = await fetch("/api/chat/voice/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          engine: voiceEngine,
+          voice: voiceId,
+          locale: voiceLocale,
+          speed: 1,
+          persona: voicePersona
+        })
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || body.error || "Speech synthesis failed");
+      }
+      const blob = await response.blob();
+      stopVoicePlayback();
+      const url = URL.createObjectURL(blob);
+      const player = new Audio(url);
+      audioUrlRef.current = url;
+      audioRef.current = player;
+      player.onended = () => {
+        if (audioUrlRef.current === url) stopVoicePlayback();
+      };
+      player.onerror = () => {
+        if (audioUrlRef.current === url) {
+          stopVoicePlayback();
+          setVoiceError("The returned audio could not be played.");
+        }
+      };
+      await player.play();
+      setVoicePlaying(true);
+      const worker = response.headers.get("x-c0mpute-worker-peer-id");
+      setVoiceStatus(worker ? `Speaking from c0mpute worker ${worker.slice(0, 12)}…` : "Speaking from a c0mpute worker");
+    } catch (err) {
+      setVoiceStatus("");
+      setVoiceError(err?.message ?? "Speech synthesis failed");
+    }
+  }
+
+  async function toggleVoiceRecording() {
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.stop();
+      return;
+    }
+    setVoiceError(null);
+    setVoiceStatus("Waiting for microphone…");
+    try {
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+        throw new Error("This browser does not support microphone recording.");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]
+        .find((candidate) => MediaRecorder.isTypeSupported(candidate));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size) chunks.push(event.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+        recorderRef.current = null;
+        setVoiceListening(false);
+        const audio = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        if (!audio.size) {
+          setVoiceStatus("");
+          setVoiceError("No audio was recorded.");
+          return;
+        }
+        setVoiceStatus("Transcribing on c0mpute CPU nodes…");
+        try {
+          const response = await fetch("/api/chat/voice/stt", {
+            method: "POST",
+            headers: { "Content-Type": audio.type || "audio/webm" },
+            body: audio
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.detail || body.error || "Speech recognition failed");
+          if (!body.text?.trim()) throw new Error("No speech was recognized. Try recording again.");
+          setInput((previous) => `${previous}${previous.trim() ? "\n" : ""}${body.text.trim()}`);
+          setVoiceStatus(body.worker_peer_id ? `Transcribed by c0mpute worker ${body.worker_peer_id.slice(0, 12)}…` : "Transcription added to the composer.");
+        } catch (err) {
+          setVoiceStatus("");
+          setVoiceError(err?.message ?? "Speech recognition failed");
+        }
+      };
+      recorder.onerror = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+        setVoiceListening(false);
+        setVoiceStatus("");
+        setVoiceError("Microphone recording failed.");
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setVoiceListening(true);
+      setVoiceStatus("Listening — select Stop recording when you’re done.");
+    } catch (err) {
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+      setVoiceStatus("");
+      setVoiceError(err?.message ?? "Could not start microphone recording");
+    }
+  }
+
   async function sendMessage() {
     const text = input.trim();
     if (!text || streaming) return;
@@ -136,6 +312,9 @@ export default function ChatView({ initialModels = [] }) {
     setRoutingPending(false);
     setRoutingNote(null);
     setDaemonLogs([]);
+    streamedTextRef.current = "";
+    setVoiceError(null);
+    setVoiceStatus("");
     const nextUser = { role: "user", content: text };
     // Assistant placeholder we'll append tokens into.
     const pendingAssistant = { role: "assistant", content: "", provider: null, pending: true };
@@ -164,10 +343,20 @@ export default function ChatView({ initialModels = [] }) {
     }
 
     const history = [...messages, nextUser].map((m) => ({ role: m.role, content: m.content }));
-    // Results ride as a system message just before the question, for this turn only.
-    const outgoingMessages = webContext
-      ? [...history.slice(0, -1), { role: "system", content: webContext }, history[history.length - 1]]
-      : history;
+    // Web results and the selected OpenProfile persona apply to this turn only.
+    const turnContext = [];
+    if (voiceMode && voicePersona) {
+      turnContext.push({
+        role: "system",
+        content: `Use this speaking persona for the current answer: ${voicePersona} Keep the same facts and answer the user's request directly.`
+      });
+    }
+    if (webContext) turnContext.push({ role: "system", content: webContext });
+    const outgoingMessages = [
+      ...history.slice(0, -1),
+      ...turnContext,
+      history[history.length - 1]
+    ];
 
     // Attempt E2E encryption: pre-select a provider and get their pubkey.
     let postBody = { messages: outgoingMessages, modelName, maxTokens: 512, temperature: 0.7, distributed };
@@ -269,6 +458,7 @@ export default function ChatView({ initialModels = [] }) {
         const data = JSON.parse(e.data);
         const text = data.text ?? "";
         if (text) {
+          streamedTextRef.current += text;
           setMessages((prev) => updateLastAssistant(prev, (m) => ({
             ...m,
             content: (m.content ?? "") + text
@@ -280,6 +470,7 @@ export default function ChatView({ initialModels = [] }) {
     es.addEventListener("done", () => {
       setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, pending: false, done: true })));
       setStreaming(false);
+      if (voiceMode) void speakAssistant(streamedTextRef.current.trim());
       convKeysRef.current.delete(jobId);
       try { es.close(); } catch { /* ignore */ }
       esRef.current = null;
@@ -368,6 +559,7 @@ export default function ChatView({ initialModels = [] }) {
   }
 
   function clearConversation() {
+    stopVoicePlayback();
     setMessages([]);
     setError(null);
     setProvider(null);
@@ -381,6 +573,9 @@ export default function ChatView({ initialModels = [] }) {
     ephemeralRef.current = null; // fresh keypair for next session
     convKeysRef.current.clear();
   }
+
+  const latestAssistantText = [...messages].reverse()
+    .find((message) => message.role === "assistant" && message.done && !message.failed)?.content ?? "";
 
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-10">
@@ -474,6 +669,127 @@ export default function ChatView({ initialModels = [] }) {
             disabled={streaming}
             className="w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel-strong)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--muted)]/70 disabled:opacity-60"
           />
+          <div className="mt-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                <input
+                  type="checkbox"
+                  checked={voiceMode}
+                  onChange={(event) => {
+                    setVoiceMode(event.target.checked);
+                    if (!event.target.checked) stopVoicePlayback();
+                  }}
+                  className="accent-[var(--accent)]"
+                />
+                Voice mode
+              </label>
+              {voiceMode ? (
+                <>
+                  <select
+                    aria-label="Agent voice profile"
+                    value={voiceProfile}
+                    onChange={(event) => {
+                      const selected = event.target.value;
+                      setVoiceProfile(selected);
+                      const profile = voiceCatalog?.agent_profiles?.find((item) => item.slug === selected);
+                      if (profile) {
+                        setVoiceEngine(profile.engine);
+                        setVoiceId(profile.voice);
+                        setVoiceLocale(profile.locale || "en-US");
+                        setVoiceAccent(profile.accent || "");
+                        setVoicePersona(profile.persona);
+                      } else {
+                        setVoiceLocale("en-US");
+                        setVoiceAccent("");
+                        setVoicePersona("");
+                      }
+                    }}
+                    disabled={!voiceCatalog || streaming || voiceListening}
+                    className="rounded-full border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+                  >
+                    <option value="custom">Custom voice</option>
+                    {(voiceCatalog?.agent_profiles ?? []).map((profile) => (
+                      <option key={profile.slug} value={profile.slug}>@{profile.slug} · {profile.voice_gender} · {profile.locale}</option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="TTS engine"
+                    value={voiceEngine}
+                    onChange={(event) => {
+                      const nextEngine = event.target.value;
+                      const voices = voiceCatalog?.engines?.find((item) => item.id === nextEngine)?.voices ?? [];
+                      setVoiceEngine(nextEngine);
+                      setVoiceId(voices[0]?.id ?? "");
+                      setVoiceProfile("custom");
+                      setVoiceLocale("en-US");
+                      setVoiceAccent("");
+                      setVoicePersona("");
+                    }}
+                    disabled={!voiceCatalog || streaming || voiceListening}
+                    className="rounded-full border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+                  >
+                    {(voiceCatalog?.engines ?? []).map((engine) => (
+                      <option key={engine.id} value={engine.id}>{engine.id}</option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Voice"
+                    value={voiceId}
+                    onChange={(event) => {
+                      setVoiceId(event.target.value);
+                      setVoiceProfile("custom");
+                      setVoiceLocale("en-US");
+                      setVoiceAccent("");
+                      setVoicePersona("");
+                    }}
+                    disabled={!voiceCatalog || streaming || voiceListening}
+                    className="rounded-full border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+                  >
+                    {(voiceCatalog?.engines?.find((item) => item.id === voiceEngine)?.voices ?? []).map((voice) => (
+                      <option key={voice.id} value={voice.id}>{voice.label} · {voice.presentation}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={toggleVoiceRecording}
+                    disabled={!voiceCatalog || streaming}
+                    className={`rounded-full border px-3 py-1.5 text-xs transition disabled:opacity-40 ${voiceListening ? "border-amber-300/50 text-amber-200" : "border-[var(--line)] text-white hover:border-[var(--accent)]"}`}
+                    title="Your recording is transcribed by a c0mpute CPU worker and added to the composer for review."
+                  >
+                    {voiceListening ? "Stop recording" : "Speak input"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => speakAssistant(latestAssistantText)}
+                    disabled={!voiceCatalog || !latestAssistantText || streaming || voiceListening || voicePlaying}
+                    className="rounded-full border border-[var(--line)] px-3 py-1.5 text-xs text-white transition hover:border-[var(--accent)] disabled:opacity-40"
+                  >
+                    Play last answer
+                  </button>
+                  {voicePlaying ? (
+                    <button
+                      type="button"
+                      onClick={stopVoicePlayback}
+                      className="rounded-full border border-[var(--line)] px-3 py-1.5 text-xs text-white transition hover:border-[var(--accent)]"
+                    >
+                      Stop audio
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+            {voiceMode ? (
+              <>
+                <p className="mt-2 text-[10px] text-[var(--muted)]">
+                  Assistant replies use the selected persona and are spoken automatically. Microphone input is transcribed into the composer; review it before sending.
+                  {voicePersona ? ` Persona: ${voicePersona}` : ""}
+                  {voiceAccent ? ` Accent: ${voiceAccent}` : ""}
+                </p>
+                {voiceStatus ? <p aria-live="polite" className="mt-1 text-[10px] text-emerald-200">{voiceStatus}</p> : null}
+                {voiceError ? <p role="status" className="mt-1 text-[10px] text-amber-200">{voiceError}</p> : null}
+              </>
+            ) : null}
+          </div>
           <div className="mt-3 flex items-center justify-between gap-3">
             <div className="text-xs text-[var(--muted)]">
               {provider ? (
@@ -497,7 +813,7 @@ export default function ChatView({ initialModels = [] }) {
               <button
                 type="button"
                 onClick={sendMessage}
-                disabled={streaming || input.trim() === ""}
+                disabled={streaming || voiceListening || input.trim() === ""}
                 className="rounded-full bg-[var(--accent-strong)] px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black transition hover:brightness-110 disabled:opacity-40"
               >
                 {streaming ? "…" : "Send"}
