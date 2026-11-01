@@ -276,7 +276,10 @@ export default function ChatView({ initialModels = [] }) {
           if (!response.ok) throw new Error(body.detail || body.error || "Speech recognition failed");
           if (!body.text?.trim()) throw new Error("No speech was recognized. Try recording again.");
           setInput((previous) => `${previous}${previous.trim() ? "\n" : ""}${body.text.trim()}`);
-          setVoiceStatus(body.worker_peer_id ? `Transcribed by c0mpute worker ${body.worker_peer_id.slice(0, 12)}…` : "Transcription added to the composer.");
+          const transcribedBy = body.worker_peer_id
+            ? `Transcribed by c0mpute worker ${body.worker_peer_id.slice(0, 12)}…`
+            : "Transcription added to the composer.";
+          setVoiceStatus(`${transcribedBy} Review the text and press Send for a reply.`);
         } catch (err) {
           setVoiceStatus("");
           setVoiceError(err?.message ?? "Speech recognition failed");
