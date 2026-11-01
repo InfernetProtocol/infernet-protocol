@@ -10,7 +10,7 @@ export default function RemoveNodeButton({ pubkey, role, name }) {
 
     async function removeNode() {
         const detail = role === "provider"
-            ? " This archives the node and preserves its earnings and payout history."
+            ? " This archives the node and preserves its history. Nodes with unpaid earnings or unsettled credits cannot be removed."
             : "";
         if (!window.confirm(`Remove ${name} from the Infernet registry?${detail}`)) return;
 

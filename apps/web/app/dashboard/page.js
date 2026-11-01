@@ -454,9 +454,13 @@ function EarningsPanel({ providers, earnings, notice, error }) {
                             return (
                                 <tr key={p.id} className="border-t border-white/5">
                                     <td className="py-2 pr-3 text-white">
-                                        <Link href={`/nodes/${p.id}`} className="hover:underline">{p.name}</Link>
+                                        {p.archived_at
+                                            ? p.name
+                                            : <Link href={`/nodes/${p.id}`} className="hover:underline">{p.name}</Link>}
                                         {p.archived_at ? <span className="ml-2 rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">Archived</span> : null}
-                                        <span className="block text-xs text-[var(--muted)]">{b.jobs_credited ?? 0} jobs credited</span>
+                                        <span className="block text-xs text-[var(--muted)]">
+                                            {b.jobs_credited ?? 0} jobs credited · <Link href={`/dashboard/earnings/${p.id}`} className="text-[var(--accent)] hover:underline">Earnings details</Link>
+                                        </span>
                                     </td>
                                     <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsdPrecise(b.pending_approval_usd)}</td>
                                     <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsdPrecise(b.pending_usd)}</td>

@@ -456,6 +456,7 @@ export async function removeNode({ role, pubkey }) {
     if (!existing) return { deleted: false };
 
     if (role === "provider") {
+        await requireProviderBalanceSettled(existing.id);
         const { error } = await supabase.from(table).update({
             status: "archived",
             is_public: false,
@@ -500,6 +501,7 @@ export async function removeOwnedNode({ userId, role, pubkey }) {
     if (!existing) return { deleted: false };
 
     if (role === "provider") {
+        await requireProviderBalanceSettled(existing.id);
         const { error: archiveErr } = await supabase.from(table).update({
             status: "archived",
             is_public: false,
@@ -672,4 +674,21 @@ function withStatus(message, status) {
     const err = new Error(message);
     err.status = status;
     return err;
+}
+
+async function requireProviderBalanceSettled(providerId) {
+    const { getEarningsForProviders } = await import("@/lib/data/earnings");
+    const { balance } = await getEarningsForProviders([providerId], { recent: 0 });
+    const outstanding = [
+        balance.available_usd,
+        balance.requested_usd,
+        balance.pending_usd,
+        balance.pending_approval_usd
+    ].some((amount) => Number(amount) > 0);
+    if (outstanding) {
+        throw withStatus(
+            "This provider has an unpaid balance or unsettled earnings. Withdraw available earnings and wait for pending credits or payouts to settle before removing it.",
+            409
+        );
+    }
 }
