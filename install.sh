@@ -17,10 +17,12 @@
 #   7. Prints next steps (`infernet setup`).
 #
 # Install strategy:
-#   1. If `npm` is available AND the package is published, run
+#   1. If `npm` is available AND the package matches this source release, run
 #      `npm install -g @infernetprotocol/cli`. Fast, ~5MB.
 #   2. Otherwise fall back to `git clone` + `pnpm install` into
 #      ~/.infernet/source and a wrapper at ~/.local/bin/infernet.
+#      This keeps self-updates working when a release is available on GitHub
+#      before the npm publish credentials are restored.
 #
 # The git path stays as a fallback so the installer works even before
 # the npm package is published (e.g. for early-access releases).
@@ -1045,6 +1047,24 @@ try_npm_install() {
     if ! command -v npm >/dev/null 2>&1; then
         return 1
     fi
+
+    # Don't install a stale public npm version when this installer points at
+    # newer source. Existing daemons call the live installer during release
+    # self-update, so this check lets them pull the tagged source if npm
+    # publishing is temporarily unavailable.
+    if [ "$INFERNET_NPM_VERSION" = "latest" ] && command -v curl >/dev/null 2>&1; then
+        SOURCE_CLI_VERSION="$(curl -fsSL --max-time 10 \
+            "$REPO_RAW_BASE/$INFERNET_REF/apps/cli/package.json" 2>/dev/null \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).version||"")}catch{}})' 2>/dev/null \
+            || true)"
+        NPM_CLI_VERSION="$(npm view "$NPM_PACKAGE@latest" version 2>/dev/null | tail -n 1 || true)"
+        if [ -n "$SOURCE_CLI_VERSION" ] && [ -n "$NPM_CLI_VERSION" ] \
+            && [ "$SOURCE_CLI_VERSION" != "$NPM_CLI_VERSION" ]; then
+            warn "npm has $NPM_CLI_VERSION but source is $SOURCE_CLI_VERSION — using source install"
+            return 1
+        fi
+    fi
+
     info "trying $NPM_PACKAGE@$INFERNET_NPM_VERSION via npm..."
     NPM_LOG="$(mktemp 2>/dev/null || echo "/tmp/inf-npm.$$.log")"
     if npm install -g "$NPM_PACKAGE@$INFERNET_NPM_VERSION" >"$NPM_LOG" 2>&1; then

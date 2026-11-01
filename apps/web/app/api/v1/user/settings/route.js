@@ -8,10 +8,10 @@ import { appUrl } from "@/lib/auth/app-url";
  *
  * Form-encoded body (from /settings):
  *   default_is_public      "true" | "false"
- *   node_public[<id>]      "true" (presence = public; absence = private)
+ *   node_public[<role>:<id>] "true" (presence = public; absence = private)
  *
  * Updates pubkey_links.default_is_public for the user, plus
- * providers.is_public for each owned provider per the form. Only
+ * is_public for each owned node role per the form. Only
  * touches rows the user actually owns (verified via pubkey_links).
  */
 export async function POST(request) {
@@ -29,35 +29,36 @@ export async function POST(request) {
             .update({ default_is_public: defaultIsPublic })
             .eq("user_id", user.id);
 
-        // Find the set of provider ids the user actually owns (via the
-        // pubkey_links join). Don't trust ids the form posts directly.
+        // Resolve nodes from the owner's pubkey links. Never trust ids from
+        // the form without checking that they belong to this account.
         const { data: ownedLinks } = await supabase
             .from("pubkey_links")
-            .select("pubkey")
+            .select("pubkey, role")
             .eq("user_id", user.id);
-        const ownedPubkeys = (ownedLinks ?? []).map((r) => r.pubkey);
-        if (ownedPubkeys.length === 0) {
+        if ((ownedLinks ?? []).length === 0) {
             return NextResponse.redirect(new URL("/settings?saved=1", appUrl()), 303);
         }
 
-        const { data: ownedProviders } = await supabase
-            .from("providers")
-            .select("id")
-            .in("public_key", ownedPubkeys);
-        const ownedIds = new Set((ownedProviders ?? []).map((p) => p.id));
-
-        // Form values: node_public[<id>]="true" means the operator
-        // ticked the checkbox; absent means they unticked. Iterate
-        // every owned id so unticked rows get is_public=false.
+        const tables = { provider: "providers", aggregator: "aggregators", client: "clients" };
         const updates = [];
-        for (const id of ownedIds) {
-            const ticked = form.get(`node_public[${id}]`) === "true";
-            updates.push(
-                supabase
-                    .from("providers")
-                    .update({ is_public: ticked })
-                    .eq("id", id)
-            );
+        for (const [role, table] of Object.entries(tables)) {
+            const pubkeys = (ownedLinks ?? [])
+                .filter((link) => link.role === role)
+                .map((link) => link.pubkey);
+            if (pubkeys.length === 0) continue;
+            const { data: ownedNodes } = await supabase
+                .from(table)
+                .select("id")
+                .in("public_key", pubkeys);
+            for (const node of ownedNodes ?? []) {
+                const ticked = form.get(`node_public[${role}:${node.id}]`) === "true";
+                updates.push(
+                    supabase
+                        .from(table)
+                        .update({ is_public: ticked })
+                        .eq("id", node.id)
+                );
+            }
         }
         await Promise.all(updates);
 
