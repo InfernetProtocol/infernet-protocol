@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { getConversationKey, encrypt } from "@/lib/nip44";
 import { CATALOG } from "@/lib/model-catalog";
 
@@ -1024,7 +1026,49 @@ function updateLastAssistant(list, mutator) {
   return next;
 }
 
-function CopyButton({ text }) {
+const MARKDOWN_COMPONENTS = {
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer nofollow" className="text-[var(--accent)] underline decoration-white/30 underline-offset-2 hover:decoration-current">
+      {children}
+    </a>
+  ),
+  h1: ({ children }) => <h1 className="mb-3 mt-5 text-2xl font-semibold leading-tight first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="mb-2 mt-5 text-xl font-semibold leading-tight first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="mb-2 mt-4 text-lg font-semibold leading-tight first:mt-0">{children}</h3>,
+  h4: ({ children }) => <h4 className="mb-2 mt-4 font-semibold leading-tight first:mt-0">{children}</h4>,
+  p: ({ children }) => <p className="my-2 whitespace-normal leading-6 first:mt-0 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
+  ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>,
+  li: ({ children }) => <li className="pl-1">{children}</li>,
+  blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-[var(--accent)]/60 pl-4 text-[var(--muted)]">{children}</blockquote>,
+  hr: () => <hr className="my-4 border-white/15" />,
+  pre: ({ children }) => <pre className="my-3 max-w-full overflow-x-auto rounded-xl border border-white/10 bg-black/30 p-4 text-xs leading-5">{children}</pre>,
+  code: ({ className, children }) => (
+    <code className={className ? "font-mono text-[0.9em]" : "rounded bg-black/30 px-1.5 py-0.5 font-mono text-[0.9em] text-[var(--accent)]"}>
+      {children}
+    </code>
+  ),
+  table: ({ children }) => (
+    <div className="my-3 max-w-full overflow-x-auto">
+      <table className="w-full border-collapse text-left text-xs">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="border-b border-white/20">{children}</thead>,
+  th: ({ children }) => <th className="px-3 py-2 font-semibold">{children}</th>,
+  td: ({ children }) => <td className="border-b border-white/10 px-3 py-2 align-top">{children}</td>
+};
+
+function MarkdownContent({ text }) {
+  return (
+    <div className="break-words text-sm leading-6 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function CopyButton({ text, label = "Copy Markdown" }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -1041,24 +1085,31 @@ function CopyButton({ text }) {
     <button
       type="button"
       onClick={handleCopy}
-      title="Copy to clipboard"
+      title={label}
+      aria-label={copied ? "Copied to clipboard" : label}
       className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-0.5 text-[10px] uppercase tracking-[0.15em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white"
     >
-      {copied ? "Copied" : "Copy"}
+      {copied ? "Copied" : label}
     </button>
   );
 }
 
 function Readm3Button({ text }) {
-  const [state, setState] = useState("idle");
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   const openReadm3 = useCallback(async () => {
-    if (state === "loading") return;
-    setState("loading");
-    // Open synchronously so popup blockers do not treat the eventual API
-    // response as an unsolicited window.
-    const tab = window.open("about:blank", "_blank", "noopener,noreferrer");
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    let tab = null;
     try {
+      // Open synchronously so popup blockers do not treat the eventual API
+      // response as an unsolicited window. Keep the WindowProxy so it can be
+      // navigated after the paste API replies, then drop its opener reference.
+      tab = window.open("about:blank", "_blank");
+      if (tab) tab.opener = null;
       const res = await fetch("/api/chat/readm3", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1068,26 +1119,39 @@ function Readm3Button({ text }) {
       if (!res.ok || typeof body.url !== "string") {
         throw new Error(body.error ?? "Readm3 could not create the document");
       }
-      if (tab) tab.location = body.url;
-      else window.open(body.url, "_blank", "noopener,noreferrer");
-      setState("done");
-    } catch {
-      if (tab) tab.close();
-      setState("error");
-      setTimeout(() => setState("idle"), 2500);
+      const pasteUrl = new URL(body.url);
+      if (pasteUrl.protocol !== "https:" || pasteUrl.hostname !== "readm3.com") {
+        throw new Error("Readm3 returned an invalid pastie URL");
+      }
+      setUrl(pasteUrl.href);
+      if (tab && !tab.closed) tab.location.replace(pasteUrl.href);
+    } catch (err) {
+      if (tab && !tab.closed) tab.close();
+      setError(err?.message ?? "Readm3 could not create the pastie");
+    } finally {
+      setBusy(false);
     }
-  }, [state, text]);
+  }, [busy, text]);
 
   return (
-    <button
-      type="button"
-      onClick={openReadm3}
-      disabled={state === "loading"}
-      title="Open this Markdown in readm3.com"
-      className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-0.5 text-[10px] uppercase tracking-[0.15em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white disabled:opacity-60"
-    >
-      {state === "loading" ? "Opening…" : state === "done" ? "Opened" : state === "error" ? "Retry" : "Readm3 ↗"}
-    </button>
+    <span className="inline-flex items-center gap-2">
+      {url ? (
+        <a href={url} target="_blank" rel="noopener noreferrer" title="Open this Markdown pastie in readm3.com" className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-0.5 text-[10px] uppercase tracking-[0.15em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white">
+          Readm3 ↗
+        </a>
+      ) : (
+        <button
+          type="button"
+          onClick={openReadm3}
+          disabled={busy}
+          title="Create and open a Markdown pastie in readm3.com"
+          className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-0.5 text-[10px] uppercase tracking-[0.15em] text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-white disabled:opacity-60"
+        >
+          {busy ? "Opening…" : "Readm3 ↗"}
+        </button>
+      )}
+      {error ? <span role="status" className="text-[10px] text-[var(--warn)]">{error}</span> : null}
+    </span>
   );
 }
 
@@ -1109,7 +1173,9 @@ function Bubble({ message }) {
             {provider.name ?? provider.nodeId}{provider.model ? ` · ${provider.model}` : ""}
           </p>
         ) : null}
-        {content || (pending ? (status ? <span className="text-xs text-[var(--muted)]">{status}</span> : <TypingDots />) : null)}
+        {content ? (
+          isUser ? content : <MarkdownContent text={content} />
+        ) : pending ? (status ? <span className="text-xs text-[var(--muted)]">{status}</span> : <TypingDots />) : null}
         {failed ? <span className="ml-2 text-xs text-[var(--warn)]">failed</span> : null}
         {!isUser && webNote ? <p className="mt-2 text-xs text-[var(--warn)]">{webNote}</p> : null}
         {!isUser && sources?.length ? (
