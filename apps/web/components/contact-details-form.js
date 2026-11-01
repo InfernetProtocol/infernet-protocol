@@ -70,6 +70,7 @@ export default function ContactDetailsForm() {
                     onChange={setValues}
                     errors={errors}
                     disabled={loading || busy}
+                                  importOpenProfile
                 />
                 {message ? (
                     <p className={`text-sm ${message.ok ? "text-[var(--muted)]" : "text-red-400"}`}>{message.text}</p>

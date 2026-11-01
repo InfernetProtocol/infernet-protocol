@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { saveOpenProfileContact } from "@profullstack/profile";
+import { userProfileStore } from "@/lib/data/user-profile";
 import { revalidatePath } from "next/cache";
 import { finishSignIn, sameState } from "@profullstack/coinpay-onboard/oauth";
 import { getSupabaseAuthClient } from "@/lib/supabase/auth-server";
@@ -58,7 +60,7 @@ export async function GET(request) {
             redirectUri: cfg.redirectUri,
             base: cfg.issuer,
         });
-        claims = { sub: r.sub, email: r.email ? r.email.slice(0, 320) : null, name: r.name ? r.name.slice(0, 200) : null };
+        claims = { sub: r.sub, email: r.email ? r.email.slice(0, 320) : null, name: r.name ? r.name.slice(0, 200) : null, ...(typeof r.userinfo?.openprofile_url === "string" ? { openprofile_url: r.userinfo.openprofile_url } : {}) };
     } catch (e) {
         console.error("[coinpay-signin] token/userinfo", e instanceof Error ? e.message : e);
         return back(failPath, "CoinPay sign-in failed. Try again.");
@@ -80,6 +82,10 @@ export async function GET(request) {
         return back(failPath, "CoinPay sign-in failed. Try again.");
     }
     if (!resolved.ok) return back(failPath, resolved.error);
+    if (pending.mode === "connect" && claims.openprofile_url) {
+        try { await saveOpenProfileContact(userProfileStore(), resolved.userId, claims.openprofile_url); }
+        catch { console.warn("[coinpay-signin] OpenProfile import skipped"); }
+    }
     if (pending.mode === "connect") {
         return back(`${pending.next}${pending.next.includes("?") ? "&" : "?"}coinpay=connected`);
     }
