@@ -1,5 +1,5 @@
 import ChatView from "./chat-view";
-import { listChatModels } from "@/lib/data/chat";
+import { listE2EChatModels } from "@/lib/data/chat";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ export const metadata = {
 export default async function ChatPage() {
   let models = [];
   try {
-    models = await listChatModels();
+    models = await listE2EChatModels();
   } catch {
     models = [];
   }
