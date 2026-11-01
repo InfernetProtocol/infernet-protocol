@@ -71,6 +71,7 @@
 #   INFERNET_NODE_NAME=name       human-readable name (default user@host)
 #   INFERNET_PUBLIC_PORT=port     P2P port (default 46337)
 #   INFERNET_AUTOSTART=0          set to 0 to install only, skip setup+start
+#   INFERNET_NO_AUTOUPDATE=1       skip the hourly per-user CLI update check
 #
 # Zero-touch full bootstrap (no SSH afterwards):
 #
@@ -1041,6 +1042,32 @@ EOF
     unset _mise_data_at_install _mise_cfg_at_install
 }
 
+schedule_auto_update() {
+    if [ "${INFERNET_NO_AUTOUPDATE:-}" = "1" ]; then
+        info "INFERNET_NO_AUTOUPDATE=1 — skipping automatic CLI updates"
+        return 0
+    fi
+    local cli_dir
+    if [ "${used_npm:-0}" = "1" ]; then
+        cli_dir="$(npm root -g 2>/dev/null)/@infernetprotocol/cli"
+    else
+        cli_dir="$SOURCE_DIR/apps/cli"
+    fi
+    if [ ! -d "$cli_dir" ]; then
+        warn "could not find Infernet's installed CLI package to schedule updates"
+        return 0
+    fi
+    if ! (cd "$cli_dir" && INFERNET_AUTOUPDATE_BIN="$WRAPPER" node --input-type=module -e '
+        import("@profullstack/cli/auto-update").then(async ({installAutoUpdate}) => {
+          const result = await installAutoUpdate({name:"infernet",command:process.env.INFERNET_AUTOUPDATE_BIN,args:["update","--quiet"]});
+          if (!result.scheduled) { console.error(`infernet: automatic updates not scheduled: ${result.reason}`); process.exitCode=1; }
+          else console.log(`infernet: automatic CLI updates scheduled with ${result.scheduler}`);
+        }).catch(error => { console.error(`infernet: could not schedule automatic updates: ${error.message}`); process.exitCode=1; });
+    '); then
+        warn "automatic CLI update check could not be scheduled"
+    fi
+}
+
 # Try installing via npm. Returns 0 on success (binary now on PATH via
 # npm's global prefix), 1 to fall back to the git clone path.
 try_npm_install() {
@@ -1445,6 +1472,8 @@ main() {
     # operators who skip `infernet setup` still have a working model.
     # Opt-out: INFERNET_SKIP_CPU_BASELINE=1.
     ensure_cpu_baseline_model
+
+    schedule_auto_update
 
     printf '\n%sInstall complete.%s\n' "$GREEN" "$RESET"
 

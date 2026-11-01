@@ -212,6 +212,10 @@ export default async function remove(args, ctx) {
     }
 
     if (!keepBinary) {
+        try {
+            const { removeAutoUpdate } = await import('@profullstack/cli/auto-update');
+            await removeAutoUpdate('infernet');
+        } catch { /* older installs may not have the shared updater dependency */ }
         const { removed, skipped } = await uninstallBinary();
         for (const p of removed) process.stdout.write(`Removed ${p}\n`);
         if (skipped.length > 0) {

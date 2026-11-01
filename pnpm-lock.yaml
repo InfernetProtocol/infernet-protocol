@@ -70,6 +70,9 @@ importers:
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
+      '@profullstack/cli':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@profullstack/x402-client':
         specifier: ^0.3.0
         version: 0.3.0
@@ -1621,6 +1624,10 @@ packages:
     resolution: {integrity: sha512-bp0iREciWetDWrQYOsa6SJRTzviekKwgJQuATT7vql+4equu7pN76q8tb3SP1oBMczydsv6rYUMvPpS6+QT7yQ==}
     engines: {node: '>=22.13'}
     hasBin: true
+
+  '@profullstack/cli@0.2.0':
+    resolution: {integrity: sha512-98Ei8yt1hBhoBFGfqDUM6QBKmzP7mad90uybp9BUw2zvilHOIRv5bTn8byR7+MjiiNN0FQ/DvOlGT9o3KcNCyg==}
+    engines: {node: '>=18'}
 
   '@profullstack/coinpay-onboard@0.3.1':
     resolution: {integrity: sha512-+K7D6uaX10y+0V5sg7To1jKwNG8iCNbN9SSW6q5ACzoiDNswMox3G7gzY/Swxd128klq7ecN2Ni4JVNr50nRIQ==}
@@ -8346,6 +8353,8 @@ snapshots:
       '@profullstack/referrals': 0.1.0(react@19.3.1)
     transitivePeerDependencies:
       - react
+
+  '@profullstack/cli@0.2.0': {}
 
   '@profullstack/coinpay-onboard@0.3.1':
     dependencies:
