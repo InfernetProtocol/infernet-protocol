@@ -29,7 +29,7 @@
     "@profullstack/favicon-generator": "^1.2.1",
     "@profullstack/footer": "latest",
     "@profullstack/form-guard": "^0.2.2",
-    "@profullstack/profile": "0.1.7",
+    "@profullstack/profile": "0.1.8",
     "@profullstack/redeem-credits": "0.2.0",
     "@profullstack/sealed-secrets": "0.1.0",
     "@profullstack/x402-gateway": "^0.13.1",
