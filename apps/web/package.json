@@ -41,8 +41,10 @@
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
     "server-only": "^0.0.1",
-    "simple-icons": "^16.36.0"
+    "simple-icons": "^16.36.0",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
