@@ -247,12 +247,18 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      remark-parse:
+        specifier: ^11.0.0
+        version: 11.0.0
       server-only:
         specifier: ^0.0.1
         version: 0.0.1
       simple-icons:
         specifier: ^16.36.0
         version: 16.36.0
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4.3.3

@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import { getConversationKey, encrypt, decrypt } from "@/lib/nip44";
 import { CATALOG } from "@/lib/model-catalog";
 
@@ -12,6 +14,41 @@ import { CATALOG } from "@/lib/model-catalog";
 const MODEL_LABELS = new Map(CATALOG.map((m) => [m.pull, m.name]));
 function modelLabel(name) {
   return MODEL_LABELS.get(name) ?? name;
+}
+
+const SPEECH_MARKDOWN = unified().use(remarkParse).use(remarkGfm);
+const SPEECH_BLOCK_TYPES = new Set([
+  "blockquote", "code", "footnoteDefinition", "heading", "listItem", "paragraph"
+]);
+
+function markdownToSpeechText(markdown) {
+  const tree = SPEECH_MARKDOWN.parse(markdown);
+  function read(node) {
+    if (!node) return "";
+    if (["text", "inlineCode", "code"].includes(node.type)) return node.value ?? "";
+    if (["image", "imageReference"].includes(node.type)) return node.alt ?? "";
+    if (["link", "linkReference"].includes(node.type)) return (node.children ?? []).map(read).join("");
+    if (["html", "definition", "footnoteReference"].includes(node.type)) return "";
+    if (node.type === "break" || node.type === "thematicBreak") return "\n";
+    if (node.type === "tableRow") {
+      return `${(node.children ?? []).map(read).map((cell) => cell.trim()).filter(Boolean).join(", ")}\n`;
+    }
+    if (node.type === "list") {
+      return (node.children ?? []).map((item, index) => {
+        const prefix = node.ordered ? `${(node.start ?? 1) + index}. ` : "";
+        return `${prefix}${read(item).trim()}`;
+      }).join("\n");
+    }
+    const content = (node.children ?? []).map(read).join("");
+    if (node.type === "root" || node.type === "table") return `${content}\n`;
+    return SPEECH_BLOCK_TYPES.has(node.type) ? `${content.trim()}\n` : content;
+  }
+
+  return read(tree)
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function splitSpeechText(text, maxChars = 480) {
@@ -143,7 +180,7 @@ export default function ChatView({ initialModels = [] }) {
   const audioRef = useRef(null);
   const audioUrlRef = useRef(null);
   const speechGenerationRef = useRef(0);
-  const speechAbortRef = useRef(null);
+  const speechAbortRef = useRef(new Set());
   const speechCancelPlaybackRef = useRef(null);
 
   useEffect(() => {
@@ -181,7 +218,8 @@ export default function ChatView({ initialModels = [] }) {
       }
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
       speechGenerationRef.current += 1;
-      speechAbortRef.current?.abort();
+      for (const controller of speechAbortRef.current) controller.abort();
+      speechAbortRef.current.clear();
       speechCancelPlaybackRef.current?.();
       if (audioRef.current) {
         try { audioRef.current.pause(); } catch { /* ignore */ }
@@ -207,8 +245,8 @@ export default function ChatView({ initialModels = [] }) {
 
   function stopVoicePlayback() {
     speechGenerationRef.current += 1;
-    speechAbortRef.current?.abort();
-    speechAbortRef.current = null;
+    for (const controller of speechAbortRef.current) controller.abort();
+    speechAbortRef.current.clear();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -222,53 +260,83 @@ export default function ChatView({ initialModels = [] }) {
     speechCancelPlaybackRef.current = null;
     cancelPlayback?.();
     setVoicePlaying(false);
+    setVoiceStatus("");
   }
 
   async function speakAssistant(text) {
     if (!text || !voiceMode) return;
     stopVoicePlayback();
     const generation = speechGenerationRef.current;
-    const chunks = splitSpeechText(text);
+    let chunks;
+    try {
+      chunks = splitSpeechText(markdownToSpeechText(text));
+    } catch (err) {
+      setVoiceError(err?.message ?? "Could not prepare the answer for speech.");
+      return;
+    }
     if (!chunks.length) return;
     setVoiceError(null);
+    setVoicePlaying(true);
+    const generated = new Array(chunks.length);
+    let nextChunk = 0;
+    let readyCount = 0;
     try {
-      for (let index = 0; index < chunks.length; index += 1) {
-        if (generation !== speechGenerationRef.current) return;
-        const controller = new AbortController();
-        speechAbortRef.current = controller;
-        setVoiceStatus(chunks.length > 1
-          ? `Generating speech ${index + 1} of ${chunks.length} on c0mpute CPU nodes…`
-          : "Generating speech on c0mpute CPU nodes…");
-        const response = await fetch("/api/chat/voice/tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            text: chunks[index],
-            engine: voiceEngine,
-            voice: voiceId,
-            locale: voiceLocale,
-            speed: 1,
-            persona: voicePersona
-          })
-        });
-        if (speechAbortRef.current === controller) speechAbortRef.current = null;
-        if (generation !== speechGenerationRef.current) return;
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
-          throw new Error(body.detail || body.error || "Speech synthesis failed");
+      setVoiceStatus(`Generating ${chunks.length} clean-text speech chunks in parallel across c0mpute CPU nodes…`);
+      const synthesizeWorker = async () => {
+        while (generation === speechGenerationRef.current) {
+          const index = nextChunk;
+          nextChunk += 1;
+          if (index >= chunks.length) return;
+          const controller = new AbortController();
+          speechAbortRef.current.add(controller);
+          try {
+            const response = await fetch("/api/chat/voice/tts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({
+                text: chunks[index],
+                engine: voiceEngine,
+                voice: voiceId,
+                locale: voiceLocale,
+                speed: 1,
+                persona: voicePersona
+              })
+            });
+            if (generation !== speechGenerationRef.current) return;
+            if (!response.ok) {
+              const body = await response.json().catch(() => ({}));
+              throw new Error(body.detail || body.error || "Speech synthesis failed");
+            }
+            const blob = await response.blob();
+            if (generation !== speechGenerationRef.current) return;
+            generated[index] = {
+              blob,
+              worker: response.headers.get("x-c0mpute-worker-peer-id")
+            };
+            readyCount += 1;
+            setVoiceStatus(`Generating speech in parallel: ${readyCount} of ${chunks.length} chunks ready across c0mpute CPU nodes…`);
+          } finally {
+            speechAbortRef.current.delete(controller);
+          }
         }
-        const blob = await response.blob();
+      };
+
+      const concurrency = Math.min(6, chunks.length);
+      await Promise.all(Array.from({ length: concurrency }, () => synthesizeWorker()));
+      if (generation !== speechGenerationRef.current) return;
+      const workers = new Set(generated.map((part) => part?.worker).filter(Boolean));
+      const workerSummary = workers.size ? ` from ${workers.size} c0mpute workers` : "";
+      setVoiceStatus(`Generated ${chunks.length} chunks${workerSummary}; playing in original order…`);
+
+      for (let index = 0; index < generated.length; index += 1) {
         if (generation !== speechGenerationRef.current) return;
+        const { blob, worker } = generated[index];
         const url = URL.createObjectURL(blob);
         const player = new Audio(url);
         audioUrlRef.current = url;
         audioRef.current = player;
-        const worker = response.headers.get("x-c0mpute-worker-peer-id");
-        setVoiceStatus(chunks.length > 1
-          ? `Speaking part ${index + 1} of ${chunks.length}${worker ? ` from worker ${worker.slice(0, 12)}…` : " from a c0mpute worker"}`
-          : worker ? `Speaking from c0mpute worker ${worker.slice(0, 12)}…` : "Speaking from a c0mpute worker");
-        setVoicePlaying(true);
+        setVoiceStatus(`Speaking part ${index + 1} of ${chunks.length} in order${worker ? ` · worker ${worker.slice(0, 12)}…` : " · c0mpute worker"}`);
         await new Promise((resolve, reject) => {
           let settled = false;
           const finish = (error) => {
@@ -292,13 +360,18 @@ export default function ChatView({ initialModels = [] }) {
           player.play().catch(finish);
         });
         if (generation !== speechGenerationRef.current) return;
+      }
+      if (generation === speechGenerationRef.current) {
+        setVoiceStatus("");
         setVoicePlaying(false);
       }
-      if (generation === speechGenerationRef.current) setVoiceStatus("");
     } catch (err) {
-      if (generation !== speechGenerationRef.current || err?.name === "AbortError") return;
+      if (generation !== speechGenerationRef.current) return;
+      for (const controller of speechAbortRef.current) controller.abort();
+      speechAbortRef.current.clear();
       setVoiceStatus("");
       setVoicePlaying(false);
+      if (err?.name === "AbortError") return;
       setVoiceError(err?.message ?? "Speech synthesis failed");
     }
   }
@@ -906,7 +979,7 @@ export default function ChatView({ initialModels = [] }) {
                       onClick={stopVoicePlayback}
                       className="rounded-full border border-[var(--line)] px-3 py-1.5 text-xs text-white transition hover:border-[var(--accent)]"
                     >
-                      Stop audio
+                      Stop readback
                     </button>
                   ) : null}
                 </>
