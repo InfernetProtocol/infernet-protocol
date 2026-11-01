@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase/auth-server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import ContactDetailsForm from "@/components/contact-details-form";
+import RemoveNodeButton from "@/components/remove-node-button";
 import { creditSummary, settleInviteBonus } from "@/lib/credits";
 import { coinpayConfig, isPlaceholderEmail, supabaseCoinpayStore } from "@/lib/auth/coinpay-signin";
 
@@ -44,21 +45,36 @@ export default async function SettingsPage({ searchParams }) {
     }
 
     const supabase = getSupabaseServerClient();
-    const [{ data: links }, { data: providers }] = await Promise.all([
-        supabase
-            .from("pubkey_links")
-            .select("id, pubkey, role, label, default_is_public, created_at")
-            .eq("user_id", user.id)
-            .order("created_at", { ascending: false }),
-        supabase
-            .from("providers")
-            .select("id, name, node_id, status, is_public, public_key")
-            .in(
-                "public_key",
-                (await supabase.from("pubkey_links").select("pubkey").eq("user_id", user.id))
-                    ?.data?.map((r) => r.pubkey) ?? ["__none__"]
-            )
-    ]);
+    const { data: links } = await supabase
+        .from("pubkey_links")
+        .select("id, pubkey, role, label, default_is_public, created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+    const nodeTables = [
+        { role: "provider", table: "providers" },
+        { role: "aggregator", table: "aggregators" },
+        { role: "client", table: "clients" }
+    ];
+    const ownedNodeGroups = await Promise.all(nodeTables.map(async ({ role, table }) => {
+        const roleLinks = (links ?? []).filter((link) => link.role === role);
+        if (roleLinks.length === 0) return [];
+        const { data } = await supabase
+            .from(table)
+            .select("id, name, node_id, status, is_public, public_key, last_seen")
+            .in("public_key", roleLinks.map((link) => link.pubkey));
+        const labels = new Map(roleLinks.map((link) => [link.pubkey, link.label]));
+        return (data ?? []).map((node) => ({
+            ...node,
+            role,
+            label: labels.get(node.public_key) ?? null
+        }));
+    }));
+    const nodes = ownedNodeGroups.flat().sort((a, b) => {
+        const aSeen = a.last_seen ? Date.parse(a.last_seen) : 0;
+        const bSeen = b.last_seen ? Date.parse(b.last_seen) : 0;
+        return bSeen - aSeen;
+    });
 
     const defaultIsPublic = links?.[0]?.default_is_public ?? true;
 
@@ -83,7 +99,7 @@ export default async function SettingsPage({ searchParams }) {
                     Settings
                 </p>
                 <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                    Account, credits &amp; node privacy
+                    Account, credits &amp; node settings
                 </h1>
                 <p className="text-sm text-[var(--muted)]">
                     Signed in as <span className="font-mono text-white">{coinpayOnly ? "your CoinPay account" : (user.email ?? user.id)}</span>.
@@ -238,13 +254,12 @@ export default async function SettingsPage({ searchParams }) {
                 <section className="rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6">
                     <h2 className="text-lg font-semibold text-white">Your nodes</h2>
                     <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-                        Toggle each node&apos;s public visibility independently. Private
-                        nodes can still receive jobs you submit; they just don&apos;t
-                        appear in public listings.
+                        Set visibility for each provider, aggregator, or client, or
+                        delete a node registration you no longer use.
                     </p>
-                    {(providers?.length ?? 0) === 0 ? (
+                    {nodes.length === 0 ? (
                         <p className="mt-4 text-sm text-[var(--muted)]">
-                            No providers registered yet. Mint a deploy token at{" "}
+                            No nodes registered yet. Mint a deploy token at{" "}
                             <Link href="/deploy" className="text-[var(--accent)] hover:underline">
                                 /deploy
                             </Link>
@@ -252,28 +267,34 @@ export default async function SettingsPage({ searchParams }) {
                         </p>
                     ) : (
                         <ul className="mt-4 space-y-2">
-                            {providers.map((p) => (
+                            {nodes.map((p) => (
                                 <li
-                                    key={p.id}
+                                    key={`${p.role}:${p.id}`}
                                     className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-[var(--panel-strong)] px-4 py-3"
                                 >
                                     <div className="min-w-0 flex-1">
                                         <p className="truncate text-sm font-medium text-white">
-                                            {p.name ?? p.node_id ?? "(unnamed)"}
+                                            {p.name ?? p.label ?? p.node_id ?? "(unnamed)"}
                                         </p>
                                         <p className="truncate text-xs text-[var(--muted)]">
-                                            {p.node_id} · status: {p.status}
+                                            {p.role} · {p.node_id ?? p.public_key} · status: {p.status}
+                                            {p.last_seen ? ` · last seen ${new Date(p.last_seen).toLocaleString()}` : " · never seen"}
                                         </p>
                                     </div>
-                                    <label className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                                    <label className="flex shrink-0 items-center gap-2 text-sm text-[var(--muted)]">
                                         <input
                                             type="checkbox"
-                                            name={`node_public[${p.id}]`}
+                                            name={`node_public[${p.role}:${p.id}]`}
                                             value="true"
                                             defaultChecked={p.is_public !== false}
                                         />
                                         <span>Public</span>
                                     </label>
+                                    <RemoveNodeButton
+                                        pubkey={p.public_key}
+                                        role={p.role}
+                                        name={p.name ?? p.node_id ?? p.public_key}
+                                    />
                                 </li>
                             ))}
                         </ul>

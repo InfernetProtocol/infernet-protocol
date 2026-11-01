@@ -79,6 +79,9 @@ jobs:
             exec npm pkg set version="${{ steps.version.outputs.version }}"
 
       - name: Publish CLI and runtime packages
+        # The GitHub release and provider image remain usable through the
+        # source-install fallback when npm publishing credentials are stale.
+        continue-on-error: true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true

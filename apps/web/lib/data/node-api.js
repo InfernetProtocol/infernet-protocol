@@ -449,6 +449,38 @@ export async function removeNode({ role, pubkey }) {
     return { deleted: true, id: existing.id };
 }
 
+/** Remove a node registration from the signed-in owner's account settings. */
+export async function removeOwnedNode({ userId, role, pubkey }) {
+    const table = tableForRole(role);
+    if (!table) throw withStatus(`invalid role: ${role}`, 400);
+
+    const supabase = getSupabaseServerClient();
+    const { data: link, error: ownerErr } = await supabase
+        .from("pubkey_links")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("pubkey", pubkey)
+        .eq("role", role)
+        .maybeSingle();
+    if (ownerErr) throw withStatus(ownerErr.message, 500);
+    if (!link) throw withStatus("you do not own this node", 403);
+
+    const { data: existing, error: lookupErr } = await supabase
+        .from(table)
+        .select("id")
+        .eq("public_key", pubkey)
+        .maybeSingle();
+    if (lookupErr) throw withStatus(lookupErr.message, 500);
+    if (!existing) return { deleted: false };
+
+    const { error: deleteErr } = await supabase.from(table).delete().eq("id", existing.id);
+    if (deleteErr?.code === "23503") {
+        throw withStatus("This node has an active reservation or order and cannot be deleted yet.", 409);
+    }
+    if (deleteErr) throw withStatus(deleteErr.message, 500);
+    return { deleted: true, id: existing.id };
+}
+
 export async function getSelfRow({ role, pubkey }) {
     const table = tableForRole(role);
     if (!table) throw withStatus(`invalid role: ${role}`, 400);
