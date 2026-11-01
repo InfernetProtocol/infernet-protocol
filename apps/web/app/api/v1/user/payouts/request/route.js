@@ -22,7 +22,7 @@ export async function POST(request) {
     const rawAmount = String(form.get("amount_usd") ?? "").trim();
     const back = (params) => NextResponse.redirect(new URL(`/dashboard?${new URLSearchParams(params)}#earnings`, appUrl()), 303);
 
-    const owned = await getUserProviders(user.id);
+    const owned = await getUserProviders(user.id, { includeArchived: true });
     if (!owned.some((p) => p.id === providerId)) {
         return back({ payout_error: "That node is not linked to your account." });
     }

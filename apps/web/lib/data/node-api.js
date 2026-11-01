@@ -179,7 +179,9 @@ export async function registerNode({ role, pubkey, body }) {
     const supabase = getSupabaseServerClient();
     const { data: existing } = await supabase
         .from(table)
-        .select("id, public_key")
+        .select(role === "provider"
+            ? "id, public_key, is_public, archived_at, archived_is_public"
+            : "id, public_key, is_public")
         .eq("node_id", nodeId)
         .maybeSingle();
 
@@ -203,6 +205,13 @@ export async function registerNode({ role, pubkey, body }) {
         if (Number.isFinite(body.price)) payload.price = Number(body.price);
         const specs = sanitizeSpecs(body.specs);
         if (specs) payload.specs = specs;
+        if (existing) payload.is_public = existing.archived_at
+            ? existing.archived_is_public ?? true
+            : existing.is_public;
+        if (existing?.archived_at) {
+            payload.archived_at = null;
+            payload.archived_is_public = null;
+        }
     }
 
     if (role === "client") {
@@ -437,12 +446,27 @@ export async function removeNode({ role, pubkey }) {
     const supabase = getSupabaseServerClient();
     const { data: existing, error: lookupErr } = await supabase
         .from(table)
-        .select("id, public_key")
+        .select(role === "provider"
+            ? "id, public_key, is_public, archived_at, archived_is_public"
+            : "id, public_key")
         .eq("public_key", pubkey)
         .maybeSingle();
 
     if (lookupErr) throw withStatus(lookupErr.message, 500);
     if (!existing) return { deleted: false };
+
+    if (role === "provider") {
+        const { error } = await supabase.from(table).update({
+            status: "archived",
+            is_public: false,
+            archived_at: new Date().toISOString(),
+            archived_is_public: existing.archived_at
+                ? existing.archived_is_public
+                : existing.is_public !== false
+        }).eq("id", existing.id);
+        if (error) throw withStatus(error.message, 500);
+        return { deleted: true, archived: true, id: existing.id };
+    }
 
     const { error } = await supabase.from(table).delete().eq("id", existing.id);
     if (error) throw withStatus(error.message, 500);
@@ -467,11 +491,26 @@ export async function removeOwnedNode({ userId, role, pubkey }) {
 
     const { data: existing, error: lookupErr } = await supabase
         .from(table)
-        .select("id")
+        .select(role === "provider"
+            ? "id, is_public, archived_at, archived_is_public"
+            : "id")
         .eq("public_key", pubkey)
         .maybeSingle();
     if (lookupErr) throw withStatus(lookupErr.message, 500);
     if (!existing) return { deleted: false };
+
+    if (role === "provider") {
+        const { error: archiveErr } = await supabase.from(table).update({
+            status: "archived",
+            is_public: false,
+            archived_at: new Date().toISOString(),
+            archived_is_public: existing.archived_at
+                ? existing.archived_is_public
+                : existing.is_public !== false
+        }).eq("id", existing.id);
+        if (archiveErr) throw withStatus(archiveErr.message, 500);
+        return { deleted: true, archived: true, id: existing.id };
+    }
 
     const { error: deleteErr } = await supabase.from(table).delete().eq("id", existing.id);
     if (deleteErr?.code === "23503") {

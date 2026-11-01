@@ -10,7 +10,7 @@ export default function RemoveNodeButton({ pubkey, role, name }) {
 
     async function removeNode() {
         const detail = role === "provider"
-            ? " This also deletes this provider's earnings and payout history."
+            ? " This archives the node and preserves its earnings and payout history."
             : "";
         if (!window.confirm(`Remove ${name} from the Infernet registry?${detail}`)) return;
 
@@ -37,7 +37,7 @@ export default function RemoveNodeButton({ pubkey, role, name }) {
                 disabled={busy}
                 className="rounded-full border border-red-400/30 px-3 py-1.5 text-xs font-medium text-red-200 transition hover:border-red-300/70 hover:bg-red-400/10 disabled:opacity-50"
             >
-                {busy ? "Removing…" : "Delete"}
+                {busy ? "Removing…" : role === "provider" ? "Archive" : "Delete"}
             </button>
             {error ? <p role="alert" className="max-w-48 text-right text-xs text-red-200">{error}</p> : null}
         </div>

@@ -44,7 +44,7 @@ export default async function DashboardPage({ searchParams }) {
 
     const hardware = summarizeHardware(providers);
     const fabric = summarizeInterconnects(providers);
-    const registeredProviderKeys = new Set(providers.map((p) => p.public_key));
+    const registeredProviderKeys = new Set((earnings.providers ?? providers).map((p) => p.public_key));
     const unregisteredNodes = pubkeys
         .filter((k) => k.role === "provider" && !registeredProviderKeys.has(k.pubkey))
         .map((k) => ({
@@ -278,10 +278,10 @@ export default async function DashboardPage({ searchParams }) {
                     </div>
                 </div>
 
-                {!noProviders ? (
+                {(earnings.providers ?? providers).length > 0 ? (
                     <section id="earnings" className="mt-10">
                         <Card title="Earnings + payouts">
-                            <EarningsPanel providers={providers} earnings={earnings} notice={sp.payout} error={sp.payout_error} />
+                            <EarningsPanel providers={earnings.providers ?? providers} earnings={earnings} notice={sp.payout} error={sp.payout_error} />
                         </Card>
                     </section>
                 ) : null}
@@ -289,7 +289,7 @@ export default async function DashboardPage({ searchParams }) {
                 {/* Operator-side view: jobs your nodes actually processed */}
                 <section className="mt-10">
                     <Card title="Recent jobs (your nodes processed)">
-                        {noProviders || jobsProcessed.length === 0 ? (
+                        {jobsProcessed.length === 0 ? (
                             <Empty
                                 hint={
                                     noProviders
@@ -455,6 +455,7 @@ function EarningsPanel({ providers, earnings, notice, error }) {
                                 <tr key={p.id} className="border-t border-white/5">
                                     <td className="py-2 pr-3 text-white">
                                         <Link href={`/nodes/${p.id}`} className="hover:underline">{p.name}</Link>
+                                        {p.archived_at ? <span className="ml-2 rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">Archived</span> : null}
                                         <span className="block text-xs text-[var(--muted)]">{b.jobs_credited ?? 0} jobs credited</span>
                                     </td>
                                     <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsdPrecise(b.pending_approval_usd)}</td>

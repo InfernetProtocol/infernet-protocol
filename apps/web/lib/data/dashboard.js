@@ -38,7 +38,7 @@ export async function getUserPubkeys(userId) {
     return data ?? [];
 }
 
-export async function getUserProviders(userId) {
+export async function getUserProviders(userId, { includeArchived = false } = {}) {
     const links = await getUserPubkeys(userId);
     const keys = links.filter((l) => l.role === "provider").map((l) => l.pubkey);
     if (keys.length === 0) return [];
@@ -46,12 +46,13 @@ export async function getUserProviders(userId) {
     const { data, error } = await supabase
         .from("providers")
         .select(
-            "id, name, status, gpu_model, price, reputation, node_id, public_key, address, port, specs, last_seen, created_at"
+            "id, name, status, gpu_model, price, reputation, node_id, public_key, address, port, specs, last_seen, created_at, archived_at, archived_is_public"
         )
         .in("public_key", keys)
         .order("last_seen", { ascending: false, nullsFirst: false });
     if (error) throw new Error(error.message);
-    return data ?? [];
+    const providers = data ?? [];
+    return includeArchived ? providers : providers.filter((provider) => !provider.archived_at);
 }
 
 export async function getUserClients(userId) {
@@ -97,14 +98,15 @@ async function sumPaymentsUsd({ ids, direction, sinceDays }) {
  * credits its node; free jobs carry the house subsidy, pending approval).
  */
 export async function getEarningsSummary(userId) {
-    const providers = await getUserProviders(userId);
+    const providers = await getUserProviders(userId, { includeArchived: true });
     const { getEarningsForProviders } = await import("@/lib/data/earnings");
     const out = await getEarningsForProviders(providers.map((p) => p.id), { recent: 0 });
     return {
         ...out.balance,
         per_provider: out.per_provider,
         payouts: out.payouts,
-        config: out.config
+        config: out.config,
+        providers
     };
 }
 
@@ -280,7 +282,7 @@ export async function getRecentJobs(userId, { limit = 8 } = {}) {
  * they run multiple).
  */
 export async function getRecentJobsProcessed(userId, { limit = 8 } = {}) {
-    const providers = await getUserProviders(userId);
+    const providers = await getUserProviders(userId, { includeArchived: true });
     const ids = providers.map((p) => p.id).filter(Boolean);
     if (ids.length === 0) return [];
 

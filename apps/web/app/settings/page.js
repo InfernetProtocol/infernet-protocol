@@ -61,10 +61,12 @@ export default async function SettingsPage({ searchParams }) {
         if (roleLinks.length === 0) return [];
         const { data } = await supabase
             .from(table)
-            .select("id, name, node_id, status, is_public, public_key, last_seen")
+            .select(role === "provider"
+                ? "id, name, node_id, status, is_public, public_key, last_seen, archived_at"
+                : "id, name, node_id, status, is_public, public_key, last_seen")
             .in("public_key", roleLinks.map((link) => link.pubkey));
         const labels = new Map(roleLinks.map((link) => [link.pubkey, link.label]));
-        return (data ?? []).map((node) => ({
+        return (data ?? []).filter((node) => role !== "provider" || !node.archived_at).map((node) => ({
             ...node,
             role,
             label: labels.get(node.public_key) ?? null
@@ -255,7 +257,7 @@ export default async function SettingsPage({ searchParams }) {
                     <h2 className="text-lg font-semibold text-white">Your nodes</h2>
                     <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
                         Set visibility for each provider, aggregator, or client, or
-                        delete a node registration you no longer use.
+                        remove a node you no longer use. Provider earnings and payout history are retained.
                     </p>
                     {nodes.length === 0 ? (
                         <p className="mt-4 text-sm text-[var(--muted)]">
