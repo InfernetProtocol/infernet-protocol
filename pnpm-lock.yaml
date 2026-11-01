@@ -212,8 +212,8 @@ importers:
         specifier: ^0.2.2
         version: 0.2.2
       '@profullstack/profile':
-        specifier: 0.1.7
-        version: 0.1.7(react@19.3.1)
+        specifier: 0.1.8
+        version: 0.1.8(react@19.3.1)
       '@profullstack/redeem-credits':
         specifier: 0.2.0
         version: 0.2.0
@@ -1654,8 +1654,8 @@ packages:
     resolution: {integrity: sha512-cdFsBbfRXurvy5KqHDNcKXxurK2s/YlfVgnILFRpVl2hq3860rExqDee8IfsFGxw5cPdqGv2fxUxtek1Xy2U5Q==}
     engines: {node: '>=22'}
 
-  '@profullstack/profile@0.1.7':
-    resolution: {integrity: sha512-N7UkypkkY2JkSBKzmdmyy6+DCoxI048qUZQksEjSRwSIyy4mjU9H1qW4yhZD+LJBhTEupgJv//Uxwhiy2FuGmA==}
+  '@profullstack/profile@0.1.8':
+    resolution: {integrity: sha512-MQ/AGGM++NZEbjMglRlEvjCrmsL46CXDz2GKb510eMBEKUik1cwix9ag20gakYrrVCaB5mNcNCMYon53vwDTfw==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -8372,7 +8372,7 @@ snapshots:
 
   '@profullstack/openprofile@0.2.0': {}
 
-  '@profullstack/profile@0.1.7(react@19.3.1)':
+  '@profullstack/profile@0.1.8(react@19.3.1)':
     dependencies:
       '@profullstack/openprofile': 0.2.0
     optionalDependencies:
