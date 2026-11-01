@@ -9,7 +9,9 @@
  */
 
 import { spawn } from 'node:child_process';
+import { compareVersions } from '@profullstack/cli';
 import setup from './setup.js';
+import { CURRENT_VERSION, fetchLatestVersion } from '../lib/version.js';
 
 const HELP = `infernet update — pull latest CLI + autonomous post-upgrade setup
 
@@ -17,6 +19,9 @@ Usage:
   infernet update [flags]
 
 Flags:
+  --check        Check for a newer release without installing it.
+  --force        Reinstall when the published version matches (never downgrades).
+  --quiet        Suppress routine update progress.
   --skip-setup   Just re-run the installer; don't run setup afterward.
   --help         Show this help.
 
@@ -43,8 +48,8 @@ function runShell(cmd) {
     });
 }
 
-export async function pullLatestBinary() {
-    process.stdout.write(`\n→ Pulling latest CLI from ${INSTALLER_URL}\n\n`);
+export async function pullLatestBinary({ quiet = false } = {}) {
+    if (!quiet) process.stdout.write(`\n→ Pulling latest CLI from ${INSTALLER_URL}\n\n`);
     // INFERNET_AUTOSTART=0: the installer would otherwise run `infernet setup`,
     // which restarts (or, next to infernet.service, duplicates) the daemon from
     // inside its own self-update. Both callers run setup themselves afterwards.
@@ -62,7 +67,31 @@ export default async function update(args, ctx) {
         return 0;
     }
 
-    const ok = await pullLatestBinary();
+    const quiet = args.has('quiet');
+    const latest = await fetchLatestVersion();
+    if (!latest) {
+        process.stderr.write('error: could not check the latest Infernet version; installer was not run.\n');
+        return 1;
+    }
+    const comparison = compareVersions(CURRENT_VERSION, latest);
+    if (comparison === null) {
+        process.stderr.write('error: invalid version from the Infernet update feed; installer was not run.\n');
+        return 1;
+    }
+    if (comparison > 0) {
+        if (!quiet) process.stdout.write(`Infernet ${CURRENT_VERSION} is newer than the published ${latest}; refusing to downgrade.\n`);
+        return 0;
+    }
+    if (comparison === 0 && !args.has('force')) {
+        if (!quiet) process.stdout.write(`Infernet ${CURRENT_VERSION} is already current; skipping reinstall.\n`);
+        return 0;
+    }
+    if (args.has('check')) {
+        if (!quiet) process.stdout.write(`Infernet update available: ${CURRENT_VERSION} → ${latest}.\n`);
+        return 0;
+    }
+
+    const ok = await pullLatestBinary({ quiet });
     if (!ok) return 1;
 
     if (args.has('skip-setup')) {
