@@ -585,7 +585,17 @@ export async function listE2EChatModels() {
     }
   }
 
-  return [...models].sort().map((name) => ({ id: name, name, family: null, context_length: null }));
+  const lightFirst = ["qwen2.5:0.5b", "qwen2.5:1.5b"];
+  return [...models]
+    .sort((a, b) => {
+      const aRank = lightFirst.indexOf(a);
+      const bRank = lightFirst.indexOf(b);
+      if (aRank >= 0 || bRank >= 0) {
+        return (aRank < 0 ? lightFirst.length : aRank) - (bRank < 0 ? lightFirst.length : bRank);
+      }
+      return a.localeCompare(b);
+    })
+    .map((name) => ({ id: name, name, family: null, context_length: null }));
 }
 
 /**
