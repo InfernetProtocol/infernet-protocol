@@ -14,6 +14,28 @@ function modelLabel(name) {
   return MODEL_LABELS.get(name) ?? name;
 }
 
+function splitSpeechText(text, maxChars = 480) {
+  const chunks = [];
+  let current = "";
+  for (const word of text.match(/\S+\s*/g) ?? []) {
+    if (current && current.length + word.length > maxChars) {
+      chunks.push(current.trim());
+      current = "";
+    }
+    if (word.length > maxChars) {
+      if (current) chunks.push(current.trim());
+      current = "";
+      const chars = Array.from(word);
+      while (chars.length > maxChars) chunks.push(chars.splice(0, maxChars).join("").trim());
+      current = chars.join("");
+    } else {
+      current += word;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks;
+}
+
 const EXAMPLE_PROMPTS = [
   "Explain how Infernet's P2P GPU network scales compared to a centralized data center.",
   "Write a Python function that streams tokens from a local llama.cpp server.",
@@ -120,6 +142,9 @@ export default function ChatView({ initialModels = [] }) {
   const mediaStreamRef = useRef(null);
   const audioRef = useRef(null);
   const audioUrlRef = useRef(null);
+  const speechGenerationRef = useRef(0);
+  const speechAbortRef = useRef(null);
+  const speechCancelPlaybackRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +180,9 @@ export default function ChatView({ initialModels = [] }) {
         try { recorderRef.current.stop(); } catch { /* ignore */ }
       }
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      speechGenerationRef.current += 1;
+      speechAbortRef.current?.abort();
+      speechCancelPlaybackRef.current?.();
       if (audioRef.current) {
         try { audioRef.current.pause(); } catch { /* ignore */ }
       }
@@ -178,6 +206,9 @@ export default function ChatView({ initialModels = [] }) {
   }
 
   function stopVoicePlayback() {
+    speechGenerationRef.current += 1;
+    speechAbortRef.current?.abort();
+    speechAbortRef.current = null;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -187,51 +218,87 @@ export default function ChatView({ initialModels = [] }) {
       URL.revokeObjectURL(audioUrlRef.current);
       audioUrlRef.current = null;
     }
+    const cancelPlayback = speechCancelPlaybackRef.current;
+    speechCancelPlaybackRef.current = null;
+    cancelPlayback?.();
     setVoicePlaying(false);
   }
 
   async function speakAssistant(text) {
     if (!text || !voiceMode) return;
+    stopVoicePlayback();
+    const generation = speechGenerationRef.current;
+    const chunks = splitSpeechText(text);
+    if (!chunks.length) return;
     setVoiceError(null);
-    setVoiceStatus("Generating speech on c0mpute CPU nodes…");
     try {
-      const response = await fetch("/api/chat/voice/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text,
-          engine: voiceEngine,
-          voice: voiceId,
-          locale: voiceLocale,
-          speed: 1,
-          persona: voicePersona
-        })
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.detail || body.error || "Speech synthesis failed");
-      }
-      const blob = await response.blob();
-      stopVoicePlayback();
-      const url = URL.createObjectURL(blob);
-      const player = new Audio(url);
-      audioUrlRef.current = url;
-      audioRef.current = player;
-      player.onended = () => {
-        if (audioUrlRef.current === url) stopVoicePlayback();
-      };
-      player.onerror = () => {
-        if (audioUrlRef.current === url) {
-          stopVoicePlayback();
-          setVoiceError("The returned audio could not be played.");
+      for (let index = 0; index < chunks.length; index += 1) {
+        if (generation !== speechGenerationRef.current) return;
+        const controller = new AbortController();
+        speechAbortRef.current = controller;
+        setVoiceStatus(chunks.length > 1
+          ? `Generating speech ${index + 1} of ${chunks.length} on c0mpute CPU nodes…`
+          : "Generating speech on c0mpute CPU nodes…");
+        const response = await fetch("/api/chat/voice/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            text: chunks[index],
+            engine: voiceEngine,
+            voice: voiceId,
+            locale: voiceLocale,
+            speed: 1,
+            persona: voicePersona
+          })
+        });
+        if (speechAbortRef.current === controller) speechAbortRef.current = null;
+        if (generation !== speechGenerationRef.current) return;
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.detail || body.error || "Speech synthesis failed");
         }
-      };
-      await player.play();
-      setVoicePlaying(true);
-      const worker = response.headers.get("x-c0mpute-worker-peer-id");
-      setVoiceStatus(worker ? `Speaking from c0mpute worker ${worker.slice(0, 12)}…` : "Speaking from a c0mpute worker");
+        const blob = await response.blob();
+        if (generation !== speechGenerationRef.current) return;
+        const url = URL.createObjectURL(blob);
+        const player = new Audio(url);
+        audioUrlRef.current = url;
+        audioRef.current = player;
+        const worker = response.headers.get("x-c0mpute-worker-peer-id");
+        setVoiceStatus(chunks.length > 1
+          ? `Speaking part ${index + 1} of ${chunks.length}${worker ? ` from worker ${worker.slice(0, 12)}…` : " from a c0mpute worker"}`
+          : worker ? `Speaking from c0mpute worker ${worker.slice(0, 12)}…` : "Speaking from a c0mpute worker");
+        setVoicePlaying(true);
+        await new Promise((resolve, reject) => {
+          let settled = false;
+          const finish = (error) => {
+            if (settled) return;
+            settled = true;
+            player.onended = null;
+            player.onerror = null;
+            if (audioRef.current === player) audioRef.current = null;
+            if (audioUrlRef.current === url) {
+              URL.revokeObjectURL(url);
+              audioUrlRef.current = null;
+            }
+            if (speechCancelPlaybackRef.current === cancel) speechCancelPlaybackRef.current = null;
+            if (error) reject(error);
+            else resolve();
+          };
+          const cancel = () => finish();
+          speechCancelPlaybackRef.current = cancel;
+          player.onended = () => finish();
+          player.onerror = () => finish(new Error("The returned audio could not be played."));
+          player.play().catch(finish);
+        });
+        if (generation !== speechGenerationRef.current) return;
+        setVoicePlaying(false);
+      }
+      if (generation === speechGenerationRef.current) setVoiceStatus("");
     } catch (err) {
+      if (generation !== speechGenerationRef.current || err?.name === "AbortError") return;
       setVoiceStatus("");
+      setVoicePlaying(false);
       setVoiceError(err?.message ?? "Speech synthesis failed");
     }
   }
