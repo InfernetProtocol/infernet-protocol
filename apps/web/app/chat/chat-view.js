@@ -658,7 +658,7 @@ export default function ChatView({ initialModels = [] }) {
           streaming={streaming}
         />
 
-        <footer className="rounded-[2rem] border border-white/10 bg-[var(--panel)] p-4 shadow-[0_20px_80px_rgba(0,0,0,0.25)]">
+        <div role="group" aria-label="Chat composer" className="rounded-[2rem] border border-white/10 bg-[var(--panel)] p-4 shadow-[0_20px_80px_rgba(0,0,0,0.25)]">
           <textarea
             ref={composerRef}
             value={input}
@@ -820,7 +820,7 @@ export default function ChatView({ initialModels = [] }) {
               </button>
             </div>
           </div>
-        </footer>
+        </div>
       </div>
     </main>
   );
