@@ -722,16 +722,21 @@ export default function ChatView({ initialModels = [] }) {
             <select
               value={modelName}
               onChange={(e) => setModelName(e.target.value)}
-              disabled={streaming}
+              disabled={streaming || initialModels.length === 0}
               className="rounded-full border border-[var(--line)] bg-[var(--panel-strong)] px-4 py-2 text-sm text-white outline-none disabled:opacity-50"
             >
-              <option value="">(any available)</option>
+              <option value="">{initialModels.length > 0 ? "(any encrypted model)" : "No encrypted models available"}</option>
               {initialModels.map((m) => (
                 <option key={m.id} value={m.name} title={m.name}>
                   {modelLabel(m.name)}
                 </option>
               ))}
             </select>
+            <p className="max-w-56 text-right text-[10px] text-[var(--muted)]">
+              {initialModels.length > 0
+                ? "Only live models with a valid E2E key are listed."
+                : "Chat is unavailable until a provider advertises an E2E model key."}
+            </p>
             <DistributedCheckbox
               modelName={modelName}
               streaming={streaming}
@@ -942,7 +947,7 @@ export default function ChatView({ initialModels = [] }) {
               <button
                 type="button"
                 onClick={sendMessage}
-                disabled={streaming || voiceListening || input.trim() === ""}
+                disabled={streaming || voiceListening || input.trim() === "" || initialModels.length === 0}
                 className="rounded-full bg-[var(--accent-strong)] px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black transition hover:brightness-110 disabled:opacity-40"
               >
                 {streaming ? "…" : "Send"}

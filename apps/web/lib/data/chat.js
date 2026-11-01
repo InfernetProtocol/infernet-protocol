@@ -539,6 +539,56 @@ export async function listChatModels() {
 }
 
 /**
+ * Models the browser's encrypted playground can actually route right now.
+ * A model is shown only when a live provider advertises NIP-44 v2 support,
+ * a valid node key, and a valid model-specific key. This keeps the picker
+ * aligned with pickChatProvider({ requireE2E: true }) and avoids offering
+ * plaintext-only or stale model listings to browser chat.
+ */
+export async function listE2EChatModels() {
+  const supabase = getSupabaseServerClient();
+  const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  let query = await supabase
+    .from("providers")
+    .select("specs, public_key, trust_tier")
+    .eq("status", "available")
+    .gte("last_seen", twoMinAgo);
+
+  // Older deployments may not have trust_tier yet. They behave as public in
+  // pickChatProvider, so retry with the same default here.
+  if (query.error && /trust_tier/.test(query.error.message ?? "")) {
+    query = await supabase
+      .from("providers")
+      .select("specs, public_key")
+      .eq("status", "available")
+      .gte("last_seen", twoMinAgo);
+  }
+  if (query.error) throw query.error;
+
+  const models = new Set();
+  for (const provider of query.data ?? []) {
+    const specs = provider?.specs ?? {};
+    if (
+      specs.e2e_capable !== true
+      || specs.e2e_version !== "nip44-v2"
+      || (provider.trust_tier ?? "public") === "private"
+      || !/^(?:[0-9a-f]{64}|[0-9a-f]{66})$/i.test(provider.public_key ?? "")
+    ) continue;
+
+    const keys = specs.model_keys ?? {};
+    for (const name of Array.isArray(specs.served_models) ? specs.served_models : []) {
+      if (
+        typeof name === "string"
+        && name.length > 0
+        && /^(?:[0-9a-f]{64}|[0-9a-f]{66})$/i.test(keys[name] ?? "")
+      ) models.add(name);
+    }
+  }
+
+  return [...models].sort().map((name) => ({ id: name, name, family: null, context_length: null }));
+}
+
+/**
  * Names of the models live nodes serve right now, for the 503 a caller gets
  * when nothing serves what it asked for. Never throws: the error response
  * must not turn into a 500 because this lookup failed.
