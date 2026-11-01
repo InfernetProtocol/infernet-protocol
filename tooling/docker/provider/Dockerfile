@@ -16,7 +16,7 @@
 # ---------------------------------------------------------------------------
 FROM node:lts-slim AS builder
 
-RUN corepack enable && corepack prepare pnpm@10.6.5 --activate
+RUN npm install --global pnpm@10.6.5
 
 WORKDIR /build
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
