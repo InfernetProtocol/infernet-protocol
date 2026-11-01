@@ -49,6 +49,12 @@ export default function HomePage() {
             >
               Live status →
             </Link>
+            <Link
+              href="/book"
+              className="inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold text-[var(--muted)] transition hover:text-white"
+            >
+              Read the book →
+            </Link>
           </div>
         </div>
       </section>
@@ -176,6 +182,35 @@ infernet "what is 2+2?"   # default verb is chat`}
 
       <ProviderLogos />
 
+      {/* The book */}
+      <section className="border-b border-white/10">
+        <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-5 px-6 py-16 lg:px-10">
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[var(--accent)]">
+            Free · Open source · MIT
+          </p>
+          <h2 className="max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+            The Infernet Protocol Book
+          </h2>
+          <p className="max-w-2xl text-base leading-7 text-[var(--muted)]">
+            A practical guide for node operators, app developers, and protocol contributors. Read it online or download the PDF and EPUB.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/book"
+              className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-strong)] px-6 py-3 text-sm font-semibold text-[var(--bg)] transition hover:bg-[var(--accent)]"
+            >
+              Read online →
+            </Link>
+            <Link
+              href="/book/infernet-book.pdf"
+              className="inline-flex items-center gap-2 rounded-full border border-white/20 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+            >
+              Download PDF
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* Try /chat */}
       <section className="border-b border-white/10">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-6 px-6 py-20 lg:px-10">
@@ -188,8 +223,8 @@ infernet "what is 2+2?"   # default verb is chat`}
           </h2>
           <p className="max-w-2xl text-base leading-7 text-[var(--muted)]">
             When the network has live providers, your prompt goes to one of them and tokens stream
-            back over SSE. When it doesn't (early-launch reality), it falls back to NVIDIA NIM so
-            the demo never breaks. Either way, it's the real wire.
+            back over SSE. Chat selects only providers that advertise NIP-44 prompt and response
+            encryption. If no secure provider is available, the message is not sent.
           </p>
           <Link
             href="/chat"

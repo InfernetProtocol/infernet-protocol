@@ -492,6 +492,11 @@ async function runDaemon(args, ctx) {
 
         return {
             ...base,
+            // Every provider daemon implements NIP-44 prompt and response
+            // encryption. Publish the capability so the control plane can
+            // exclude daemons that have not upgraded yet.
+            e2e_capable: true,
+            e2e_version: 'nip44-v2',
             ...(bench ? { bench } : {}),
             load,
             ...(reachable ? { reachable } : {}),
@@ -544,11 +549,15 @@ async function runDaemon(args, ctx) {
                 recordBench(result);
                 resultPayload = {
                     type: 'chat',
-                    text: result.text,
                     token_count: result.token_count,
                     duration_ms: result.duration_ms,
                     completed_by: node.nodeId
                 };
+                // For an E2E job, response text was delivered in encrypted
+                // job events. Do not send a plaintext copy in the completion
+                // payload, which is readable by the control plane.
+                if (result.e2e) resultPayload.e2e = true;
+                else resultPayload.text = result.text;
             } else {
                 await new Promise((resolve) => setTimeout(resolve, 500));
                 resultPayload = { stub: true, completed_by: node.nodeId };

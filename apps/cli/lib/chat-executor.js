@@ -14,7 +14,7 @@
 
 import { createEngine, MSG } from "@infernetprotocol/engine";
 import { loadConfig } from "./config.js";
-import { getConversationKey, decrypt } from "./nip44.js";
+import { getConversationKey, decrypt, encrypt } from "./nip44.js";
 import { getModelKeyPair } from "./model-key.js";
 
 // Flush the event buffer when it hits this many tokens OR when we haven't
@@ -55,9 +55,10 @@ function mergeTokens(events) {
 }
 
 class EventBuffer {
-    constructor(client, jobId) {
+    constructor(client, jobId, conversationKey = null) {
         this.client = client;
         this.jobId = jobId;
+        this.conversationKey = conversationKey;
         this.events = [];
         this.lastFlush = Date.now();
     }
@@ -72,13 +73,33 @@ class EventBuffer {
     }
     async flush() {
         if (this.events.length === 0) return;
-        const batch = mergeTokens(this.events);
+        const batch = mergeTokens(this.events).map((event) => {
+            if (!this.conversationKey) return event;
+            if (event.event_type === "token") {
+                return {
+                    ...event,
+                    data: { encrypted_text: encrypt(this.conversationKey, event.data?.text ?? "") }
+                };
+            }
+            if (event.event_type === "done") {
+                const { text = "", ...metadata } = event.data ?? {};
+                return {
+                    ...event,
+                    data: {
+                        ...metadata,
+                        encrypted_text: encrypt(this.conversationKey, text)
+                    }
+                };
+            }
+            return event;
+        });
         this.events = [];
         this.lastFlush = Date.now();
         try {
             await this.client.postJobEvents(this.jobId, batch);
         } catch (err) {
             process.stderr.write(`postJobEvents failed: ${err?.message ?? err}\n`);
+            throw err;
         }
     }
 }
@@ -210,7 +231,7 @@ export async function executeChatJob({ client, job, node }) {
     }
 
     const engine = await getEngineForModel(job.model_name);
-    const buffer = new EventBuffer(client, job.id);
+    const buffer = new EventBuffer(client, job.id, convKey);
 
     const t0 = Date.now();
     const generation = engine.generate({
@@ -262,7 +283,7 @@ export async function executeChatJob({ client, job, node }) {
 
     await buffer.flush();
     const duration_ms = Date.now() - t0;
-    return { text: accumulated, token_count: tokenCount, duration_ms };
+    return { text: accumulated, token_count: tokenCount, duration_ms, e2e: Boolean(convKey) };
 }
 
 export async function failChatJob({ client, jobId, message }) {
