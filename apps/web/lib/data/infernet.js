@@ -504,9 +504,8 @@ export async function getDashboardOverview({ pubkey } = {}) {
   const supabase = getSupabaseServerClient();
   const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
-  // Provider rows include the specs jsonb so we can count distinct
-  // served_models across the network — that's what the public /chat
-  // playground actually needs to know is online.
+  // Provider rows include specs so the public status card can count
+  // distinct models advertised by currently online providers.
   let providersQuery = supabase.from("providers").select("status, last_seen, specs");
   if (pubkey) providersQuery = providersQuery.eq("public_key", pubkey);
   const [{ data: providersAll, error: pErr }, jobs] = await Promise.all([
@@ -520,9 +519,9 @@ export async function getDashboardOverview({ pubkey } = {}) {
     (p) => p.status === "available" && p.last_seen && p.last_seen >= tenMinAgo
   );
 
-  // Distinct models advertised across providers' specs.served_models.
+  // Distinct models advertised by online providers' specs.served_models.
   const modelSet = new Set();
-  for (const p of providers) {
+  for (const p of onlineProviders) {
     const served = Array.isArray(p?.specs?.served_models) ? p.specs.served_models : [];
     for (const m of served) {
       if (typeof m === "string" && m) modelSet.add(m);
