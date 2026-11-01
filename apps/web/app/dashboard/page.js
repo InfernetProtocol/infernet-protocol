@@ -102,7 +102,13 @@ export default async function DashboardPage({ searchParams }) {
                     <Stat
                         label="Earnings"
                         value={fmtUsdPrecise(earnings.confirmed_usd + earnings.pending_usd + earnings.pending_approval_usd)}
-                        sub={`${fmtUsdPrecise(earnings.confirmed_usd)} confirmed · ${fmtUsdPrecise(earnings.pending_approval_usd)} pending approval · ${fmtUsdPrecise(earnings.paid_usd)} paid out · ${earnings.jobs_credited} jobs`}
+                        sub={(
+                            <>
+                                {fmtUsdPrecise(earnings.confirmed_usd)} confirmed · {fmtUsdPrecise(earnings.pending_approval_usd)} pending approval · {fmtUsdPrecise(earnings.paid_usd)} paid out · {earnings.jobs_credited} jobs
+                                <br />
+                                <Link href="/dashboard/earnings" className="mt-1 inline-block text-[var(--accent)] hover:underline">See all jobs across your nodes →</Link>
+                            </>
+                        )}
                     />
                     <Stat
                         label="Spend (last 30d)"
@@ -458,9 +464,7 @@ function EarningsPanel({ providers, earnings, notice, error }) {
                                             ? p.name
                                             : <Link href={`/nodes/${p.id}`} className="hover:underline">{p.name}</Link>}
                                         {p.archived_at ? <span className="ml-2 rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">Archived</span> : null}
-                                        <span className="block text-xs text-[var(--muted)]">
-                                            {b.jobs_credited ?? 0} jobs credited · <Link href={`/dashboard/earnings/${p.id}`} className="text-[var(--accent)] hover:underline">Earnings details</Link>
-                                        </span>
+                                        <span className="block text-xs text-[var(--muted)]">{b.jobs_credited ?? 0} jobs credited</span>
                                     </td>
                                     <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsdPrecise(b.pending_approval_usd)}</td>
                                     <td className="py-2 pr-3 text-[var(--muted)]">{fmtUsdPrecise(b.pending_usd)}</td>
