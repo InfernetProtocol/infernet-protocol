@@ -73,6 +73,24 @@ function splitSpeechText(text, maxChars = 480) {
   return chunks;
 }
 
+async function fetchSpeechWithRetry(url, init) {
+  // c0mpute speech jobs can briefly lose a worker or the browser connection.
+  // Retry one time, but keep explicit user cancellation immediate.
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      if (attempt === maxAttempts || ![502, 504].includes(response.status)) return response;
+      await response.body?.cancel().catch(() => {});
+    } catch (error) {
+      if (error?.name === "AbortError" || attempt === maxAttempts) throw error;
+    }
+
+    if (init.signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+}
+
 const EXAMPLE_PROMPTS = [
   "Explain how Infernet's P2P GPU network scales compared to a centralized data center.",
   "Write a Python function that streams tokens from a local llama.cpp server.",
@@ -290,7 +308,7 @@ export default function ChatView({ initialModels = [] }) {
           const controller = new AbortController();
           speechAbortRef.current.add(controller);
           try {
-            const response = await fetch("/api/chat/voice/tts", {
+            const response = await fetchSpeechWithRetry("/api/chat/voice/tts", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               signal: controller.signal,
@@ -409,7 +427,7 @@ export default function ChatView({ initialModels = [] }) {
         }
         setVoiceStatus("Transcribing on c0mpute CPU nodes…");
         try {
-          const response = await fetch("/api/chat/voice/stt", {
+          const response = await fetchSpeechWithRetry("/api/chat/voice/stt", {
             method: "POST",
             headers: { "Content-Type": audio.type || "audio/webm" },
             body: audio
