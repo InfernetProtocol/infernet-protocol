@@ -1013,6 +1013,12 @@ write_wrapper() {
 # Self-contained: install-time paths are baked in so this works
 # regardless of the operator's shell environment.
 
+# Keep the install locations available to CLI commands that re-enter the
+# installer for updates or removal, including custom/relocated installs.
+: "\${INFERNET_HOME:=$INFERNET_HOME}"
+: "\${INFERNET_BIN:=$INFERNET_BIN}"
+export INFERNET_HOME INFERNET_BIN
+
 # mise paths — operator can override via env, otherwise we use the
 # values install.sh resolved (correct even when relocated to a volume).
 : "\${MISE_DATA_DIR:=$_mise_data_at_install}"
