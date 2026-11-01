@@ -37,6 +37,19 @@ export function sanitizeSpecs(input) {
             ? input.e2e_version
             : null;
 
+    // IPIP-0028: model-specific public keys let browser clients encrypt to
+    // the key the daemon will use to decrypt. Keep only bounded model names
+    // and public key hex; never accept private key material in provider specs.
+    const modelKeys = input.model_keys && typeof input.model_keys === "object" && !Array.isArray(input.model_keys)
+        ? Object.fromEntries(Object.entries(input.model_keys)
+            .filter(([name, key]) => typeof name === "string"
+                && name.length > 0
+                && name.length <= 200
+                && typeof key === "string"
+                && /^(?:[0-9a-f]{64}|[0-9a-f]{66})$/i.test(key))
+            .slice(0, 50))
+        : {};
+
     // CLI version — semver-ish, public. Surfaced on /dashboard, /status,
     // and the public /nodes/[id] page so operators can see which fleet
     // members are out of date. Without this whitelist the daemon's
@@ -61,6 +74,7 @@ export function sanitizeSpecs(input) {
         served_models: servedModels,
         e2e_capable: e2eCapable,
         e2e_version: e2eVersion,
+        ...(Object.keys(modelKeys).length > 0 ? { model_keys: modelKeys } : {}),
         cli_version: cliVersion,
         ...(rpc ? { rpc } : {}),
         ...(rpcPrimary ? { rpc_primary: rpcPrimary } : {})

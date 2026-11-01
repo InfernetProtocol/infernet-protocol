@@ -47,6 +47,15 @@ export async function POST(request) {
   if (!hasPlain && !hasEncrypted) {
     return err(400, "messages[] or encryptedMessages is required");
   }
+  if (hasPlain && hasEncrypted) {
+    return err(400, "Send plaintext messages or encryptedMessages, not both");
+  }
+  if (hasEncrypted && (!providerId || typeof clientPubkey !== "string" || !clientPubkey)) {
+    return err(400, "E2E chat requires providerId and clientPubkey");
+  }
+  if (providerId && !hasEncrypted) {
+    return err(400, "Provider-routed chat must use E2E encryption");
+  }
   if (hasPlain) {
     for (const m of messages) {
       if (!m || typeof m.role !== "string" || typeof m.content !== "string") {

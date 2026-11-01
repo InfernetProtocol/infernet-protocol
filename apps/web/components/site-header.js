@@ -5,6 +5,7 @@ const PUBLIC_NAV = [
     { href: "/getting-started", label: "Get started" },
     { href: "/protocol", label: "Protocol" },
     { href: "/docs", label: "Docs" },
+    { href: "/book", label: "Book" },
     { href: "/chat", label: "Chat" },
     { href: "/deploy", label: "Deploy" },
     { href: "/order", label: "Order" },
@@ -16,6 +17,7 @@ const SIGNED_IN_NAV = [
     { href: "/deploy", label: "Deploy" },
     { href: "/order", label: "Order" },
     { href: "/chat", label: "Chat" },
+    { href: "/book", label: "Book" },
     { href: "/status", label: "Status" },
     { href: "/invites", label: "Invites" },
     { href: "/settings", label: "Settings" }

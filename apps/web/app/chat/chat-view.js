@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { getConversationKey, encrypt } from "@/lib/nip44";
+import { getConversationKey, encrypt, decrypt } from "@/lib/nip44";
 import { CATALOG } from "@/lib/model-catalog";
 
 // served_models carries raw ids (ollama tags like `dolphin3:8b`, or the full
@@ -86,8 +86,8 @@ export default function ChatView({ initialModels = [] }) {
   const [provider, setProvider] = useState(null);
   const [e2eActive, setE2eActive] = useState(false);
   // IPIP-0027 §7: provider's advertised E2E capability, learned from
-  // /api/chat/provider before we even POST the job. Drives the warning
-  // banner on legacy providers that can't decrypt NIP-44.
+  // /api/chat/provider before we even POST the job. A provider without
+  // verified NIP-44 support is never sent this browser chat prompt.
   const [providerE2eCapable, setProviderE2eCapable] = useState(true);
   // IPIP-0033: when distributed mode is on, the daemon publishes a
   // `routing` SSE event listing the RPC slices that contributed
@@ -431,33 +431,37 @@ export default function ChatView({ initialModels = [] }) {
     ];
 
     // Attempt E2E encryption: pre-select a provider and get their pubkey.
-    let postBody = { messages: outgoingMessages, modelName, maxTokens: 512, temperature: 0.7, distributed };
+    let postBody;
     let currentJobConvKey = null;
     try {
       const provRes = await fetch(`/api/chat/provider${modelName ? `?modelName=${encodeURIComponent(modelName)}` : ""}`);
-      if (provRes.ok) {
-        const provData = await provRes.json();
-        setProviderE2eCapable(provData.e2eCapable !== false);
-        // IPIP-0028: prefer model key over node key when available.
-        const pubkeyToUse = provData.modelPubkey ?? provData.providerPubkey ?? null;
-        if (pubkeyToUse) {
-          const { privateKey, publicKey } = await getOrCreateEphemeralKey();
-          const convKey = getConversationKey(privateKey, pubkeyToUse);
-          currentJobConvKey = convKey;
-          const encryptedMessages = encrypt(convKey, JSON.stringify(outgoingMessages));
-          postBody = {
-            encryptedMessages,
-            clientPubkey: publicKey,
-            providerId: provData.providerId,
-            ...(provData.modelPubkey ? { modelPubkey: provData.modelPubkey } : {}),
-            modelName,
-            maxTokens: 512,
-            temperature: 0.7
-          };
-        }
+      const provData = await provRes.json().catch(() => ({}));
+      if (!provRes.ok) throw new Error(provData.error ?? "No E2E-capable provider is available");
+      const pubkeyToUse = provData.modelPubkey ?? provData.providerPubkey ?? null;
+      const e2eAvailable = provData.e2eCapable === true
+        && provData.e2eVersion === "nip44-v2"
+        && typeof provData.providerId === "string"
+        && typeof pubkeyToUse === "string"
+        && /^(?:[0-9a-f]{64}|[0-9a-f]{66})$/i.test(pubkeyToUse);
+      setProviderE2eCapable(e2eAvailable);
+      if (!e2eAvailable) {
+        throw new Error("No NIP-44 provider key was returned. Your prompt was not sent.");
       }
-    } catch {
-      // E2E setup failed — fall back to plaintext (no-op, postBody already set)
+      const { privateKey, publicKey } = await getOrCreateEphemeralKey();
+      const convKey = getConversationKey(privateKey, pubkeyToUse);
+      currentJobConvKey = convKey;
+      postBody = {
+        encryptedMessages: encrypt(convKey, JSON.stringify(outgoingMessages)),
+        clientPubkey: publicKey,
+        providerId: provData.providerId,
+        ...(provData.modelPubkey ? { modelPubkey: provData.modelPubkey } : {}),
+        modelName,
+        maxTokens: 2048,
+        temperature: 0.7
+      };
+    } catch (err) {
+      failPending(`Secure chat unavailable: ${err?.message ?? "E2E setup failed"}. Your prompt was not sent.`);
+      return;
     }
 
     let res;
@@ -528,7 +532,16 @@ export default function ChatView({ initialModels = [] }) {
     es.addEventListener("token", (e) => {
       try {
         const data = JSON.parse(e.data);
-        const text = data.text ?? "";
+        const conversationKey = convKeysRef.current.get(jobId);
+        if (conversationKey && typeof data.encrypted_text !== "string") {
+          throw new Error("Provider sent an unencrypted response chunk; the response was blocked.");
+        }
+        if (!conversationKey && typeof data.encrypted_text === "string") {
+          throw new Error("Encrypted response arrived without a conversation key.");
+        }
+        const text = conversationKey
+          ? decrypt(conversationKey, data.encrypted_text)
+          : data.text ?? "";
         if (text) {
           streamedTextRef.current += text;
           setMessages((prev) => updateLastAssistant(prev, (m) => ({
@@ -536,13 +549,33 @@ export default function ChatView({ initialModels = [] }) {
             content: (m.content ?? "") + text
           })));
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        failPending(err?.message ?? "Could not verify the encrypted response.");
+      }
     });
 
-    es.addEventListener("done", () => {
-      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, pending: false, done: true })));
+    es.addEventListener("done", (e) => {
+      let finalText = streamedTextRef.current;
+      let finishReason = null;
+      try {
+        const data = JSON.parse(e.data);
+        const conversationKey = convKeysRef.current.get(jobId);
+        if (conversationKey && typeof data.encrypted_text !== "string") {
+          throw new Error("Provider did not send an encrypted final response; the response was blocked.");
+        }
+        if (!conversationKey && typeof data.encrypted_text === "string") {
+          throw new Error("Encrypted final response arrived without a conversation key.");
+        }
+        if (conversationKey) finalText = decrypt(conversationKey, data.encrypted_text);
+        if (data.reason === "length" || data.reason === "cancel") finishReason = data.reason;
+      } catch (err) {
+        failPending(err?.message ?? "Could not verify the encrypted final response.");
+        return;
+      }
+      streamedTextRef.current = finalText;
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, content: finalText, pending: false, done: true, finishReason })));
       setStreaming(false);
-      if (voiceMode) void speakAssistant(streamedTextRef.current.trim());
+      if (voiceMode) void speakAssistant(finalText.trim());
       convKeysRef.current.delete(jobId);
       try { es.close(); } catch { /* ignore */ }
       esRef.current = null;
@@ -579,11 +612,35 @@ export default function ChatView({ initialModels = [] }) {
       const res = await fetch(`/api/chat/${encodeURIComponent(jobId)}/status`);
       if (res.ok) {
         const body = await res.json();
-        // Job completed successfully — connection dropped after done was written
-        // but before the browser received it. Mark done instead of failing.
+        // Recover the final E2E-encrypted text if the SSE connection dropped
+        // after the provider committed its completion event.
         if (body?.status === "completed") {
+          const conversationKey = convKeysRef.current.get(jobId);
+          if (body.last_event_type !== "done") {
+            failPending("The provider completed the job without a final response event. The partial reply is marked incomplete.");
+            return;
+          }
+          let completedText = streamedTextRef.current;
+          if (conversationKey) {
+            if (typeof body.latest_done_encrypted_text !== "string") {
+              failPending("The provider's final response could not be verified as E2E encrypted.");
+              return;
+            }
+            try {
+              completedText = decrypt(conversationKey, body.latest_done_encrypted_text);
+            } catch {
+              failPending("The provider's final response failed E2E verification.");
+              return;
+            }
+          }
+          streamedTextRef.current = completedText;
+          const finishReason = body.latest_done_reason === "length" || body.latest_done_reason === "cancel"
+            ? body.latest_done_reason
+            : null;
           setStreaming(false);
-          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, pending: false, done: true })));
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, content: completedText, pending: false, done: true, finishReason })));
+          convKeysRef.current.delete(jobId);
+          if (voiceMode) void speakAssistant(completedText.trim());
           if (esRef.current) {
             try { esRef.current.close(); } catch { /* ignore */ }
             esRef.current = null;
@@ -958,7 +1015,7 @@ function DistributedCheckbox({ modelName, streaming, checked, onChange, census }
  * IPIP-0027 §8 — E2E status indicator. Three states:
  *   1. active   → green "🔒 End-to-end encrypted · Provider: <name>"
  *   2. capable  → silent (no banner needed; the lock will appear on send)
- *   3. !capable → amber warning explaining the prompt is server-readable
+ *   3. !capable → amber warning that the prompt was not sent
  */
 function E2eIndicator({ active, provider, capable, streaming }) {
   if (active && provider) {
@@ -976,7 +1033,7 @@ function E2eIndicator({ active, provider, capable, streaming }) {
     return (
       <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs text-amber-100">
         <span className="mr-1" aria-hidden="true">&#9888;</span>
-        This provider does not support E2E encryption. Your prompt is readable by Infernet's control plane.
+        This provider cannot verify E2E encryption. Your prompt was not sent.
       </div>
     );
   }
@@ -1223,7 +1280,7 @@ function Readm3Button({ text }) {
 }
 
 function Bubble({ message }) {
-  const { role, content, provider, pending, failed, status, sources, webNote } = message;
+  const { role, content, provider, pending, failed, status, sources, webNote, finishReason } = message;
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -1243,6 +1300,12 @@ function Bubble({ message }) {
         {content ? (
           isUser ? content : <MarkdownContent text={content} />
         ) : pending ? (status ? <span className="text-xs text-[var(--muted)]">{status}</span> : <TypingDots />) : null}
+        {!isUser && finishReason === "length" ? (
+          <p className="mt-2 text-xs text-[var(--warn)]">This answer may be incomplete: the model reached its output limit.</p>
+        ) : null}
+        {!isUser && finishReason === "cancel" ? (
+          <p className="mt-2 text-xs text-[var(--warn)]">The model stopped before finishing this answer.</p>
+        ) : null}
         {failed ? <span className="ml-2 text-xs text-[var(--warn)]">failed</span> : null}
         {!isUser && webNote ? <p className="mt-2 text-xs text-[var(--warn)]">{webNote}</p> : null}
         {!isUser && sources?.length ? (

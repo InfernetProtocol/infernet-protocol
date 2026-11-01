@@ -30,14 +30,14 @@ export async function GET(request) {
 
     let provider;
     try {
-        provider = await pickChatProvider({ modelName });
+        provider = await pickChatProvider({ modelName, requireE2E: true });
     } catch (e) {
         return err(500, e?.message ?? String(e));
     }
 
     if (!provider) {
         return NextResponse.json(
-            { error: "No providers available", hint: "Try again shortly or omit modelName to widen the pool." },
+            { error: "No E2E-capable providers available", hint: "Providers must advertise NIP-44 support and a key for the requested model." },
             { status: 503 }
         );
     }
@@ -48,12 +48,10 @@ export async function GET(request) {
     const servedName = modelName ? (matchServedModel(provider.specs?.served_models, modelName) ?? modelName) : null;
     const modelPubkey = servedName ? (provider.specs?.model_keys?.[servedName] ?? null) : null;
 
-    // IPIP-0027 §7: surface E2E capability so the client knows whether
-    // to encrypt and the UI can show the lock indicator. A provider with
-    // a pubkey but no advertised capability still gets `e2e_capable: true`
-    // — every Nostr-keyed daemon supports NIP-44.
-    const e2eCapable = provider.specs?.e2e_capable === true || Boolean(providerPubkey);
-    const e2eVersion = provider.specs?.e2e_version ?? (providerPubkey ? "nip44-v2" : null);
+    // Only explicitly advertised, upgraded NIP-44 daemons can be selected.
+    // A Nostr identity alone does not prove that a daemon can decrypt jobs.
+    const e2eCapable = provider.specs?.e2e_capable === true;
+    const e2eVersion = provider.specs?.e2e_version ?? null;
 
     return NextResponse.json({
         providerId: provider.id,

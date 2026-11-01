@@ -35,7 +35,7 @@ export function meetsTrustTier(provider, minTier) {
   return have >= need;
 }
 
-export async function pickChatProvider({ modelName, minTrustTier } = {}) {
+export async function pickChatProvider({ modelName, minTrustTier, requireE2E = false } = {}) {
   const supabase = getSupabaseServerClient();
   const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
 
@@ -54,16 +54,33 @@ export async function pickChatProvider({ modelName, minTrustTier } = {}) {
         .eq("status", "available")
         .gte("last_seen", twoMinAgo);
       if (fallback.error) throw fallback.error;
-      return finishPick(fallback.data ?? [], { modelName, minTrustTier });
+      return finishPick(fallback.data ?? [], { modelName, minTrustTier, requireE2E });
     }
     throw error;
   }
 
-  return finishPick(data ?? [], { modelName, minTrustTier });
+  return finishPick(data ?? [], { modelName, minTrustTier, requireE2E });
 }
 
-function finishPick(rows, { modelName, minTrustTier }) {
+function finishPick(rows, { modelName, minTrustTier, requireE2E = false }) {
   let candidates = rows;
+
+  if (requireE2E) {
+    candidates = candidates.filter((provider) => {
+      const specs = provider?.specs ?? {};
+      const nodeKey = provider?.public_key;
+      if (
+        specs.e2e_capable !== true
+        || specs.e2e_version !== "nip44-v2"
+        || typeof nodeKey !== "string"
+        || !/^(?:[0-9a-f]{64}|[0-9a-f]{66})$/i.test(nodeKey)
+      ) return false;
+      if (!modelName) return true;
+      const servedName = matchServedModel(specs.served_models, modelName) ?? modelName;
+      const modelKey = specs.model_keys?.[servedName];
+      return typeof modelKey === "string" && /^(?:[0-9a-f]{64}|[0-9a-f]{66})$/i.test(modelKey);
+    });
+  }
 
   if (typeof modelName === "string" && modelName) {
     // Any name of the model counts: catalog id, Ollama tag, HF repo or the
@@ -307,6 +324,9 @@ export async function createChatJob({
   const now = new Date().toISOString();
 
   const e2e = Boolean(encryptedMessages && clientPubkey);
+  if (encryptedMessages && (!providerId || !clientPubkey)) {
+    throw withStatus("E2E chat requires an explicitly selected provider and client key", 400);
+  }
 
   let p2pProvider = null;
   if (providerId) {
@@ -331,7 +351,7 @@ export async function createChatJob({
   let servedModel = modelName;
   let requestedModel = null;
 
-  if (!p2pProvider && !pinned) {
+  if (!p2pProvider && !pinned && !providerId) {
     p2pProvider = await pickChatProvider({ modelName, minTrustTier });
     // Asked by another name of the model: run it under the name the node serves.
     const servedName = p2pProvider && modelName ? matchServedModel(p2pProvider.specs?.served_models, modelName) : null;
@@ -350,7 +370,34 @@ export async function createChatJob({
     }
   }
 
-  const nimAvailable = !p2pProvider && !pinned && isNimConfigured() && (await hostedFallbackUnderDailyCap());
+  // A preselected provider may serve the request under a canonical model
+  // name (for example, a model alias). Persist that canonical name so the
+  // daemon selects the same per-model key the client used for encryption.
+  if (p2pProvider && modelName) {
+    const servedName = matchServedModel(p2pProvider.specs?.served_models, modelName);
+    if (servedName && servedName !== modelName) {
+      servedModel = servedName;
+      requestedModel = modelName;
+    }
+  }
+
+  if (p2pProvider && e2e) {
+    const specs = p2pProvider.specs ?? {};
+    const servedName = modelName ? (matchServedModel(specs.served_models, modelName) ?? modelName) : null;
+    const expectedKey = servedName ? specs.model_keys?.[servedName] : p2pProvider.public_key;
+    const suppliedKey = modelPubkey ?? p2pProvider.public_key;
+    if (
+      specs.e2e_capable !== true
+      || specs.e2e_version !== "nip44-v2"
+      || typeof expectedKey !== "string"
+      || expectedKey !== suppliedKey
+    ) {
+      p2pProvider = null;
+    }
+  }
+
+  const nimAvailable = !p2pProvider && !providerId && !e2e && !pinned
+    && isNimConfigured() && (await hostedFallbackUnderDailyCap());
   const source = p2pProvider ? "p2p" : nimAvailable ? "nim" : "none";
   if (nimAvailable) {
     // The hosted fallback serves one configured model. Forwarding the name the
@@ -403,16 +450,14 @@ export async function createChatJob({
     .select()
     .single();
 
-  // Graceful degradation: if the migration adding E2E columns hasn't been
-  // applied yet, retry without them so the playground stays functional.
+  // Legacy plaintext clients can continue without the optional E2E columns.
+  // An encrypted job cannot: retrying without its client key would make it
+  // undecryptable, and must never turn into a plaintext fallback.
   if (error?.message?.includes("client_pubkey") || error?.message?.includes("model_pubkey")) {
+    if (e2e) throw error;
     const fallbackRow = { ...insertRow };
     delete fallbackRow.client_pubkey;
     delete fallbackRow.model_pubkey;
-    // Also fall back to plaintext messages so the provider can read the job.
-    if (e2e && messages) {
-      fallbackRow.input_spec = encryptJSON({ messages, max_tokens: maxTokens, temperature });
-    }
     ({ data: job, error } = await supabase
       .from("jobs")
       .insert(fallbackRow)

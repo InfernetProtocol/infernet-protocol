@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { decryptJSON } from "@/lib/encrypt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,6 +55,18 @@ export async function GET(_request, { params }) {
 
     const eventsList = events ?? [];
     const errEvent = eventsList.find((e) => e.event_type === "error");
+    const doneEvent = eventsList.find((e) => e.event_type === "done");
+    let latestDoneEncryptedText = null;
+    let latestDoneReason = null;
+    if (doneEvent?.data) {
+        try {
+            const doneData = decryptJSON(doneEvent.data);
+            if (typeof doneData?.encrypted_text === "string") {
+                latestDoneEncryptedText = doneData.encrypted_text;
+            }
+            if (typeof doneData?.reason === "string") latestDoneReason = doneData.reason;
+        } catch { /* don't turn a diagnostic endpoint into a job failure */ }
+    }
     const lastEvent = eventsList[0] ?? null;
     const lastEventAgeMs = lastEvent?.created_at
         ? Date.now() - new Date(lastEvent.created_at).getTime()
@@ -96,6 +109,8 @@ export async function GET(_request, { params }) {
         latest_error_message: explicit ?? synthesized,
         token_count: tokenCount ?? 0,
         last_event_type: lastEvent?.event_type ?? null,
+        latest_done_encrypted_text: latestDoneEncryptedText,
+        latest_done_reason: latestDoneReason,
         last_event_age_ms: lastEventAgeMs,
         completed_at: job.completed_at ?? null,
         updated_at: job.updated_at ?? null

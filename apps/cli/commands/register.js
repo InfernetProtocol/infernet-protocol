@@ -204,6 +204,8 @@ export async function gatherCoarseSpecs() {
     const served_models = [...new Set([...pulledModels.map((m) => m.name), ...vllmModels])];
 
     return {
+        e2e_capable: true,
+        e2e_version: 'nip44-v2',
         cpu: summarizeCpu(),
         gpu_count: gpus.length,
         gpus: gpus.map((g) => ({
