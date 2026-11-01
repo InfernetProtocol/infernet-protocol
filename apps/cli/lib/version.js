@@ -10,7 +10,7 @@ export const CURRENT_VERSION = readInstalledVersion();
  * The version on disk right now, read fresh (CURRENT_VERSION is what this
  * process started with). Self-update compares the two after the installer
  * runs: if nothing newer landed, restarting would only repeat the same update
- * every 5 minutes.
+ * every 60 seconds.
  */
 export function readInstalledVersion() {
     const versions = [];
@@ -37,13 +37,12 @@ export function readInstalledVersion() {
 export async function fetchLatestVersion() {
     try {
         const res = await fetch(
-            'https://api.github.com/repos/infernetprotocol/infernet-protocol/releases/latest',
-            { headers: { accept: 'application/vnd.github+json', 'user-agent': 'infernet-daemon' }, signal: AbortSignal.timeout(10_000) }
+            'https://infernetprotocol.com/api/cli/latest-version',
+            { headers: { accept: 'application/json', 'user-agent': 'infernet-daemon' }, signal: AbortSignal.timeout(10_000) }
         );
         if (!res.ok) return null;
         const data = await res.json();
-        const tag = typeof data.tag_name === 'string' ? data.tag_name.replace(/^v/, '') : null;
-        return tag;
+        return typeof data.version === 'string' ? data.version.replace(/^v/, '') : null;
     } catch {
         return null;
     }
