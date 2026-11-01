@@ -78,7 +78,7 @@ jobs:
           pnpm -r --workspace-concurrency=1 \
             exec npm pkg set version="${{ steps.version.outputs.version }}"
 
-      - name: Publish public @infernetprotocol/* packages
+      - name: Publish CLI and runtime packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
@@ -95,7 +95,6 @@ jobs:
           # tests/release-publish-list.test.js guards it now.
           pnpm publish \
             --filter "@infernetprotocol/cli" \
-            --filter "@infernetprotocol/sdk" \
             --filter "@infernetprotocol/auth" \
             --filter "@infernetprotocol/config" \
             --filter "@infernetprotocol/deploy-providers" \
@@ -103,6 +102,21 @@ jobs:
             --filter "@infernetprotocol/gpu" \
             --filter "@infernetprotocol/rpc-adapter" \
             --filter "@infernetprotocol/liquid-agent" \
+            --access public \
+            --no-git-checks \
+            --tag latest
+
+      # The standalone SDK is not a CLI dependency. Its npm package currently
+      # rejects publishes with 404 for this token, so don't block provider CLI
+      # releases on it; keep attempting it and surface any failure in Actions.
+      - name: Publish standalone SDK (non-blocking)
+        continue-on-error: true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+        run: |
+          pnpm publish \
+            --filter "@infernetprotocol/sdk" \
             --access public \
             --no-git-checks \
             --tag latest
