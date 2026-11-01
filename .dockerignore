@@ -28,12 +28,12 @@
 **/*.swp
 **/*~
 
-# Tests / docs we don't need at runtime in the production image.
-# (Tests still run in CI from a clean checkout — they're not built into
-#  the Railway image.)
+# Test fixtures and protocol specs are not needed for the web build.
+# Keep docs/book in the build context because the web prebuild generates its
+# production table of contents from those Markdown sources. The Dockerfile
+# does not copy docs into the final runtime image.
 tests
 ipips
-docs
 **/*.test.js
 **/*.test.ts
 **/*.spec.js
@@ -49,4 +49,5 @@ apps/daemon/src
 
 # Non-build assets
 *.pdf
+!apps/web/public/book/infernet-book.pdf
 INFERNET-*.pdf
