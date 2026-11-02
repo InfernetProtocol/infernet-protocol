@@ -29,6 +29,18 @@
       "added": "2026-11-02"
     },
     {
+      "name": "tax-guy-agent",
+      "source": "hf.co/profullstack/tax-guy-agent-GGUF",
+      "digest": "sha256:38685b88fcb7d41cc3bdd268defd1747459bbc8953b67278046f3acd5b1754aa",
+      "size_bytes": 531070425,
+      "min_ram_gb": 2,
+      "min_disk_gb": 1,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "description": "Tax research assistant (not a CPA, not tax advice): Qwen2.5-0.5B-Instruct with a LoRA trained on the c0mpute network from rssamplifier tax topics and the pit.world corpus, merged, GGUF Q8_0. Built by Profullstack.",
+      "added": "2026-11-02"
+    },
+    {
       "name": "qwen3.5-abliterated-4b",
       "source": "huihui_ai/qwen3.5-abliterated:4b",
       "digest": "sha256:9acbd90c2645120ea1e4a5fe7ec9c4fe000e547ccebc8a24f950315d582003e6",
