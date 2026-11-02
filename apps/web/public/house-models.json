@@ -7,8 +7,8 @@
     {
       "name": "saas-business-strategist-agent",
       "source": "hf.co/profullstack/saas-business-strategist-agent-GGUF",
-      "digest": "sha256:bd8db3faccdf9eb277b98b700f1ee9ee9b8b329017c3e2bf28e34da846aa5cad",
-      "size_bytes": 531070268,
+      "digest": "sha256:fa80fc55ff14cdb0330e6c4617e0e864fd049acc8db97caed7269d0a259ade4d",
+      "size_bytes": 531070285,
       "min_ram_gb": 2,
       "min_disk_gb": 1,
       "uncensored": false,
