@@ -87,6 +87,51 @@ export async function peftRuntimeStatus() {
     });
 }
 
+export const GENERATE_RUNNER_PATH = fileURLToPath(new URL("../../runners/peft_generate.py", import.meta.url));
+
+/**
+ * One answer from a base model + LoRA adapter (workload infernet.text.infer).
+ * `request` is the runner's request object; relative paths resolve against
+ * `requestPath`'s directory when given. Resolves to the runner's answer
+ * object; rejects with its error message.
+ */
+export async function peftGenerate({ request, requestPath = null, python = null, runner = GENERATE_RUNNER_PATH, timeoutMs = 600000, spawnImpl = spawn } = {}) {
+    const py = python ?? resolvePeftPython();
+    if (!py) throw Object.assign(new Error("the peft runtime is not installed; run `infernet model runtime setup --peft --yes`"), { code: "E_NO_RUNTIME" });
+    let file = requestPath;
+    if (!file) {
+        const dir = await mkdtemp(path.join(os.tmpdir(), "infernet-generate-"));
+        file = path.join(dir, "request.json");
+        await writeFile(file, JSON.stringify(request));
+    }
+    return new Promise((resolve, reject) => {
+        const child = spawnImpl(py, [runner, file], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PYTHONUNBUFFERED: "1" } });
+        let out = "";
+        const tail = [];
+        child.stdout.on("data", (b) => (out += b));
+        child.stderr.on("data", (b) => {
+            for (const l of b.toString().split("\n").filter(Boolean)) {
+                tail.push(l);
+                if (tail.length > 20) tail.shift();
+            }
+        });
+        const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
+        child.on("error", reject);
+        child.on("close", (code) => {
+            clearTimeout(timer);
+            const line = out.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("{")).at(-1);
+            let res = null;
+            try {
+                res = line ? JSON.parse(line) : null;
+            } catch {
+                res = null;
+            }
+            if (code === 0 && res?.type === "answer") return resolve(res);
+            reject(Object.assign(new Error(res?.message ?? `generate exited ${code}: ${tail.at(-1) ?? "no output"}`), { code: "E_RUNTIME" }));
+        });
+    });
+}
+
 export function createPeftBackend({ python = null, runner = RUNNER_PATH, spawnImpl = spawn } = {}) {
     const children = new Set();
     return {

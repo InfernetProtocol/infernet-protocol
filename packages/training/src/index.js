@@ -43,7 +43,9 @@ export * from "./protocol.js";
 export {
     createPeftBackend,
     peftRuntimeDir,
+    peftGenerate,
     peftRuntimeStatus,
+    GENERATE_RUNNER_PATH as PEFT_GENERATE_RUNNER_PATH,
     PEFT_KINDS,
     resolvePeftPython,
     RUNNER_PATH as PEFT_RUNNER_PATH,
