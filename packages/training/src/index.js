@@ -21,6 +21,9 @@
  *                    baseline) via the isolated infernet-liquid runtime.
  *                    Single provider, CPU or GPU. Workload
  *                    infernet.temporal.train.
+ *   - "peft"       — LoRA fine-tunes of causal LMs (transformers + peft)
+ *                    in their own venv, CPU or CUDA. Single provider.
+ *                    Workload infernet.text.train.
  *   - "stub"       — synthetic training run, no GPU required. Default.
  *
  * Auto-selection precedence (only if `opts.backend` is not set):
@@ -33,9 +36,19 @@ import { createLiquidBackend } from "./backends/liquid.js";
 import { createOpenDiLoCoBackend } from "./backends/opendiloco.js";
 import { createOpenRLHFBackend } from "./backends/openrlhf.js";
 import { createPetalsBackend } from "./backends/petals.js";
+import { createPeftBackend } from "./backends/peft.js";
 import { createStubTrainer } from "./backends/stub.js";
 
 export * from "./protocol.js";
+export {
+    createPeftBackend,
+    peftRuntimeDir,
+    peftRuntimeStatus,
+    PEFT_KINDS,
+    resolvePeftPython,
+    RUNNER_PATH as PEFT_RUNNER_PATH,
+    setupPeftRuntime
+} from "./backends/peft.js";
 
 export async function createTrainer(opts = {}) {
     const backend = opts.backend ?? autoSelectBackend();
@@ -50,6 +63,8 @@ export async function createTrainer(opts = {}) {
             return createPetalsBackend(opts);
         case "liquid":
             return createLiquidBackend(opts);
+        case "peft":
+            return createPeftBackend(opts);
         case "stub":
             return createStubTrainer(opts);
         default:

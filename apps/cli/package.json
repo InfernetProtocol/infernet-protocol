@@ -1,7 +1,7 @@
 {
   "name": "@infernetprotocol/cli",
-  "version": "0.1.78",
-  "description": "GPU-node CLI / daemon for the Infernet Protocol — register a GPU server with a Supabase control plane and start earning.",
+  "version": "0.1.79",
+  "description": "GPU-node CLI / daemon for the Infernet Protocol \u2014 register a GPU server with a Supabase control plane and start earning.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -32,6 +32,7 @@
     "@infernetprotocol/gpu": "workspace:*",
     "@infernetprotocol/liquid-agent": "workspace:*",
     "@infernetprotocol/rpc-adapter": "workspace:*",
+    "@infernetprotocol/training": "workspace:*",
     "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
