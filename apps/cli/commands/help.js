@@ -26,6 +26,7 @@ Daemon:
   start        Start the node daemon (detached by default)
   stop         Stop the running daemon
   status       Show this node's current state (remote row + live daemon)
+  house-models House models this node pulls by default: status / list / sync / off / uncensored off / cap
   stats        Live in-memory stats from the running daemon (via IPC)
   logs         Show / tail the daemon log (~/.config/infernet/daemon.log)
   service      Userland systemd unit (Linux): install / enable / status / logs

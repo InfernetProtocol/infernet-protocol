@@ -35,6 +35,7 @@ import gpu from './commands/gpu.js';
 import firewall from './commands/firewall.js';
 import chat from './commands/chat.js';
 import setup from './commands/setup.js';
+import houseModels from './commands/house-models.js';
 import model from './commands/model.js';
 import tui from './commands/tui.js';
 import doctor from './commands/doctor.js';
@@ -114,11 +115,12 @@ const COMMANDS = {
     // aliases
     uninstall: remove,
     start, status, stop, restart, stats, logs,
-    payout, payments, gpu, firewall, chat, setup, model, train, publish, inference, rpc, uncensored, reservation, reservations: reservation, order, orders: order, mcp, credits, invites, redeem, batch, batches: batch, billing, keys, tui, doctor, service, pubkey, debug, deploy, console: consoleCmd, help
+    payout, payments, gpu, firewall, chat, setup, model, train, publish, inference, rpc, uncensored, reservation, reservations: reservation, order, orders: order, mcp, credits, invites, redeem, batch, batches: batch, billing, keys, tui, doctor, service, pubkey, debug, deploy, console: consoleCmd, help,
+    'house-models': houseModels, house: houseModels
 };
 
 // Commands that can run without a loaded config.
-const NO_CONFIG = new Set(['init', 'login', 'help', 'stats', 'logs', 'stop', 'restart', 'gpu', 'firewall', 'chat', 'setup', 'model', 'train', 'publish', 'inference', 'rpc', 'uncensored', 'reservation', 'reservations', 'order', 'orders', 'mcp', 'credits', 'invites', 'redeem', 'batch', 'batches', 'billing', 'keys', 'tui', 'doctor', 'service', 'pubkey', 'debug', 'deploy', 'console', 'upgrade', 'update', 'remove', 'uninstall']);
+const NO_CONFIG = new Set(['init', 'login', 'help', 'stats', 'logs', 'stop', 'restart', 'gpu', 'firewall', 'chat', 'setup', 'model', 'train', 'publish', 'inference', 'rpc', 'uncensored', 'reservation', 'reservations', 'order', 'orders', 'mcp', 'credits', 'invites', 'redeem', 'batch', 'batches', 'billing', 'keys', 'tui', 'doctor', 'service', 'pubkey', 'debug', 'deploy', 'console', 'upgrade', 'update', 'remove', 'uninstall', 'house-models', 'house']);
 // Commands that need a config but not a control-plane client (none today
 // — kept as a future escape hatch).
 const NO_CLIENT = new Set();
