@@ -101,6 +101,7 @@ export default async function houseModels(args) {
         const verdict = new Map();
         for (const m of plan.keep) verdict.set(m.ollama_name, 'installed');
         for (const m of plan.pull) verdict.set(m.ollama_name, 'will pull');
+        for (const m of plan.update) verdict.set(m.ollama_name, `will update (installed ${String(m.installed_digest ?? '?').replace(/^sha256:/, '').slice(0, 12)}, pinned ${String(m.digest).replace(/^sha256:/, '').slice(0, 12)})`);
         for (const r of plan.remove) verdict.set(r.name, `will remove: ${r.reason}`);
         for (const s of plan.skipped) verdict.set(s.name, `skip: ${s.reason}`);
         process.stdout.write(`manifest: ${settings.manifestUrl}${manifest.updated ? ` (updated ${manifest.updated})` : ''}\n\n`);

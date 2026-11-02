@@ -12,6 +12,7 @@ import { spawn } from 'node:child_process';
 import { compareVersions } from '@profullstack/cli';
 import setup from './setup.js';
 import { CURRENT_VERSION, fetchLatestVersion } from '../lib/version.js';
+import { pruneCliCopies, wrapperTarget } from '../lib/cli-copies.js';
 
 const HELP = `infernet update — pull latest CLI + autonomous post-upgrade setup
 
@@ -23,6 +24,7 @@ Flags:
   --force        Reinstall when the published version matches (never downgrades).
   --quiet        Suppress routine update progress.
   --skip-setup   Just re-run the installer; don't run setup afterward.
+  --keep-copies  Don't remove other npm-global copies of the CLI.
   --help         Show this help.
 
 What it does (fully autonomous, no manual steps):
@@ -34,6 +36,10 @@ What it does (fully autonomous, no manual steps):
        - Re-registers specs with the control plane
        - Restarts the daemon so the new code is live
        - Verifies the heartbeat reaches the control plane
+  3. Keeps one CLI per node: removes npm-global @infernetprotocol/cli
+     copies under other Node installs (mise, nvm, system npm) that are
+     not the install the wrapper runs, so a stale copy can never shadow
+     the current one on PATH. Runs even when nothing new was published.
 
 \`infernet upgrade\` is an alias for this command.
 `;
@@ -61,6 +67,28 @@ export async function pullLatestBinary({ quiet = false } = {}) {
     return true;
 }
 
+/**
+ * Remove stray npm-global CLI copies (see lib/cli-copies.js). Keeps the copy
+ * the installer's wrapper runs; with no wrapper, keeps nothing but the
+ * source install, and with neither it removes nothing.
+ */
+export function cleanCliCopies({ quiet = false, version = null } = {}) {
+    try {
+        const r = pruneCliCopies({
+            keepDirs: [wrapperTarget()],
+            version,
+            log: (m) => { if (!quiet) process.stdout.write(`  ${m}\n`); }
+        });
+        for (const d of r.removed) process.stdout.write(`Removed stray infernet CLI copy ${d}\n`);
+        for (const d of r.updated) process.stdout.write(`Updated infernet CLI copy ${d} to v${version}\n`);
+        for (const f of r.failed) process.stderr.write(`warning: could not clean ${f.dir}: ${f.error}\n`);
+        return r;
+    } catch (err) {
+        process.stderr.write(`warning: CLI copy check failed: ${err?.message ?? err}\n`);
+        return null;
+    }
+}
+
 export default async function update(args, ctx) {
     if (args.has('help') || args.has('h')) {
         process.stdout.write(HELP);
@@ -68,6 +96,7 @@ export default async function update(args, ctx) {
     }
 
     const quiet = args.has('quiet');
+    const clean = () => { if (!args.has('keep-copies') && !args.has('check')) cleanCliCopies({ quiet, version: CURRENT_VERSION }); };
     const latest = await fetchLatestVersion();
     if (!latest) {
         process.stderr.write('error: could not check the latest Infernet version; installer was not run.\n');
@@ -80,10 +109,12 @@ export default async function update(args, ctx) {
     }
     if (comparison > 0) {
         if (!quiet) process.stdout.write(`Infernet ${CURRENT_VERSION} is newer than the published ${latest}; refusing to downgrade.\n`);
+        clean();
         return 0;
     }
     if (comparison === 0 && !args.has('force')) {
         if (!quiet) process.stdout.write(`Infernet ${CURRENT_VERSION} is already current; skipping reinstall.\n`);
+        clean();
         return 0;
     }
     if (args.has('check')) {
@@ -93,6 +124,10 @@ export default async function update(args, ctx) {
 
     const ok = await pullLatestBinary({ quiet });
     if (!ok) return 1;
+
+    // The installer already pruned other copies (install.sh); this catches an
+    // older installer and copies the installer could not see.
+    if (!args.has('keep-copies')) cleanCliCopies({ quiet, version: latest });
 
     if (args.has('skip-setup')) {
         process.stdout.write("\n✓ Binary updated (skipped setup).\n");

@@ -63,7 +63,7 @@ import { getOrCreateModelKey, getModelPublicKeys } from '../lib/model-key.js';
 import { pullLatestBinary } from './upgrade.js';
 import { PROBE_INTERVAL_MS, runProbeRound } from '../lib/aggregator.js';
 import { nodeTokenLogin } from './login.js';
-import { CURRENT_VERSION, fetchLatestVersion, isNewerVersion, readInstalledVersion } from '../lib/version.js';
+import { CLI_DIR, CURRENT_VERSION, fetchLatestVersion, isNewerVersion, readRunningVersion } from '../lib/version.js';
 import { readInferenceState, readInferenceStateSync, isPidAlive } from '../lib/inference/state.js';
 import { resolveSettings as resolveHouseSettings, syncHouseModels, readState as readHouseState, FIRST_SYNC_DELAY_MS as HOUSE_FIRST_SYNC_DELAY_MS } from '../lib/house-models.js';
 
@@ -1302,6 +1302,8 @@ async function runDaemon(args, ctx) {
     function snapshot() {
         return {
             pid: process.pid,
+            version: CURRENT_VERSION,
+            cliDir: CLI_DIR,
             startedAt: startedAt.toISOString(),
             uptimeMs: Date.now() - startedAt.getTime(),
             node: {
@@ -1669,8 +1671,8 @@ async function runDaemon(args, ctx) {
                     isBusy: () => stats.activeJobIds.size > 0 || shuttingDown,
                     log: (m) => process.stdout.write(`[${new Date().toISOString()}] [house-models] ${m}\n`)
                 });
-                process.stdout.write(`[${new Date().toISOString()}] [house-models] sync (${why}): pulled ${summary.pulled.length}, removed ${summary.removed.length}, skipped ${summary.skipped.length}, errors ${summary.errors.length}\n`);
-                if (summary.pulled.length > 0 || summary.removed.length > 0) {
+                process.stdout.write(`[${new Date().toISOString()}] [house-models] sync (${why}): pulled ${summary.pulled.length}, updated ${summary.updated?.length ?? 0}, removed ${summary.removed.length}, skipped ${summary.skipped.length}, errors ${summary.errors.length}\n`);
+                if (summary.pulled.length > 0 || summary.updated?.length > 0 || summary.removed.length > 0) {
                     invalidateSpecsCache();
                     heartbeat().catch(() => {});
                 }
@@ -1697,7 +1699,10 @@ async function runDaemon(args, ctx) {
     const followOnly = process.env.INFERNET_AUTO_UPDATE === 'follow';
     const checkForUpdate = async () => {
         if (shuttingDown || isUpgrading || Date.now() < updatePausedUntil) return;
-        const latest = followOnly ? readInstalledVersion() : await fetchLatestVersion();
+        // follow: restart only once THIS daemon's own code on disk is newer;
+        // restarting re-runs the same entry, so another copy's newer version
+        // would only restart it into the same old code every minute.
+        const latest = followOnly ? readRunningVersion() : await fetchLatestVersion();
         if (!latest || !isNewerVersion(CURRENT_VERSION, latest)) return;
         // Never start an upgrade under a running job. But a node that is always
         // busy used to skip every check and never update (bonita sat on 0.1.77
@@ -1727,10 +1732,11 @@ async function runDaemon(args, ctx) {
             // whose package.json lagged the release, or npm writing to another
             // prefix). Restarting then would rerun the same update every 60 seconds
             // forever, so keep serving and try again much later.
-            const installed = readInstalledVersion();
+            // What a restart would run: this daemon's own entry, re-read from disk.
+            const installed = readRunningVersion();
             if (!isNewerVersion(CURRENT_VERSION, installed)) {
                 updatePausedUntil = Date.now() + UPDATE_PAUSE_MS;
-                process.stderr.write(`[update] installer left v${installed} here (latest v${latest}); not restarting, next try in ${UPDATE_PAUSE_MS / 3_600_000}h\n`);
+                process.stderr.write(`[update] installer left v${installed} at ${CLI_DIR}, which this daemon runs from (latest v${latest}); not restarting, next try in ${UPDATE_PAUSE_MS / 3_600_000}h. Run \`infernet doctor\` to see every CLI copy.\n`);
                 stats.draining = false;
                 isUpgrading = false;
                 return;

@@ -1,6 +1,7 @@
 /**
  * `infernet doctor` — diagnose all three sides of a P2P chat round-trip.
  *
+ *   0. CLI install        — one CLI version on the machine, daemon runs it
  *   1. Local config       — file present, mode 0600, has identity + URL
  *   2. Engine             — Ollama reachable, configured model is pulled
  *   3. Control plane      — URL responds, /api/overview is reachable
@@ -24,6 +25,8 @@ import { isDaemonAlive, sendToDaemon } from "../lib/ipc.js";
 import { readLiveSupervisorPid, spawnDetachedSupervisor } from "../lib/supervisor.js";
 import { createNodeClient } from "../lib/node-client.js";
 import { submitChatJob, streamChatEvents } from "../lib/remote-chat.js";
+import { CLI_DIR, RUNNING_VERSION } from "../lib/version.js";
+import { inventory } from "../lib/cli-copies.js";
 
 const HELP = `infernet doctor — diagnose P2P chat readiness
 
@@ -70,6 +73,78 @@ function printCheck(idx, total, name, result) {
     if (result.hint) {
         process.stdout.write(`                                ${C.yellow}→${C.reset} ${result.hint}\n`);
     }
+}
+
+// ---------------------------------------------------------------------------
+// 0. CLI install: one version per node
+// ---------------------------------------------------------------------------
+/**
+ * Pure: judge an inventory. `daemon` is { version, cliDir } from the daemon's
+ * stats (null when it is not running; version undefined on daemons before
+ * 0.1.84, which did not report it).
+ */
+export function judgeCliInstall({ running, copies = [], pathFirst = null, wrapper = null, daemon = null }) {
+    const lines = [];
+    const problems = [];
+    lines.push(`running: v${running.version} at ${running.dir}`);
+    const distinct = new Map();
+    for (const c of copies) distinct.set(c.dir, c);
+    distinct.set(running.dir, { ...running, kind: distinct.get(running.dir)?.kind ?? "running" });
+    for (const c of distinct.values()) {
+        if (c.dir === running.dir) continue;
+        lines.push(`${c.kind}: v${c.version ?? "?"} at ${c.dir}`);
+    }
+    const versions = new Set([...distinct.values()].map((c) => c.version).filter(Boolean));
+    if (versions.size > 1) problems.push(`${versions.size} CLI versions installed (${[...versions].join(", ")})`);
+    else if (distinct.size > 1) problems.push(`${distinct.size} copies of the CLI installed`);
+    if (wrapper) lines.push(`installer wrapper runs: ${wrapper}`);
+    if (pathFirst) {
+        lines.push(`\`infernet\` on PATH: ${pathFirst.path} (${pathFirst.via})${pathFirst.dir ? ` -> ${pathFirst.dir}` : ""}`);
+        const target = pathFirst.dir ? distinct.get(pathFirst.dir) : null;
+        if (wrapper && pathFirst.dir && pathFirst.dir !== wrapper) {
+            problems.push(`\`infernet\` on PATH runs ${target?.version ? `v${target.version} ` : ""}${pathFirst.dir}, not the installed CLI`);
+        }
+    }
+    if (daemon) {
+        if (!daemon.version) {
+            problems.push("daemon is older than 0.1.84 (does not report its version)");
+        } else {
+            lines.push(`daemon: v${daemon.version}${daemon.cliDir ? ` at ${daemon.cliDir}` : ""}`);
+            const expected = wrapper ? distinct.get(wrapper)?.version : running.version;
+            if (expected && daemon.version !== expected) problems.push(`daemon runs v${daemon.version}, CLI is v${expected}`);
+        }
+    }
+    const skew = problems.some((p) => /versions|runs v|not the installed|older than/.test(p));
+    return {
+        status: problems.length === 0 ? "ok" : skew ? "fail" : "warn",
+        summary: problems.length === 0 ? `v${running.version}, one CLI on this machine` : problems.join("; "),
+        details: lines.join("\n"),
+        hint: problems.length === 0 ? undefined
+            : "run `infernet upgrade` (it keeps the installed CLI and removes stray npm-global copies), then `infernet restart` if the daemon is behind"
+    };
+}
+
+async function checkCliInstall() {
+    let inv;
+    try {
+        inv = inventory({ runningDir: CLI_DIR });
+    } catch (err) {
+        return { status: "warn", summary: `could not list CLI copies: ${err?.message ?? err}` };
+    }
+    let daemon = null;
+    try {
+        if (await isDaemonAlive(500)) {
+            const r = await sendToDaemon("stats", null, { timeoutMs: 1500 });
+            if (r?.ok) daemon = { version: r.data?.version ?? null, cliDir: r.data?.cliDir ?? null };
+        }
+    } catch { /* daemon check below reports it */ }
+    return judgeCliInstall({
+        running: { version: RUNNING_VERSION, dir: CLI_DIR },
+        copies: inv.copies,
+        pathFirst: inv.pathFirst,
+        wrapper: inv.wrapper,
+        daemon
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -435,38 +510,43 @@ export default async function doctor(args) {
     const modelOverride = args.get("model") ? String(args.get("model")) : null;
 
     const results = [];
-    const checks = ["Local config", "Engine", "Control plane", "Daemon", "Provider row", "End-to-end"];
+    const checks = ["CLI install", "Local config", "Engine", "Control plane", "Daemon", "Provider row", "End-to-end"];
     if (skipE2E) checks.pop();
 
     process.stdout.write(`\n${C.bold}infernet doctor${C.reset}\n\n`);
 
+    // 0. CLI install (version skew between copies, PATH and the daemon)
+    const cliResult = await checkCliInstall();
+    if (!jsonMode) printCheck(1, checks.length, "CLI install", cliResult);
+    results.push({ name: "CLI install", ...cliResult });
+
     // 1. Config
     const cfgResult = await checkConfig();
-    if (!jsonMode) printCheck(1, checks.length, "Local config", cfgResult);
+    if (!jsonMode) printCheck(2, checks.length, "Local config", cfgResult);
     results.push({ name: "Local config", ...cfgResult });
     const config = cfgResult.config ?? null;
 
     // 2. Engine
     const engineResult = await checkEngine(config ?? {});
-    if (!jsonMode) printCheck(2, checks.length, "Engine", engineResult);
+    if (!jsonMode) printCheck(3, checks.length, "Engine", engineResult);
     results.push({ name: "Engine", ...engineResult });
 
     // 3. Control plane
     const url = urlOverride ?? config?.controlPlane?.url ?? null;
     const cpResult = await checkControlPlane(url);
-    if (!jsonMode) printCheck(3, checks.length, "Control plane", cpResult);
+    if (!jsonMode) printCheck(4, checks.length, "Control plane", cpResult);
     results.push({ name: "Control plane", ...cpResult });
 
     // 4. Daemon
     const daemonResult = await checkDaemon();
-    if (!jsonMode) printCheck(4, checks.length, "Daemon", daemonResult);
+    if (!jsonMode) printCheck(5, checks.length, "Daemon", daemonResult);
     results.push({ name: "Daemon", ...daemonResult });
 
     // 5. Provider row
     const provResult = config
         ? await checkProviderRow(config)
         : { status: "skip", summary: "no config — skipped" };
-    if (!jsonMode) printCheck(5, checks.length, "Provider row", provResult);
+    if (!jsonMode) printCheck(6, checks.length, "Provider row", provResult);
     results.push({ name: "Provider row", ...provResult });
 
     // 6. End-to-end
@@ -474,7 +554,7 @@ export default async function doctor(args) {
     if (!skipE2E) {
         const model = modelOverride ?? config?.engine?.model ?? null;
         e2eResult = await checkEndToEnd(config ?? {}, { url, model });
-        if (!jsonMode) printCheck(6, checks.length, "End-to-end", e2eResult);
+        if (!jsonMode) printCheck(7, checks.length, "End-to-end", e2eResult);
         results.push({ name: "End-to-end", ...e2eResult });
     }
 
