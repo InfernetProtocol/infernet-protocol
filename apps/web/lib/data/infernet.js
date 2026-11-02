@@ -257,24 +257,38 @@ export async function getJobs({ limit, status, pubkey } = {}) {
   if (status) {
     query = query.eq("status", status);
   }
-  if (pubkey) {
-    // A pubkey may identify either the consumer (jobs.client_pubkey) or
-    // a provider (jobs.provider_id → providers.public_key). Resolve the
-    // provider id first so we can filter with a single OR.
-    const { data: providerRows } = await supabase
-      .from("providers")
-      .select("id")
-      .eq("public_key", pubkey);
-    const providerIds = (providerRows ?? []).map((r) => r.id);
-    const orParts = [`client_pubkey.eq.${pubkey}`];
-    if (providerIds.length > 0) {
-      orParts.push(`provider_id.in.(${providerIds.join(",")})`);
-    }
-    query = query.or(orParts.join(","));
-  }
+  if (pubkey) query = await filterJobsByPubkey(supabase, query, pubkey);
 
   const rows = await runQuery(withLimit(query, limit));
   return rows.map(mapJob);
+}
+
+// A pubkey may identify either the consumer (jobs.client_pubkey) or a
+// provider (jobs.provider_id -> providers.public_key). Resolve the provider
+// id first so we can filter with a single OR.
+async function filterJobsByPubkey(supabase, query, pubkey) {
+  const { data: providerRows } = await supabase
+    .from("providers")
+    .select("id")
+    .eq("public_key", pubkey);
+  const providerIds = (providerRows ?? []).map((r) => r.id);
+  const orParts = [`client_pubkey.eq.${pubkey}`];
+  if (providerIds.length > 0) {
+    orParts.push(`provider_id.in.(${providerIds.join(",")})`);
+  }
+  return query.or(orParts.join(","));
+}
+
+// Exact row count (no rows fetched), so the status cards show the real total
+// rather than the length of a 100-row page.
+export async function countJobs({ status, pubkey } = {}) {
+  const supabase = getSupabaseServerClient();
+  let query = supabase.from("jobs").select("id", { count: "exact", head: true });
+  if (status) query = query.eq("status", status);
+  if (pubkey) query = await filterJobsByPubkey(supabase, query, pubkey);
+  const { count, error } = await query;
+  if (error) throw new Error(error.message);
+  return count ?? 0;
 }
 
 export async function getModels({ limit } = {}) {
@@ -563,9 +577,10 @@ export async function getDashboardOverview({ pubkey } = {}) {
   // distinct models advertised by currently online providers.
   let providersQuery = supabase.from("providers").select("status, last_seen, specs");
   if (pubkey) providersQuery = providersQuery.eq("public_key", pubkey);
-  const [{ data: providersAll, error: pErr }, jobs, money] = await Promise.all([
+  const [{ data: providersAll, error: pErr }, totalJobs, pendingJobs, money] = await Promise.all([
     providersQuery,
-    getJobs({ limit: 100, pubkey }),
+    countJobs({ pubkey }),
+    countJobs({ status: "pending", pubkey }),
     // Network-wide totals belong on the public page only, not a per-node view.
     pubkey ? Promise.resolve(undefined) : getNetworkMoney()
   ]);
@@ -585,7 +600,8 @@ export async function getDashboardOverview({ pubkey } = {}) {
     }
   }
 
-  const pendingJobs = jobs.filter((j) => j.status === "pending").length;
+  // Freshest heartbeat among online providers (the list is unordered).
+  const lastSeen = onlineProviders.reduce((max, p) => (p.last_seen > max ? p.last_seen : max), "");
 
   return {
     cards: [
@@ -603,13 +619,13 @@ export async function getDashboardOverview({ pubkey } = {}) {
       },
       {
         label: "Jobs",
-        value: jobs.length,
+        value: totalJobs,
         note: `${pendingJobs} pending`
       },
       {
         label: "Last heartbeat",
-        value: onlineProviders[0]?.last_seen ? relativeAgo(onlineProviders[0].last_seen) : "—",
-        note: onlineProviders[0]?.last_seen ?? "no heartbeats yet"
+        value: lastSeen ? relativeAgo(lastSeen) : "—",
+        note: lastSeen || "no heartbeats yet"
       },
       ...(money === undefined ? [] : moneyCards(money))
     ]
