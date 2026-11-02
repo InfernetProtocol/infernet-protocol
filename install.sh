@@ -33,6 +33,7 @@
 #   INFERNET_REF=branch           branch/tag/commit for git path (master)
 #   INFERNET_NPM_VERSION=X.Y.Z    pin npm version (latest)
 #   INFERNET_FORCE_GIT=1          skip npm, force git path
+#   INFERNET_KEEP_OTHER_COPIES=1  don't remove other npm-global CLI copies
 #   INFERNET_MIN_DISK_MB=N        override disk-space threshold (3 / 10 / 15 GB)
 #   INFERNET_SKIP_DISK_CHECK=1    skip the disk-space preflight
 #   INFERNET_NO_RELOCATE=1        keep install at $HOME even if a bigger
@@ -1085,6 +1086,37 @@ schedule_auto_update() {
     fi
 }
 
+# One CLI per node. A stale npm-global @infernetprotocol/cli under another
+# Node (mise / nvm / system prefix) shadowed the installer's wrapper on PATH
+# and ran old code (2026-11-02: `infernet house-models off` went to a model as
+# a chat prompt). Keep the install this run made, update in place any copy a
+# service unit starts the daemon from, remove the rest, then `mise reshim` so
+# mise's shim for the removed binary disappears.
+prune_stray_cli_copies() {
+    if [ "${INFERNET_KEEP_OTHER_COPIES:-}" = "1" ]; then
+        info "INFERNET_KEEP_OTHER_COPIES=1 — leaving other infernet CLI copies alone"
+        return 0
+    fi
+    local cli_dir keep ver
+    if [ "${used_npm:-0}" = "1" ]; then
+        cli_dir="$(npm root -g 2>/dev/null)/@infernetprotocol/cli"
+        keep="$cli_dir"
+    else
+        cli_dir="$SOURCE_DIR/apps/cli"
+        keep="none"
+    fi
+    [ -f "$cli_dir/lib/cli-copies.js" ] || return 0
+    ver="$(node -e 'try{process.stdout.write(require(process.argv[1]).version||"")}catch{}' "$cli_dir/package.json" 2>/dev/null || true)"
+    info "checking for other infernet CLI copies (one version per node)"
+    if [ -n "$ver" ]; then
+        node "$cli_dir/lib/cli-copies.js" --prune --keep "$keep" --version "$ver" \
+            || warn "some infernet CLI copies could not be cleaned (see above)"
+    else
+        node "$cli_dir/lib/cli-copies.js" --prune --keep "$keep" \
+            || warn "some infernet CLI copies could not be cleaned (see above)"
+    fi
+}
+
 # Try installing via npm. Returns 0 on success (binary now on PATH via
 # npm's global prefix), 1 to fall back to the git clone path.
 try_npm_install() {
@@ -1504,6 +1536,8 @@ main() {
     # operators who skip `infernet setup` still have a working model.
     # Opt-out: INFERNET_SKIP_CPU_BASELINE=1.
     ensure_cpu_baseline_model
+
+    prune_stray_cli_copies
 
     schedule_auto_update
 

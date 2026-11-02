@@ -93,6 +93,12 @@ export default function HouseModelsPage() {
                 only removes models it pulled itself (recorded in <code>~/.config/infernet/house-models-state.json</code>).
                 A pulled house model is advertised and served like any other model, and jobs on it earn like any other job.
             </P>
+            <P>
+                When the list pins a new digest for a model (a new build), every node that pulled the old build re-pulls
+                it on its next sync (CLI 0.1.84 and later). The old build stays until the new one verifies, so a failed
+                update leaves the node serving the old one and retries after 24 hours. A model the operator pulled
+                themselves is never updated; <code>infernet house-models</code> reports it as outdated.
+            </P>
 
             <H2 id="opt-out">Opting out</H2>
             <Code>{`infernet house-models                 # what is pulled, disk used, last sync

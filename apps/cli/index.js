@@ -14,8 +14,9 @@
 
 import { loadConfig, getConfigPath } from './lib/config.js';
 import { createNodeClientFromConfig } from './lib/node-client.js';
-import { decideRoute } from './lib/route.js';
-import { CURRENT_VERSION, fetchLatestVersion, isNewerVersion } from './lib/version.js';
+import { decideRoute, unknownCommandMessage } from './lib/route.js';
+import { CLI_DIR, RUNNING_VERSION, fetchLatestVersion, isNewerVersion } from './lib/version.js';
+import { inventory } from './lib/cli-copies.js';
 
 import help, { USAGE } from './commands/help.js';
 import init from './commands/init.js';
@@ -127,12 +128,26 @@ const NO_CLIENT = new Set();
 
 const KNOWN_COMMAND_NAMES = new Set(Object.keys(COMMANDS));
 
-async function printVersion() {
-    process.stdout.write(`infernet v${CURRENT_VERSION}\n`);
+async function printVersion({ verbose = false } = {}) {
+    // The version of THIS code, read from the package.json beside it. Not the
+    // newest version on disk: a stale copy that says it is current is how a
+    // node ran 0.1.80 code under a "v0.1.83" banner.
+    process.stdout.write(`infernet v${RUNNING_VERSION}${verbose ? `  (${CLI_DIR})` : ''}\n`);
+    try {
+        const inv = inventory({ runningDir: CLI_DIR });
+        const others = inv.copies.filter((c) => c.dir !== CLI_DIR && c.version && c.version !== RUNNING_VERSION);
+        for (const c of others) {
+            process.stdout.write(`  other copy: v${c.version} at ${c.dir}\n`);
+        }
+        if (inv.pathFirst?.dir && inv.pathFirst.dir !== CLI_DIR) {
+            process.stdout.write(`  note: \`infernet\` on PATH (${inv.pathFirst.path}, ${inv.pathFirst.via}) runs ${inv.pathFirst.dir}\n`);
+        }
+        if (others.length) process.stdout.write('  more than one CLI version on this machine: run `infernet upgrade` (keeps one) and `infernet doctor`\n');
+    } catch { /* inventory is advisory */ }
     const latest = await fetchLatestVersion();
     if (!latest) {
         process.stdout.write(`  update check failed (offline?)\n`);
-    } else if (isNewerVersion(CURRENT_VERSION, latest)) {
+    } else if (isNewerVersion(RUNNING_VERSION, latest)) {
         process.stdout.write(`  update available: v${latest}  →  run \`infernet upgrade\`\n`);
     } else {
         process.stdout.write(`  up to date\n`);
@@ -144,13 +159,18 @@ async function main() {
 
     // --version / -v / -V  (checked before full routing)
     if (argv[0] === '--version' || argv[0] === '-v' || argv[0] === '-V') {
-        await printVersion();
+        await printVersion({ verbose: true });
         process.exit(0);
     }
 
     const route = decideRoute(argv, KNOWN_COMMAND_NAMES, { isTTY: !!process.stdin.isTTY });
     const sub = route.command;
     const rest = route.rest;
+
+    if (sub === 'unknown') {
+        process.stderr.write(unknownCommandMessage(route.name, { version: RUNNING_VERSION, entry: CLI_DIR }));
+        process.exit(2);
+    }
 
     if (sub === 'help') {
         // Bare `infernet` → show version + up-to-date status, then help.

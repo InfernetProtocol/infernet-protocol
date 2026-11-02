@@ -64,6 +64,28 @@ function stripDigest(d) {
     return typeof d === 'string' ? d.replace(/^sha256:/, '').toLowerCase() : null;
 }
 
+function shortDigest(d) {
+    const s = stripDigest(d);
+    return s ? s.slice(0, 12) : '?';
+}
+
+/**
+ * True when the manifest pins a digest and Ollama reports a different one.
+ * No pin, or no digest from Ollama, is never "outdated": nothing to compare.
+ */
+export function isOutdated(entry, installedModel) {
+    const want = stripDigest(entry?.digest);
+    const got = stripDigest(installedModel?.digest);
+    return Boolean(want && got && want !== got);
+}
+
+/** `name:tag` -> `name:infernet-prev`, the backup tag kept during an update. */
+export function backupTag(ollamaName) {
+    const n = normalizeOllamaName(ollamaName);
+    const i = n.lastIndexOf(':');
+    return `${n.slice(0, i)}:infernet-prev`;
+}
+
 /**
  * Validate a manifest document. Bad entries are dropped individually (and
  * reported in `rejected`) so one typo cannot stop every other model.
@@ -188,11 +210,17 @@ export function diskReserveBytes(totalBytes) {
  *   settings   resolveSettings() output
  *   failures   { [ollama_name]: { at } }: recent pull/verify failures
  *
- * Returns { pull: [entry], remove: [{ name, reason }], keep: [entry], skipped: [{ name, reason }] }.
+ * Returns { pull: [entry], update: [entry], remove: [{ name, reason }], keep: [entry], skipped: [{ name, reason }] }.
+ *
+ * `update` holds models the daemon pulled whose installed digest no longer
+ * matches the manifest pin (we re-pinned a new build). Before 0.1.84 an
+ * installed model was always kept, so a re-pin never reached any node that
+ * already had the old build. A model the operator pulled themselves is never
+ * touched; it is reported in `skipped` as outdated instead.
  */
 export function planSync({ manifest, installed = [], owned = {}, capacity = {}, settings, failures = {}, now = Date.now() }) {
     const installedByName = new Map(installed.map((m) => [normalizeOllamaName(m.name ?? m.model), m]));
-    const plan = { pull: [], remove: [], keep: [], skipped: [] };
+    const plan = { pull: [], update: [], remove: [], keep: [], skipped: [] };
     const models = manifest?.models ?? [];
     const listed = new Set(models.map((m) => m.ollama_name));
 
@@ -219,9 +247,40 @@ export function planSync({ manifest, installed = [], owned = {}, capacity = {}, 
         else if (used + m.size_bytes > capBytes) reason = `over the house-models disk cap of ${settings.maxDiskGb} GB`;
 
         if (have) {
-            if (reason && ours) plan.remove.push({ name: m.ollama_name, reason });
-            else if (reason) plan.skipped.push({ name: m.ollama_name, reason: `${reason} (kept: you installed it yourself)` });
-            else { plan.keep.push(m); if (ours) used += m.size_bytes; }
+            if (reason && ours) { plan.remove.push({ name: m.ollama_name, reason }); continue; }
+            if (reason) { plan.skipped.push({ name: m.ollama_name, reason: `${reason} (kept: you installed it yourself)` }); continue; }
+            const outdated = isOutdated(m, have);
+            if (!outdated) { plan.keep.push(m); if (ours) used += m.size_bytes; continue; }
+            const pin = `installed ${shortDigest(have.digest)}, house manifest pins ${shortDigest(m.digest)}`;
+            if (!ours) {
+                plan.keep.push(m);
+                plan.skipped.push({ name: m.ollama_name, reason: `outdated vs house manifest (${pin}); not updated: you installed it yourself`, outdated: true });
+                continue;
+            }
+            // Ours and re-pinned: re-pull, under the same backoff and disk
+            // rules as a fresh pull. The old build stays until the new one
+            // verifies (syncHouseModels keeps a backup tag).
+            used += m.size_bytes;
+            const failedUpdate = failures[m.ollama_name];
+            if (failedUpdate && now - Date.parse(failedUpdate.at) < FAILURE_BACKOFF_MS) {
+                plan.keep.push(m);
+                plan.skipped.push({ name: m.ollama_name, reason: `update failed (${failedUpdate.error ?? 'error'}); kept the old build, retrying after 24 h`, outdated: true });
+                continue;
+            }
+            if (Number.isFinite(free)) {
+                const needFree = m.size_bytes + reserve;
+                if (free < needFree) {
+                    plan.keep.push(m);
+                    plan.skipped.push({
+                        name: m.ollama_name,
+                        reason: `update waiting for disk (${pin}): ${(free / GB).toFixed(1)} GB free, needs ${(needFree / GB).toFixed(1)} GB`,
+                        outdated: true
+                    });
+                    continue;
+                }
+                free -= m.size_bytes;
+            }
+            plan.update.push({ ...m, installed_digest: have.digest ? `sha256:${stripDigest(have.digest)}` : null });
             continue;
         }
         if (reason) { plan.skipped.push({ name: m.ollama_name, reason }); continue; }
@@ -349,6 +408,16 @@ export async function ollamaDelete(name, { host = ollamaHost(), fetchImpl = fetc
     if (!res.ok && res.status !== 404) throw new Error(`ollama delete HTTP ${res.status}`);
 }
 
+/** Copy a tag (manifest only; the blobs are shared, so this costs no disk). */
+export async function ollamaCopy(source, destination, { host = ollamaHost(), fetchImpl = fetch } = {}) {
+    const res = await fetchImpl(new URL('/api/copy', host), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ source, destination })
+    });
+    if (!res.ok) throw new Error(`ollama copy HTTP ${res.status}`);
+}
+
 /** Where Ollama keeps blobs, best guess; used only to measure free disk. */
 export function ollamaModelsDir(env = process.env) {
     const candidates = [
@@ -402,7 +471,7 @@ export async function syncHouseModels({
 } = {}) {
     const state = readState(statePath);
     const at = new Date().toISOString();
-    const summary = { at, pulled: [], removed: [], skipped: [], errors: [] };
+    const summary = { at, pulled: [], updated: [], removed: [], skipped: [], errors: [] };
     try {
         const man = manifest ?? await fetchManifest({ url: settings.manifestUrl, fetchImpl });
         for (const r of man.rejected) log(`manifest entry ${r.name} rejected: ${r.reasons.join('; ')}`);
@@ -462,6 +531,47 @@ export async function syncHouseModels({
                 state.failures[m.ollama_name] = { at: new Date().toISOString(), error };
                 summary.errors.push({ name: m.ollama_name, error });
                 log(`pull ${m.ollama_name} failed: ${error}`);
+            }
+            await writeState({ ...state, last_sync: summary }, statePath).catch(() => {});
+        }
+        for (const m of plan.update) {
+            const waitUntil = Date.now() + busyWaitMs;
+            while (isBusy() && Date.now() < waitUntil) await sleep(15_000);
+            const backup = backupTag(m.ollama_name);
+            log(`updating ${m.ollama_name}: installed ${shortDigest(m.installed_digest)}, manifest pins ${shortDigest(m.digest)}`);
+            let backedUp = false;
+            try {
+                // Keep the old build under a backup tag so a failed or bad
+                // pull never leaves the node without the model.
+                await ollamaCopy(m.ollama_name, backup, { host, fetchImpl });
+                backedUp = true;
+                await ollamaPull(m.source, { host, fetchImpl });
+                installed = await ollamaTags({ host, fetchImpl });
+                const got = installed.find((t) => normalizeOllamaName(t.name) === m.ollama_name);
+                const v = verifyPulled(m, got);
+                if (!v.ok) throw new Error(`verification failed: ${v.error}`);
+                await ollamaDelete(backup, { host, fetchImpl }).catch(() => {});
+                state.owned[m.ollama_name] = { digest: got.digest ?? null, size_bytes: Number(got.size) || m.size_bytes, pulled_at: new Date().toISOString(), uncensored: m.uncensored, updated_from: m.installed_digest };
+                delete state.failures[m.ollama_name];
+                summary.updated.push(m.ollama_name);
+                log(`updated and verified ${m.ollama_name}`);
+            } catch (err) {
+                let error = (err?.message ?? String(err)).slice(0, 300);
+                if (backedUp) {
+                    // Put the old build back under the real name.
+                    try {
+                        await ollamaCopy(backup, m.ollama_name, { host, fetchImpl });
+                        await ollamaDelete(backup, { host, fetchImpl });
+                        error += ' (kept the old build)';
+                    } catch (restoreErr) {
+                        error += `; restoring the old build failed: ${restoreErr?.message ?? restoreErr} (it is still under ${backup})`;
+                    }
+                } else {
+                    error += ' (kept the old build)';
+                }
+                state.failures[m.ollama_name] = { at: new Date().toISOString(), error, update: true };
+                summary.errors.push({ name: m.ollama_name, error });
+                log(`update ${m.ollama_name} failed: ${error}`);
             }
             await writeState({ ...state, last_sync: summary }, statePath).catch(() => {});
         }

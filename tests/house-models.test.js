@@ -13,7 +13,9 @@ import {
     diskReserveBytes,
     syncHouseModels,
     readState,
-    formatStatus
+    formatStatus,
+    isOutdated,
+    backupTag
 } from "../apps/cli/lib/house-models.js";
 import { matchServedModel } from "../apps/web/lib/model-names.js";
 
@@ -309,5 +311,136 @@ describe("chat routing finds house models by either name", () => {
         expect(matchServedModel(served, "hf.co/profullstack/saas-business-strategist-agent-GGUF")).toBe(served[1]);
         expect(matchServedModel(["hf.co/x/y"], "hf.co/x/y:latest")).toBe("hf.co/x/y");
         expect(matchServedModel(["qwen2.5:0.5b"], "qwen2.5")).toBeNull();
+    });
+});
+
+describe("house-models updates when the manifest re-pins a build", () => {
+    // Infernet #127 re-pinned the strategist; nodes that had the old build
+    // kept it forever because an installed model was always kept.
+    const small = "hf.co/acme/small-GGUF:latest";
+    const oldBuild = { name: small, digest: "f".repeat(64), size: 0.5 * GB };
+    const onlySmall = parseManifest({ schema: 1, models: [doc.models[0]] });
+
+    it("same digest -> keep", () => {
+        const p = planSync({ manifest: onlySmall, installed: [{ ...oldBuild, digest: "a".repeat(64) }], owned: { [small]: {} }, capacity: bigBox, settings: on });
+        expect(p.keep.map((m) => m.ollama_name)).toEqual([small]);
+        expect(p.update).toEqual([]);
+        expect(p.pull).toEqual([]);
+        expect(isOutdated(onlySmall.models[0], { digest: D("a") })).toBe(false);
+        expect(isOutdated(onlySmall.models[0], { digest: null })).toBe(false);
+    });
+
+    it("owned + different digest -> update", () => {
+        const p = planSync({ manifest: onlySmall, installed: [oldBuild], owned: { [small]: {} }, capacity: bigBox, settings: on });
+        expect(p.update.map((m) => m.ollama_name)).toEqual([small]);
+        expect(p.update[0].installed_digest).toBe(`sha256:${"f".repeat(64)}`);
+        expect(p.keep).toEqual([]);
+        expect(p.pull).toEqual([]);
+    });
+
+    it("operator-installed + different digest -> skipped with an outdated note, never touched", () => {
+        const p = planSync({ manifest: onlySmall, installed: [oldBuild], owned: {}, capacity: bigBox, settings: on });
+        expect(p.update).toEqual([]);
+        expect(p.remove).toEqual([]);
+        expect(p.keep.map((m) => m.ollama_name)).toEqual([small]);
+        const note = p.skipped.find((x) => x.name === small);
+        expect(note.reason).toMatch(/outdated vs house manifest \(installed ffffffffffff, house manifest pins aaaaaaaaaaaa\)/);
+        expect(note.reason).toMatch(/you installed it yourself/);
+        const text = formatStatus({ settings: { ...on, sources: {} }, state: { owned: {}, last_sync: { at: "2026-11-02T00:00:00Z", skipped: p.skipped, errors: [] } } });
+        expect(text).toMatch(/skipped hf.co\/acme\/small-GGUF:latest: outdated vs house manifest/);
+    });
+
+    it("a failed update backs off for a day and keeps the old build", () => {
+        const now = Date.parse("2026-11-02T12:00:00Z");
+        const failures = { [small]: { at: "2026-11-02T11:00:00Z", error: "digest mismatch" } };
+        const p = planSync({ manifest: onlySmall, installed: [oldBuild], owned: { [small]: {} }, capacity: bigBox, settings: on, failures, now });
+        expect(p.update).toEqual([]);
+        expect(p.keep.map((m) => m.ollama_name)).toEqual([small]);
+        expect(p.skipped[0].reason).toMatch(/kept the old build/);
+    });
+
+    it("backupTag replaces the tag", () => {
+        expect(backupTag("hf.co/a/b")).toBe("hf.co/a/b:infernet-prev");
+        expect(backupTag("huihui_ai/qwen3.5-abliterated:4b")).toBe("huihui_ai/qwen3.5-abliterated:infernet-prev");
+    });
+
+    describe("syncHouseModels", () => {
+        let dir;
+        beforeEach(() => { dir = mkdtempSync(path.join(tmpdir(), "house-models-upd-")); });
+        afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+        const capacity = { ramGb: 32, disk: { freeBytes: 200 * GB, totalBytes: 500 * GB } };
+
+        // An Ollama whose pull replaces the tag (as the real one does) and that
+        // serves `servedDigest` for it.
+        function ollama(tags, servedDigest) {
+            const calls = [];
+            const find = (n) => tags.findIndex((t) => normalizeOllamaName(t.name) === normalizeOllamaName(n));
+            const fetchImpl = async (url, init = {}) => {
+                const u = new URL(url);
+                const body = init.body ? JSON.parse(init.body) : {};
+                calls.push(`${init.method ?? "GET"} ${u.pathname}${body.name ? ` ${body.name}` : ""}${body.source ? ` ${body.source}->${body.destination}` : ""}`);
+                if (u.pathname === "/api/tags") return new Response(JSON.stringify({ models: tags.map((t) => ({ ...t })) }), { status: 200 });
+                if (u.pathname === "/api/copy") {
+                    const i = find(body.source);
+                    if (i < 0) return new Response("missing", { status: 404 });
+                    const j = find(body.destination);
+                    const copy = { ...tags[i], name: normalizeOllamaName(body.destination) };
+                    if (j >= 0) tags[j] = copy; else tags.push(copy);
+                    return new Response("", { status: 200 });
+                }
+                if (u.pathname === "/api/pull") {
+                    const n = normalizeOllamaName(body.name);
+                    const i = find(n);
+                    const t = { name: n, digest: servedDigest, size: 0.5 * GB };
+                    if (i >= 0) tags[i] = t; else tags.push(t);
+                    return new Response('{"status":"success"}\n', { status: 200 });
+                }
+                if (u.pathname === "/api/delete") {
+                    const i = find(body.name);
+                    if (i >= 0) tags.splice(i, 1);
+                    return new Response("", { status: 200 });
+                }
+                return new Response("nope", { status: 404 });
+            };
+            return { fetchImpl, calls };
+        }
+
+        it("re-pulls an owned model to the new pin and drops the backup", async () => {
+            const tags = [{ ...oldBuild }];
+            const { fetchImpl, calls } = ollama(tags, "a".repeat(64));
+            const statePath = path.join(dir, "s.json");
+            const { writeState } = await import("../apps/cli/lib/house-models.js");
+            await writeState({ owned: { [small]: { digest: "f".repeat(64) } }, failures: {} }, statePath);
+            const s = await syncHouseModels({ settings: on, manifest: onlySmall, fetchImpl, host: "http://ollama.test", statePath, capacity });
+            expect(s.updated).toEqual([small]);
+            expect(s.errors).toEqual([]);
+            expect(tags).toEqual([{ name: small, digest: "a".repeat(64), size: 0.5 * GB }]);
+            expect(calls).toContain(`POST /api/copy ${small}->hf.co/acme/small-GGUF:infernet-prev`);
+            expect(readState(statePath).owned[small].digest).toBe("a".repeat(64));
+        });
+
+        it("keeps the old build when the new pull does not verify", async () => {
+            const tags = [{ ...oldBuild }];
+            const { fetchImpl } = ollama(tags, "9".repeat(64)); // registry serves yet another build
+            const statePath = path.join(dir, "s.json");
+            const { writeState } = await import("../apps/cli/lib/house-models.js");
+            await writeState({ owned: { [small]: { digest: "f".repeat(64) } }, failures: {} }, statePath);
+            const s = await syncHouseModels({ settings: on, manifest: onlySmall, fetchImpl, host: "http://ollama.test", statePath, capacity });
+            expect(s.updated).toEqual([]);
+            expect(s.errors[0].error).toMatch(/digest mismatch.*kept the old build/);
+            expect(tags).toEqual([{ ...oldBuild }]); // old build back under its name, no backup left
+            const state = readState(statePath);
+            expect(state.owned[small]).toBeTruthy();
+            expect(state.failures[small].update).toBe(true);
+        });
+
+        it("never touches an operator-installed outdated model", async () => {
+            const tags = [{ ...oldBuild }];
+            const { fetchImpl, calls } = ollama(tags, "a".repeat(64));
+            const s = await syncHouseModels({ settings: on, manifest: onlySmall, fetchImpl, host: "http://ollama.test", statePath: path.join(dir, "s.json"), capacity });
+            expect(calls.filter((c) => !c.startsWith("GET"))).toEqual([]);
+            expect(s.skipped[0].reason).toMatch(/outdated vs house manifest/);
+            expect(tags).toEqual([{ ...oldBuild }]);
+        });
     });
 });
