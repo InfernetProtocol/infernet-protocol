@@ -389,6 +389,34 @@ export function checkPayoutRequest({ balance, amountUsd, config, hasAddress, has
  * "$0.00" hides sub-cent credits, which is exactly what made a provider
  * think he had earned nothing. Show up to 6 decimals below a cent.
  */
+/**
+ * Network-wide money totals across every node, for the public /status page.
+ *   earned  every non-void credit (paid jobs, subsidy, reservations), split
+ *           into confirmed and not-yet-confirmed (pending / pending_approval)
+ *   spent   net confirmed earnings nodes moved into paid batch inference
+ *           (spent_on_compute debits less returns), plus payouts sent out
+ */
+export function summariseNetworkMoney(earnings = [], payouts = []) {
+    const sum = (rows) => roundUsd(rows.reduce((a, r) => a + (Number(r.amount_usd) || 0), 0));
+    const credits = earnings.filter((e) => e.status !== "void" && e.kind !== "spent_on_compute");
+    const confirmed = sum(credits.filter((e) => e.status === "confirmed"));
+    const pending = sum(credits.filter((e) => e.status !== "confirmed"));
+    const spentOnCompute = roundUsd(Math.max(0,
+        -sum(earnings.filter((e) => e.kind === "spent_on_compute" && e.status === "confirmed"))));
+    const paidOut = sum(payouts.filter((p) => p.status === "sent"));
+    const earners = new Set(credits.map((e) => e.provider_id).filter(Boolean));
+    return {
+        earned_usd: roundUsd(confirmed + pending),
+        earned_confirmed_usd: confirmed,
+        earned_pending_usd: pending,
+        spent_usd: roundUsd(spentOnCompute + paidOut),
+        spent_on_compute_usd: spentOnCompute,
+        paid_out_usd: paidOut,
+        earning_nodes: earners.size,
+        credits: credits.length
+    };
+}
+
 export function fmtAmount(n) {
     const v = Number(n) || 0;
     if (v === 0) return "0.00";

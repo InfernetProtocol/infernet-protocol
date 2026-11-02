@@ -157,3 +157,39 @@ describe("auto-approve config", () => {
         expect(isAutoApprovable(0.5, { auto_approve_max_usd: 0 })).toBe(false);
     });
 });
+
+describe("summariseNetworkMoney", () => {
+    it("totals earned and spent across nodes, ignoring void and open payouts", async () => {
+        const { summariseNetworkMoney } = await import("@/lib/earnings/core");
+        const m = summariseNetworkMoney(
+            [
+                { provider_id: "a", kind: "paid", status: "confirmed", amount_usd: "9.80" },
+                { provider_id: "a", kind: "subsidy", status: "pending_approval", amount_usd: 0.5 },
+                { provider_id: "b", kind: "reservation", status: "pending", amount_usd: 2 },
+                { provider_id: "c", kind: "paid", status: "void", amount_usd: 100 },
+                { provider_id: "a", kind: "spent_on_compute", status: "confirmed", amount_usd: -4 },
+                { provider_id: "a", kind: "spent_on_compute", status: "confirmed", amount_usd: 1.25 }
+            ],
+            [
+                { status: "sent", amount_usd: 3 },
+                { status: "requested", amount_usd: 1 },
+                { status: "rejected", amount_usd: 50 }
+            ]
+        );
+        expect(m).toEqual({
+            earned_usd: 12.3,
+            earned_confirmed_usd: 9.8,
+            earned_pending_usd: 2.5,
+            spent_usd: 5.75,
+            spent_on_compute_usd: 2.75,
+            paid_out_usd: 3,
+            earning_nodes: 2,
+            credits: 3
+        });
+    });
+
+    it("is all zeros on an empty ledger", async () => {
+        const { summariseNetworkMoney } = await import("@/lib/earnings/core");
+        expect(summariseNetworkMoney()).toMatchObject({ earned_usd: 0, spent_usd: 0, earning_nodes: 0 });
+    });
+});
