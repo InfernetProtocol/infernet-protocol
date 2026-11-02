@@ -32,7 +32,6 @@ import random
 import sys
 import time
 import traceback
-import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,11 +59,14 @@ def resolve(base_dir, p):
 
 
 def load_dataset(spec, base_dir):
+    # Local files only: the runner never fetches from the network. A remote
+    # corpus is downloaded and hash-checked by the caller (c0mpute's text
+    # worker) and handed over as a path, so a job cannot point this process at
+    # an arbitrary URL.
     url = spec["url"]
-    if url.startswith(("http://", "https://")):
-        raw = urllib.request.urlopen(url, timeout=300).read()
-    else:
-        raw = resolve(base_dir, url).read_bytes()
+    if "://" in url and not url.startswith("file://"):
+        raise ValueError("dataset.url must be a local path; download remote corpora first")
+    raw = resolve(base_dir, url).read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
     want = (spec.get("sha256") or "").removeprefix("sha256:")
     if want and digest != want:
