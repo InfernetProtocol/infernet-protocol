@@ -1697,10 +1697,19 @@ async function runDaemon(args, ctx) {
     const followOnly = process.env.INFERNET_AUTO_UPDATE === 'follow';
     const checkForUpdate = async () => {
         if (shuttingDown || isUpgrading || Date.now() < updatePausedUntil) return;
-        // Never start an upgrade under a running job; the next check retries.
-        if (stats.activeJobIds.size > 0) return;
         const latest = followOnly ? readInstalledVersion() : await fetchLatestVersion();
         if (!latest || !isNewerVersion(CURRENT_VERSION, latest)) return;
+        // Never start an upgrade under a running job. But a node that is always
+        // busy used to skip every check and never update (bonita sat on 0.1.77
+        // for four releases under steady chat load), so stop taking new jobs
+        // and upgrade on the first check after the running ones finish.
+        if (stats.activeJobIds.size > 0) {
+            if (!stats.draining) {
+                stats.draining = true;
+                process.stdout.write(`[update] v${latest} available (running v${CURRENT_VERSION}) — finishing ${stats.activeJobIds.size} running job(s) first, taking no new ones\n`);
+            }
+            return;
+        }
         isUpgrading = true;
 
         if (followOnly) {
@@ -1710,6 +1719,7 @@ async function runDaemon(args, ctx) {
             const ok = await pullLatestBinary();
             if (!ok) {
                 process.stderr.write('[update] installer failed — will retry next check\n');
+                stats.draining = false;
                 isUpgrading = false;
                 return;
             }
@@ -1721,6 +1731,7 @@ async function runDaemon(args, ctx) {
             if (!isNewerVersion(CURRENT_VERSION, installed)) {
                 updatePausedUntil = Date.now() + UPDATE_PAUSE_MS;
                 process.stderr.write(`[update] installer left v${installed} here (latest v${latest}); not restarting, next try in ${UPDATE_PAUSE_MS / 3_600_000}h\n`);
+                stats.draining = false;
                 isUpgrading = false;
                 return;
             }

@@ -41,7 +41,7 @@ INFERNET_UNCENSORED_MODELS=0, INFERNET_HOUSE_MODELS_MAX_GB=<n>.
 House models are ON by default. The daemon checks
 https://infernetprotocol.com/house-models.json on start and every 6 hours,
 pulls listed models that fit (RAM >= min_ram_gb, and the pull leaves at least
-10% of the disk free, 10-50 GB), one at a time and never during a job, verifies
+10% of the disk free, 10-50 GB), one at a time (waiting up to 10 min for a running job), verifies
 each model's digest, and removes house models that leave the list. A model you
 pulled yourself is never removed.
 `;

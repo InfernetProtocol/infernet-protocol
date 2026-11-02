@@ -85,7 +85,7 @@ export default function HouseModelsPage() {
                 <li>the machine has at least the model&apos;s <code>min_ram_gb</code> of RAM;</li>
                 <li>after the download at least 10% of the disk stays free (never less than 10 GB, never more than 50 GB required);</li>
                 <li>house models stay under the operator&apos;s disk cap, if one is set;</li>
-                <li>no job is running (a pull never starts under a job).</li>
+                <li>one at a time; a pull waits up to 10 minutes for a running job to finish, then goes ahead (it is download work Ollama does beside inference).</li>
             </ul>
             <P>
                 After each pull the node checks the model&apos;s digest and size against the list and deletes it if they
