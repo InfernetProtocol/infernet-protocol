@@ -17,6 +17,8 @@
  */
 
 import os from "node:os";
+import http from "node:http";
+import https from "node:https";
 import { randomUUID } from "node:crypto";
 import { AsyncQueue } from "../async-queue.js";
 import { MSG, PROTOCOL_VERSION } from "../protocol.js";
@@ -40,6 +42,58 @@ export function defaultNumThread() {
 
 export const OLLAMA_DEFAULT_HOST = DEFAULT_HOST;
 
+/**
+ * Minimal fetch over node:http for the /api/chat stream, with no headers or
+ * body timeout.
+ *
+ * Node's global fetch (undici) fails with a bare "fetch failed" when no
+ * response headers arrive within 300 s. Ollama sends headers with the first
+ * token, and a single-GPU node serves one request at a time: a job queued
+ * behind another generation, or a long prompt on a slow card, routinely
+ * waits longer than that (cullen3, GTX 745, 2026-11-02: 47 of 49 qwen3:4b
+ * jobs failed at ~300 s). The job already has its own expiry and cancel, so
+ * the transport must not add a third, shorter deadline.
+ *
+ * Returns the subset of Response the backend uses: ok, status, text() and
+ * an async-iterable body.
+ */
+export function ollamaHttpFetch(url, { method = "GET", headers = {}, body, signal } = {}) {
+    const u = url instanceof URL ? url : new URL(url);
+    const mod = u.protocol === "https:" ? https : http;
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(abortError());
+            return;
+        }
+        const req = mod.request(u, { method, headers }, (res) => {
+            const status = res.statusCode ?? 0;
+            resolve({
+                ok: status >= 200 && status < 300,
+                status,
+                body: res,
+                async text() {
+                    let out = "";
+                    res.setEncoding("utf8");
+                    for await (const chunk of res) out += chunk;
+                    return out;
+                }
+            });
+        });
+        const onAbort = () => req.destroy(abortError());
+        signal?.addEventListener("abort", onAbort, { once: true });
+        req.on("close", () => signal?.removeEventListener("abort", onAbort));
+        req.on("error", reject);
+        if (body != null) req.write(body);
+        req.end();
+    });
+}
+
+function abortError() {
+    const err = new Error("The operation was aborted");
+    err.name = "AbortError";
+    return err;
+}
+
 export async function isOllamaReachable(host = DEFAULT_HOST, timeoutMs = PROBE_TIMEOUT_MS) {
     try {
         const ctrl = new AbortController();
@@ -57,7 +111,7 @@ export async function createOllamaBackend({
     defaultModel = process.env.INFERNET_ENGINE_MODEL ?? null,
     numThread = Number.parseInt(process.env.OLLAMA_NUM_THREAD ?? "", 10) || defaultNumThread(),
     skipProbe = false,
-    fetchImpl = globalThis.fetch
+    fetchImpl = ollamaHttpFetch
 } = {}) {
     if (!skipProbe) {
         const ok = await isOllamaReachable(host);
