@@ -150,7 +150,7 @@ curl https://infernetprotocol.com/api/v1/cprs/cpr_7x2a1b3c \
 
 ## Platform Fee
 
-The current house fee is **2%** of each job's payment. This funds:
+The current house fee is **2%** of each job's payment. Infernet and the c0mpute market are separate products: c0mpute's 5% market fee applies only to jobs bought through c0mpute.com/market and is never added to an Infernet job. The house fee funds:
 
 - Control plane infrastructure
 - Protocol development

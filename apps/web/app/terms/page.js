@@ -73,7 +73,9 @@ export default function TermsPage() {
                         <p>
                             We take a 2% house fee on paid jobs. Pricing displayed for any job is the price
                             the client agrees to pay; the operator receives 98% of the agreed amount, less
-                            the payment processor&apos;s fee.
+                            the payment processor&apos;s fee. Infernet and the c0mpute market are separate
+                            products: c0mpute&apos;s 5% market fee applies only to jobs bought on
+                            c0mpute.com/market and is never added to an Infernet job.
                         </p>
                     </Section>
 
