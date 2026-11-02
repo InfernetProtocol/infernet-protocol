@@ -1,6 +1,7 @@
 import Link from "next/link";
 import CopyButton from "@/components/copy-button";
 import ProviderLogos from "@/components/provider-logos";
+import PriceComparison from "@/components/price-comparison";
 
 export const metadata = {
   title: "Infernet Protocol — Decentralized GPU compute",
@@ -8,10 +9,13 @@ export const metadata = {
     "A peer-to-peer GPU compute marketplace for inference and distributed training. Operators run one CLI command and start earning crypto. Clients pay in any supported coin. No native token, no rent extraction."
 };
 
+// The price table reads the live batch pricing; refresh it every 5 minutes.
+export const revalidate = 300;
+
 const INSTALL_ONE_LINER =
   "curl -fsSL https://c0mpute.com/install.sh | sh && c0mpute plugin install infernet";
 
-export default function HomePage() {
+export default async function HomePage() {
   return (
     <>
       <main className="min-h-screen">
@@ -131,6 +135,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Price comparison (live Infernet prices vs frontier list prices) */}
+      <PriceComparison />
 
       {/* Run a node */}
       <section id="run-a-node" className="border-b border-white/10">
