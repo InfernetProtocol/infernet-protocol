@@ -93,6 +93,12 @@ export const MAX_CREDITED_OUTPUT_TOKENS = 32768;
 export const OUTLIER_MEDIAN_FACTOR = 3;
 // Fewer credits than this and the median says nothing yet.
 export const OUTLIER_MIN_HISTORY = 5;
+// A credit at or below this many output tokens is never held as an outlier,
+// whatever the median. A node whose history is mostly tiny health-check
+// prompts (median 10-16 tokens) otherwise held every real answer above ~48
+// tokens, a $0.0005 credit included (2026-11-02: 93 of ~210 credits held).
+// 2048 tokens is $0.02 at the $0.01/1k subsidy: not worth an admin's review.
+export const OUTLIER_FLOOR_TOKENS = 2048;
 
 /**
  * Output tokens for a finished job, and how the number was arrived at.
@@ -139,9 +145,10 @@ export function median(values) {
  * Why a subsidy credit of `tokens` should wait for an admin, or null.
  * `history` is that provider's other subsidy credits (output_tokens).
  */
-export function outlierReason(tokens, history, { factor = OUTLIER_MEDIAN_FACTOR, ceiling = MAX_CREDITED_OUTPUT_TOKENS, minHistory = OUTLIER_MIN_HISTORY } = {}) {
+export function outlierReason(tokens, history, { factor = OUTLIER_MEDIAN_FACTOR, ceiling = MAX_CREDITED_OUTPUT_TOKENS, minHistory = OUTLIER_MIN_HISTORY, floor = OUTLIER_FLOOR_TOKENS } = {}) {
     const t = Number(tokens) || 0;
     if (t > ceiling) return `output_tokens ${t} above the ${ceiling} ceiling`;
+    if (t <= floor) return null;
     const list = (history ?? []).map(Number).filter((x) => Number.isFinite(x) && x > 0);
     if (list.length < minHistory) return null;
     const m = median(list);

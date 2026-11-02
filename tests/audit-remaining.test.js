@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
     outputTokenCount, outputTokensFor, outlierReason, splitSubsidyOutliers, applyOutlierHolds,
-    computeJobCredits, computeReservationCredit, median, MAX_CREDITED_OUTPUT_TOKENS, DEFAULT_EARNINGS_CONFIG
+    computeJobCredits, computeReservationCredit, median, MAX_CREDITED_OUTPUT_TOKENS, OUTLIER_FLOOR_TOKENS, DEFAULT_EARNINGS_CONFIG
 } from "../apps/web/lib/earnings/core.js";
 import { summariseRevenue, isInternalOrder } from "../apps/web/lib/earnings/revenue.js";
 import { resolveModelDenylist, resolveOrderBlocklist, deniedModel, orderBlockReason } from "../apps/web/lib/moderation/blocklists.js";
@@ -41,17 +41,25 @@ describe("1. subsidy token counts", () => {
         expect(median([3, 1, 2])).toBe(2);
         expect(median([1, 2, 3, 4])).toBe(2.5);
         expect(median([])).toBeNull();
-        const hist = [100, 120, 90, 110, 100];
-        expect(outlierReason(300, hist)).toBeNull();
-        expect(outlierReason(301, hist)).toMatch(/3x provider median 100/);
-        expect(outlierReason(5000, [100, 100])).toBeNull(); // too little history
+        const hist = [1000, 1200, 900, 1100, 1000];
+        expect(outlierReason(3000, hist)).toBeNull();
+        expect(outlierReason(3001, hist)).toMatch(/3x provider median 1000/);
+        expect(outlierReason(25000, [1000, 1000])).toBeNull(); // too little history
         expect(outlierReason(MAX_CREDITED_OUTPUT_TOKENS + 1, [])).toMatch(/ceiling/);
+    });
+
+    it("never holds a credit at or below the token floor, however small the median", () => {
+        const pings = [10, 10, 16, 16, 12, 10, 16];
+        expect(outlierReason(49, pings)).toBeNull();
+        expect(outlierReason(OUTLIER_FLOOR_TOKENS, pings)).toBeNull();
+        expect(outlierReason(OUTLIER_FLOOR_TOKENS + 1, pings)).toMatch(/3x provider median/);
+        expect(outlierReason(5000, pings, { floor: 0 })).toMatch(/3x provider median/);
     });
 
     it("splitSubsidyOutliers keeps outliers and already-held rows pending", () => {
         const rows = [
-            ...[1, 2, 3, 4, 5].map((i) => ({ id: `a${i}`, provider_id: "A", output_tokens: 100 })),
-            { id: "a-big", provider_id: "A", output_tokens: 1000 },
+            ...[1, 2, 3, 4, 5].map((i) => ({ id: `a${i}`, provider_id: "A", output_tokens: 1000 })),
+            { id: "a-big", provider_id: "A", output_tokens: 10000 },
             { id: "b1", provider_id: "B", output_tokens: 1000 },
             { id: "held", provider_id: "B", output_tokens: 10, held_reason: "manual" }
         ];
@@ -62,10 +70,10 @@ describe("1. subsidy token counts", () => {
 
     it("applyOutlierHolds only holds subsidy rows", () => {
         const rows = [
-            { kind: "subsidy", provider_id: "A", output_tokens: 900, status: "confirmed", confirmed_at: "x" },
-            { kind: "paid", provider_id: "A", output_tokens: 900, status: "confirmed" }
+            { kind: "subsidy", provider_id: "A", output_tokens: 9000, status: "confirmed", confirmed_at: "x" },
+            { kind: "paid", provider_id: "A", output_tokens: 9000, status: "confirmed" }
         ];
-        const out = applyOutlierHolds(rows, { A: [100, 100, 100, 100, 100] });
+        const out = applyOutlierHolds(rows, { A: [1000, 1000, 1000, 1000, 1000] });
         expect(out[0]).toMatchObject({ status: "pending_approval", confirmed_at: null });
         expect(out[0].held_reason).toMatch(/median/);
         expect(out[1].status).toBe("confirmed");
