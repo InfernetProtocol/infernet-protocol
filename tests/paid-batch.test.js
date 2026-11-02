@@ -112,7 +112,15 @@ describe("pricing math", () => {
     });
     it("provider gets the charge less the house fee (fee rounded up)", () => {
         expect(providerSplitMicro(1_000_000, 2)).toEqual({ feeMicro: 20_000, providerMicro: 980_000 });
-        expect(providerSplitMicro(1, 2)).toEqual({ feeMicro: 1, providerMicro: 0 });
+        // Rounding favours the operator: a 1-micro charge pays them 1, not 0.
+        expect(providerSplitMicro(1, 2)).toEqual({ feeMicro: 0, providerMicro: 1 });
+        expect(providerSplitMicro(151, 2)).toEqual({ feeMicro: 3, providerMicro: 148 });
+        for (const c of [1, 7, 49, 50, 51, 99, 101, 12345, 999_999]) {
+            const { providerMicro, feeMicro } = providerSplitMicro(c, 2);
+            expect(providerMicro + feeMicro).toBe(c);
+            expect(providerMicro).toBeGreaterThanOrEqual(Math.ceil(c * 0.98) - 1);
+            expect(providerMicro * 100).toBeGreaterThanOrEqual(c * 98);
+        }
         expect(providerSplitMicro(0, 2)).toEqual({ feeMicro: 0, providerMicro: 0 });
         expect(providerSplitMicro(100, 0)).toEqual({ feeMicro: 0, providerMicro: 100 });
     });
