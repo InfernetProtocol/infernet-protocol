@@ -13,6 +13,12 @@
  *                   Anthony approves the rate, then 'confirmed'. The token
  *                   count is the provider's, so it is clamped to the job's
  *                   max_tokens, and outliers wait for an admin.
+ *   kind 'spent_on_compute'  the operator spent confirmed earnings on paid
+ *                   batch inference: a negative confirmed row (and a positive
+ *                   one when unused funds come back), so `available` below
+ *                   already nets it out. Written only by the SQL functions in
+ *                   20261102020000_paid_batch_inference.sql, which share the
+ *                   provider row lock with a payout_requests trigger.
  *   kind 'reservation'  a node reservation order the buyer prepaid: one row
  *                   per reservation (no job), the hours less the house fee.
  *                   Always 'pending_approval' until an admin confirms it.
@@ -219,6 +225,9 @@ export function computeJobCredits({ job, result, shares, config, source = "compl
     if (parts.length === 0) return [];
     const count = outputTokenCount(result, { maxTokens: job.max_tokens });
     const tokens = count.tokens;
+    // A prepaid batch item is settled by lib/data/batches.js (kind 'paid',
+    // confirmed, from the customer's charge): never a subsidy on top.
+    if (job.batch_item_id || job.billing === "prepaid_batch") return [];
     const offer = num(job.payment_offer, 0);
     const paid = offer > 0;
     if (!paid && job.reservation_id) return [];
@@ -343,7 +352,9 @@ export function summariseBalance(earnings = [], payouts = []) {
         requested_usd: open,
         paid_usd: paid,
         available_usd: roundUsd(Math.max(0, confirmed - open - paid)),
-        jobs_credited: earnings.filter((e) => e.status !== "void").length
+        // Earnings moved to (or back from) the compute balance are not jobs.
+        spent_on_compute_usd: roundUsd(-sum(earnings.filter((e) => e.kind === "spent_on_compute" && e.status === "confirmed"))),
+        jobs_credited: earnings.filter((e) => e.status !== "void" && e.kind !== "spent_on_compute").length
     };
 }
 
@@ -392,7 +403,8 @@ export function fmtUsdPrecise(n) {
 export const EARNING_KIND_LABELS = {
     paid: "paid job",
     subsidy: "house subsidy",
-    reservation: "reservation"
+    reservation: "reservation",
+    spent_on_compute: "spent on compute"
 };
 
 export const EARNING_STATUS_LABELS = {

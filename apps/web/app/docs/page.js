@@ -744,6 +744,12 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
                     </Link>.
                 </p>
                 <p>
+                    Many requests at once, paid per token from your node earnings or a prepaid balance? See{" "}
+                    <Link href="/docs/batch-inference" className="text-[var(--accent)] hover:underline">
+                        Paid batch inference
+                    </Link>.
+                </p>
+                <p>
                     Training or serving small temporal policies (CfC/LTC liquid networks, GRU baseline) for desktop
                     tasks? See{" "}
                     <Link href="/docs/liquid-agent" className="text-[var(--accent)] hover:underline">

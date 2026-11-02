@@ -60,7 +60,8 @@ export function formatBalance(b = {}) {
     return [
         `Earnings:   ${fmtUsd(b.pending_approval_usd)} pending approval, ${fmtUsd(b.pending_usd)} awaiting client payment, ${fmtUsd(b.confirmed_usd)} confirmed`,
         `Payouts:    ${fmtUsd(b.paid_usd)} paid, ${fmtUsd(b.requested_usd)} requested, ${fmtUsd(b.available_usd)} available to withdraw`,
-        `Jobs:       ${b.jobs_credited ?? 0} credited`
+        `Jobs:       ${b.jobs_credited ?? 0} credited`,
+        ...(Number(b.spent_on_compute_usd) > 0 ? [`Compute:    ${fmtUsd(b.spent_on_compute_usd)} spent on batch inference (infernet billing balance)`] : [])
     ].join('\n');
 }
 

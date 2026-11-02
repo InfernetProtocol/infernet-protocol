@@ -354,7 +354,10 @@ export async function createChatJob({
   pinned = false,
   // The reservation this job serves: tagged on the job so it earns no
   // subsidy (the operator is paid from the reservation order instead).
-  reservationId = null
+  reservationId = null,
+  // Paid batch inference (lib/data/batches.js): the item this job serves.
+  // Billed from the customer's prepaid hold, never a subsidy.
+  batchItemId = null
 }) {
   const supabase = getSupabaseServerClient();
   const now = new Date().toISOString();
@@ -463,7 +466,8 @@ export async function createChatJob({
     temperature,
     ...(requestedModel ? { requested_model: requestedModel } : {}),
     ...(nimAvailable ? { fallback: "nvidia-nim" } : {}),
-    ...(distributed ? { distributed: true } : {})
+    ...(distributed ? { distributed: true } : {}),
+    ...(batchItemId ? { billing: "prepaid_batch" } : {})
   };
 
   // Nothing can serve this request. Nothing ever picks up an unassigned
@@ -490,6 +494,7 @@ export async function createChatJob({
   }
 
   if (reservationId) insertRow.reservation_id = reservationId;
+  if (batchItemId) insertRow.batch_item_id = batchItemId;
   if (e2e && clientPubkey) insertRow.client_pubkey = clientPubkey;
   if (e2e && modelPubkey) insertRow.model_pubkey = modelPubkey;
 

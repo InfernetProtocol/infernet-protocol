@@ -58,7 +58,7 @@ console.log(`config: ${JSON.stringify(config)}`);
 let jobFilter = "status=eq.completed&provider_id=not.is.null";
 if (providerArg) jobFilter += `&provider_id=eq.${encodeURIComponent(providerArg)}`;
 const jobs = await all(
-    `jobs?${jobFilter}&select=id,provider_id,payment_offer,payment_coin,payment_status,model_name,completed_at,created_at,result&order=created_at.asc`
+    `jobs?${jobFilter}&select=id,provider_id,payment_offer,payment_coin,payment_status,model_name,completed_at,created_at,result,batch_item_id&order=created_at.asc`
 );
 const credited = new Set(
     (await all("provider_earnings?select=job_id")).map((r) => r.job_id)

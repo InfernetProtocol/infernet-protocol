@@ -6,6 +6,10 @@
  *   - self-serve reservation orders that were paid (paid_at in the window):
  *     GMV is fulfilled orders' total_usd less what was refunded
  *   - jobs whose client payment CoinPay confirmed (payment_offer > 0)
+ *   - prepaid batch inference CHARGES (settled items, settled_at in the
+ *     window), whatever funded them: prepaid top-up, wallet, or the buyer's
+ *     own node earnings. Top-ups are NOT GMV (money in, nothing sold yet).
+ *     Platform fee = charge less the provider's 'paid' credit.
  * Platform fee: what stays with the house. A node order keeps the setup fee
  *   plus the house fee on the hours (total less the operator's reservation
  *   credit); a Salad order keeps its whole total (Salad's own bill is not in
@@ -41,8 +45,9 @@ export function isInternalOrder(order, internal = {}) {
  * @param {Array} [p.subsidy]     subsidy credits earned in the window { amount_usd, status } (reported as excluded)
  * @param {object} p.config       resolveEarningsConfig() output (house_fee_pct fallback)
  * @param {object} [p.internal]   { emails: [], payers: [] }
+ * @param {Array} [p.batchCharges] settled batch items { cost_usd, provider_usd|null, email }
  */
-export function summariseRevenue({ orders = [], jobs = [], earnings = [], payouts = [], subsidy = [], config = {}, internal = {} } = {}) {
+export function summariseRevenue({ orders = [], jobs = [], earnings = [], payouts = [], subsidy = [], config = {}, internal = {}, batchCharges = [] } = {}) {
     const sum = (rows, f) => roundUsd(rows.reduce((a, r) => a + (Number(f(r)) || 0), 0));
     const feePct = Number(config.house_fee_pct) || 0;
     const live = earnings.filter((e) => e.status !== "void");
@@ -77,8 +82,17 @@ export function summariseRevenue({ orders = [], jobs = [], earnings = [], payout
     const saladFee = sum(salad, (o) => o.total_usd);
     const jobFee = sum(paidJobs, (j) => (jobFees.has(j.id) ? jobFees.get(j.id) : Number(j.payment_offer) * (feePct / 100)));
 
+    const internalEmails = (internal.emails ?? []).map(lower);
+    const isInternalBatch = (c) => Boolean(lower(c?.email) && internalEmails.includes(lower(c.email)));
+    const extBatch = batchCharges.filter((c) => !isInternalBatch(c));
+    const intBatch = batchCharges.filter(isInternalBatch);
+    const batchGmv = sum(extBatch, (c) => c.cost_usd);
+    const batchProvider = sum(extBatch, (c) => (c.provider_usd === null || c.provider_usd === undefined
+        ? Number(c.cost_usd) * (1 - feePct / 100) : c.provider_usd));
+    const batchFee = roundUsd(batchGmv - batchProvider);
+
     return {
-        gmv_usd: roundUsd(orderGmv + jobGmv),
+        gmv_usd: roundUsd(orderGmv + jobGmv + batchGmv),
         orders: {
             paid_count: external.length,
             paid_usd: sum(external, (o) => o.total_usd),
@@ -89,7 +103,15 @@ export function summariseRevenue({ orders = [], jobs = [], earnings = [], payout
             operator_share_usd: sum(node, nodeOperatorShare)
         },
         jobs: { paid_count: paidJobs.length, gmv_usd: jobGmv },
-        platform_fee_usd: roundUsd(nodeFee + saladFee + jobFee),
+        platform_fee_usd: roundUsd(nodeFee + saladFee + jobFee + batchFee),
+        batches: {
+            charged_items: extBatch.length,
+            gmv_usd: batchGmv,
+            provider_share_usd: batchProvider,
+            platform_fee_usd: batchFee,
+            internal_items: intBatch.length,
+            internal_usd: sum(intBatch, (c) => c.cost_usd)
+        },
         platform_fee: { node_orders_usd: nodeFee, salad_orders_usd: saladFee, paid_jobs_usd: jobFee },
         refunds: {
             due_count: due.length,

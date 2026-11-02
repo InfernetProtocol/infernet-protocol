@@ -73,6 +73,31 @@ export async function getRevenue(params = {}) {
         if (error) throw withStatus(error.message, 500);
         earnings.push(...(data ?? []));
     }
+    // Prepaid batch inference: charges settled in the window (not top-ups).
+    const batchItems = await selectAll(() => db.from("inference_batch_items")
+        .select("id, batch_id, job_id, cost_micro, settled_at")
+        .gt("cost_micro", 0).gte("settled_at", from).lt("settled_at", to).order("settled_at"))
+        .catch((e) => { if (/inference_batch_items/.test(e.message ?? "")) return []; throw e; });
+    const batchEmail = new Map();
+    const providerByJob = new Map();
+    const batchIds = [...new Set(batchItems.map((i) => i.batch_id))];
+    for (let i = 0; i < batchIds.length; i += 200) {
+        const { data, error } = await db.from("inference_batches").select("id, user_email").in("id", batchIds.slice(i, i + 200));
+        if (error) throw withStatus(error.message, 500);
+        for (const b of data ?? []) batchEmail.set(b.id, b.user_email);
+    }
+    const batchJobIds = batchItems.map((i) => i.job_id).filter(Boolean);
+    for (let i = 0; i < batchJobIds.length; i += 200) {
+        const { data, error } = await db.from("provider_earnings").select("job_id, amount_usd, status")
+            .eq("kind", "paid").in("job_id", batchJobIds.slice(i, i + 200));
+        if (error) throw withStatus(error.message, 500);
+        for (const e of data ?? []) if (e.status !== "void") providerByJob.set(e.job_id, (providerByJob.get(e.job_id) ?? 0) + Number(e.amount_usd));
+    }
+    const batchCharges = batchItems.map((i) => ({
+        cost_usd: Number(i.cost_micro) / 1e6,
+        provider_usd: providerByJob.has(i.job_id) ? providerByJob.get(i.job_id) : null,
+        email: batchEmail.get(i.batch_id) ?? null
+    }));
     return {
         from,
         to,
@@ -84,7 +109,8 @@ export async function getRevenue(params = {}) {
             payouts,
             subsidy,
             config,
-            internal: internalBuyers()
+            internal: internalBuyers(),
+            batchCharges
         })
     };
 }
