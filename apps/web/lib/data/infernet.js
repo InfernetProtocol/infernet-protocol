@@ -2,6 +2,7 @@ import "server-only";
 import { getEnv } from "@/lib/env";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { formatGeo } from "@/lib/geo";
+import { summariseNetworkMoney, fmtUsdPrecise } from "@/lib/earnings/core";
 
 function withLimit(query, limit) {
   const pageSize = getEnv().pageSize;
@@ -500,6 +501,60 @@ export async function getNodeActivity({ id, role }) {
   };
 }
 
+/** Every row of a table/select, paged past PostgREST's 1,000-row cap. */
+async function selectAll(supabase, table, columns, pageSize = 1000) {
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    rows.push(...(data ?? []));
+    if (!data || data.length < pageSize) return rows;
+  }
+}
+
+/**
+ * Money earned and spent across every node (provider_earnings ledger +
+ * sent payouts). Null when the ledger can't be read, so /status still renders.
+ */
+export async function getNetworkMoney() {
+  try {
+    const supabase = getSupabaseServerClient();
+    const [earnings, payouts] = await Promise.all([
+      selectAll(supabase, "provider_earnings", "id, provider_id, kind, status, amount_usd"),
+      selectAll(supabase, "payout_requests", "id, status, amount_usd")
+    ]);
+    return summariseNetworkMoney(earnings, payouts);
+  } catch (err) {
+    console.warn(`network money stats failed: ${err?.message ?? err}`);
+    return null;
+  }
+}
+
+function moneyCards(money) {
+  if (!money) {
+    return [
+      { label: "Earned by nodes", value: "—", note: "ledger unavailable" },
+      { label: "Spent by nodes", value: "—", note: "ledger unavailable" }
+    ];
+  }
+  return [
+    {
+      label: "Earned by nodes",
+      value: fmtUsdPrecise(money.earned_usd),
+      note: `${fmtUsdPrecise(money.earned_confirmed_usd)} confirmed · ${fmtUsdPrecise(money.earned_pending_usd)} pending · ${money.earning_nodes} node${money.earning_nodes === 1 ? "" : "s"}`
+    },
+    {
+      label: "Spent by nodes",
+      value: fmtUsdPrecise(money.spent_usd),
+      note: `${fmtUsdPrecise(money.spent_on_compute_usd)} on compute · ${fmtUsdPrecise(money.paid_out_usd)} paid out`
+    }
+  ];
+}
+
 export async function getDashboardOverview({ pubkey } = {}) {
   const supabase = getSupabaseServerClient();
   const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
@@ -508,9 +563,11 @@ export async function getDashboardOverview({ pubkey } = {}) {
   // distinct models advertised by currently online providers.
   let providersQuery = supabase.from("providers").select("status, last_seen, specs");
   if (pubkey) providersQuery = providersQuery.eq("public_key", pubkey);
-  const [{ data: providersAll, error: pErr }, jobs] = await Promise.all([
+  const [{ data: providersAll, error: pErr }, jobs, money] = await Promise.all([
     providersQuery,
-    getJobs({ limit: 100, pubkey })
+    getJobs({ limit: 100, pubkey }),
+    // Network-wide totals belong on the public page only, not a per-node view.
+    pubkey ? Promise.resolve(undefined) : getNetworkMoney()
   ]);
   if (pErr) throw new Error(pErr.message);
   const providers = providersAll ?? [];
@@ -553,7 +610,8 @@ export async function getDashboardOverview({ pubkey } = {}) {
         label: "Last heartbeat",
         value: onlineProviders[0]?.last_seen ? relativeAgo(onlineProviders[0].last_seen) : "—",
         note: onlineProviders[0]?.last_seen ?? "no heartbeats yet"
-      }
+      },
+      ...(money === undefined ? [] : moneyCards(money))
     ]
   };
 }

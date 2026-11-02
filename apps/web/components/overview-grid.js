@@ -1,6 +1,6 @@
 export default function OverviewGrid({ cards }) {
   return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <section className={`grid gap-4 md:grid-cols-2 ${cards.length % 3 === 0 && cards.length % 4 !== 0 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
       {cards.map((card) => (
         <article
           key={card.label}
