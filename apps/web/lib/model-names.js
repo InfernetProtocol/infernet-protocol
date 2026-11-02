@@ -43,7 +43,15 @@ for (const m of CATALOG) {
 export function modelNameVariants(name) {
     if (typeof name !== "string" || !name.trim()) return [];
     const group = GROUPS.get(key(name));
-    return [...new Set([key(name), ...(group ?? []).map(key)])];
+    const names = [key(name), ...(group ?? []).map(key)];
+    // Ollama lists an untagged pull as "<name>:latest" (house models such as
+    // "hf.co/org/repo" advertise "hf.co/org/repo:latest"), so the two match.
+    for (const n of [...names]) {
+        const last = n.split("/").pop() ?? "";
+        if (n.endsWith(":latest")) names.push(n.slice(0, -":latest".length));
+        else if (!last.includes(":") && !n.startsWith("hf:")) names.push(`${n}:latest`);
+    }
+    return [...new Set(names)];
 }
 
 /**

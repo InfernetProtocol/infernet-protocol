@@ -73,6 +73,14 @@
 #   INFERNET_AUTOSTART=0          set to 0 to install only, skip setup+start
 #   INFERNET_NO_AUTOUPDATE=1       skip the hourly per-user CLI update check
 #
+# House models (ON by default): provider nodes pull and serve the models
+# listed at https://infernetprotocol.com/house-models.json that fit the box
+# (RAM, and always leaving 10% of the disk free, 10-50 GB). Opt out:
+#
+#   INFERNET_NO_HOUSE_MODELS=1      or  --no-house-models
+#   INFERNET_NO_UNCENSORED_MODELS=1 or  --no-uncensored-models  (uncensored only)
+#   INFERNET_HOUSE_MODELS_MAX_GB=N  cap the disk house models may use
+#
 # Zero-touch full bootstrap (no SSH afterwards):
 #
 #   curl -fsSL https://infernetprotocol.com/install.sh \\
@@ -149,6 +157,9 @@ INFERNET_NODE_NAME="${INFERNET_NODE_NAME:-}"
 INFERNET_PUBLIC_PORT="${INFERNET_PUBLIC_PORT:-46337}"
 INFERNET_BIND_PORT="${INFERNET_BIND_PORT:-}"
 INFERNET_BEARER="${INFERNET_BEARER:-}"
+INFERNET_NO_HOUSE_MODELS="${INFERNET_NO_HOUSE_MODELS:-}"
+INFERNET_NO_UNCENSORED_MODELS="${INFERNET_NO_UNCENSORED_MODELS:-}"
+INFERNET_HOUSE_MODELS_MAX_GB="${INFERNET_HOUSE_MODELS_MAX_GB:-}"
 SOURCE_DIR="$INFERNET_HOME/source"
 WRAPPER="$INFERNET_BIN/infernet"
 
@@ -1361,14 +1372,27 @@ auto_bootstrap_native() {
 
     info "running infernet setup --yes (this takes a few minutes the first time)"
     export INFERNET_NONINTERACTIVE=1
+    # House-model opt-outs ride along as setup flags; setup saves them to config.
+    _house_flags=""
+    [ "$INFERNET_NO_HOUSE_MODELS" = "1" ] && _house_flags="$_house_flags --no-house-models"
+    [ "$INFERNET_NO_UNCENSORED_MODELS" = "1" ] && _house_flags="$_house_flags --no-uncensored-models"
+    [ -n "$INFERNET_HOUSE_MODELS_MAX_GB" ] && _house_flags="$_house_flags --house-models-max-gb $INFERNET_HOUSE_MODELS_MAX_GB"
+    if [ "$INFERNET_NO_HOUSE_MODELS" = "1" ]; then
+        info "house models: off (INFERNET_NO_HOUSE_MODELS=1)"
+    else
+        info "house models: ON — this node pulls the models listed at https://infernetprotocol.com/house-models.json that fit it"
+        info "  opt out: re-run with INFERNET_NO_HOUSE_MODELS=1, or later: infernet house-models off"
+    fi
     # On --force we deliberately DON'T re-pull an Ollama starter model — the
     # operator wanted a clean slate to push vLLM models from the UI. Otherwise
     # setup pulls $INFERNET_MODEL as before.
     if [ -n "$INFERNET_FORCE" ]; then
-        "$INFERNET_CMD" setup --yes --skip-pull --port "$INFERNET_PUBLIC_PORT" \
+        # shellcheck disable=SC2086
+        "$INFERNET_CMD" setup --yes --skip-pull --port "$INFERNET_PUBLIC_PORT" $_house_flags \
             || warn "infernet setup exited with errors — re-run 'infernet setup' to retry"
     else
-        "$INFERNET_CMD" setup --yes --model "$INFERNET_MODEL" --port "$INFERNET_PUBLIC_PORT" \
+        # shellcheck disable=SC2086
+        "$INFERNET_CMD" setup --yes --model "$INFERNET_MODEL" --port "$INFERNET_PUBLIC_PORT" $_house_flags \
             || warn "infernet setup exited with errors — re-run 'infernet setup' to retry"
     fi
 }
@@ -1411,6 +1435,8 @@ main() {
     for _arg in "$@"; do
         case "$_arg" in
             --force) INFERNET_FORCE=1 ;;
+            --no-house-models) INFERNET_NO_HOUSE_MODELS=1 ;;
+            --no-uncensored-models) INFERNET_NO_UNCENSORED_MODELS=1 ;;
             *) : ;;
         esac
     done

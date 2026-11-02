@@ -744,6 +744,13 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
                     </Link>.
                 </p>
                 <p>
+                    Running a node? It pulls and serves Infernet&apos;s house models by default (opt out with{" "}
+                    <code>infernet house-models off</code>). See{" "}
+                    <Link href="/docs/house-models" className="text-[var(--accent)] hover:underline">
+                        House models
+                    </Link>.
+                </p>
+                <p>
                     Many requests at once, paid per token from your node earnings or a prepaid balance? See{" "}
                     <Link href="/docs/batch-inference" className="text-[var(--accent)] hover:underline">
                         Paid batch inference

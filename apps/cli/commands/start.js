@@ -65,6 +65,7 @@ import { PROBE_INTERVAL_MS, runProbeRound } from '../lib/aggregator.js';
 import { nodeTokenLogin } from './login.js';
 import { CURRENT_VERSION, fetchLatestVersion, isNewerVersion, readInstalledVersion } from '../lib/version.js';
 import { readInferenceState, readInferenceStateSync, isPidAlive } from '../lib/inference/state.js';
+import { resolveSettings as resolveHouseSettings, syncHouseModels, readState as readHouseState, FIRST_SYNC_DELAY_MS as HOUSE_FIRST_SYNC_DELAY_MS } from '../lib/house-models.js';
 
 function readInferenceStateSyncSafe() {
     try { return readInferenceStateSync(); } catch { return {}; }
@@ -84,7 +85,15 @@ Flags:
   --no-p2p                   Don't bind the P2P TCP listener
   --no-advertise             Don't send address/port in heartbeats
   --once                     Run one heartbeat + one poll and exit (debug)
+  --no-house-models          Don't pull Infernet house models for this run
+                             (persist with \`infernet house-models off\`)
+  --no-uncensored-models     Skip uncensored house models only
+  --house-models-max-gb <n>  Cap the disk house models may use
   --help                     Show this help
+
+House models: provider nodes pull the models listed at
+https://infernetprotocol.com/house-models.json (on start, then every 6 h) when
+they fit. See \`infernet house-models --help\`.
 
 Daemon logs to \`~/.config/infernet/daemon.log\`, exposes an IPC socket for
 live queries (see \`infernet status\`, \`infernet stats\`, \`infernet logs\`).
@@ -162,6 +171,10 @@ function passthroughArgs(args) {
     if (args.has('no-p2p')) passthrough.push('--no-p2p');
     if (args.has('no-advertise')) passthrough.push('--no-advertise');
     if (args.has('once')) passthrough.push('--once');
+    if (args.has('no-house-models')) passthrough.push('--no-house-models');
+    if (args.has('no-uncensored-models')) passthrough.push('--no-uncensored-models');
+    const houseCap = args.get('house-models-max-gb');
+    if (houseCap) passthrough.push('--house-models-max-gb', houseCap);
     return passthrough;
 }
 
@@ -287,6 +300,9 @@ async function runDaemon(args, ctx) {
     let heartbeatTimer = null;
     let pollTimer = null;
     let shuttingDown = false;
+    // House models (lib/house-models.js): set up after the first heartbeat.
+    let runHouseSync = null;
+    let houseSyncRunning = false;
     let ipcServer = null;
     let p2pServer = null;
     let healthServer = null;
@@ -1296,6 +1312,7 @@ async function runDaemon(args, ctx) {
             },
             controlPlaneUrl: config.controlPlane?.url ?? null,
             intervals: { heartbeatMs, pollMs },
+            houseModels: node.role === 'provider' ? { syncing: houseSyncRunning, ...readHouseState() } : null,
             stats: {
                 heartbeatsOk: stats.heartbeatsOk,
                 heartbeatsFailed: stats.heartbeatsFailed,
@@ -1360,6 +1377,10 @@ async function runDaemon(args, ctx) {
             case 'ping':    return { ok: true, data: { pong: Date.now() } };
             case 'status':
             case 'stats':   return { ok: true, data: snapshot() };
+            case 'house-models-sync':
+                if (!runHouseSync) return { ok: false, error: 'house models run on provider nodes only' };
+                setImmediate(() => { runHouseSync('ipc').catch(() => {}); });
+                return { ok: true, data: { started: !houseSyncRunning } };
             case 'shutdown':
                 setImmediate(() => shutdown('ipc-shutdown'));
                 return { ok: true, data: { shuttingDown: true } };
@@ -1628,6 +1649,40 @@ async function runDaemon(args, ctx) {
             );
         }, trainingPollMs);
         if (typeof trainingTimer.unref === 'function') trainingTimer.unref();
+    }
+
+    // House models: Profullstack-published models every provider pulls and
+    // serves by default. Settings are re-read from config.json on every pass so
+    // `infernet house-models off` takes effect without a restart.
+    if (node.role === 'provider') {
+        const startupSettings = resolveHouseSettings({ config, args });
+        const label = (s) => `${s.enabled ? 'on' : 'off'}; uncensored ${s.uncensored ? 'on' : 'off'}${s.maxDiskGb != null ? `; disk cap ${s.maxDiskGb} GB` : ''}`;
+        process.stdout.write(`[house-models] ${label(startupSettings)} — manifest ${startupSettings.manifestUrl}, every ${Math.round(startupSettings.intervalMs / 3_600_000 * 10) / 10}h (opt out: infernet house-models off)\n`);
+        runHouseSync = async (why) => {
+            if (houseSyncRunning || shuttingDown) return null;
+            houseSyncRunning = true;
+            try {
+                const fresh = await loadConfig().catch(() => null);
+                const settings = resolveHouseSettings({ config: fresh ?? config, args });
+                const summary = await syncHouseModels({
+                    settings,
+                    isBusy: () => stats.activeJobIds.size > 0 || shuttingDown,
+                    log: (m) => process.stdout.write(`[${new Date().toISOString()}] [house-models] ${m}\n`)
+                });
+                process.stdout.write(`[${new Date().toISOString()}] [house-models] sync (${why}): pulled ${summary.pulled.length}, removed ${summary.removed.length}, skipped ${summary.skipped.length}, errors ${summary.errors.length}\n`);
+                if (summary.pulled.length > 0 || summary.removed.length > 0) {
+                    invalidateSpecsCache();
+                    heartbeat().catch(() => {});
+                }
+                return summary;
+            } finally {
+                houseSyncRunning = false;
+            }
+        };
+        const houseFirst = setTimeout(() => { runHouseSync('startup').catch(() => {}); }, HOUSE_FIRST_SYNC_DELAY_MS);
+        if (typeof houseFirst.unref === 'function') houseFirst.unref();
+        const houseTimer = setInterval(() => { runHouseSync('scheduled').catch(() => {}); }, startupSettings.intervalMs);
+        if (typeof houseTimer.unref === 'function') houseTimer.unref();
     }
 
     // Self-update: check the GitHub release feed every 60 seconds. If a newer version is

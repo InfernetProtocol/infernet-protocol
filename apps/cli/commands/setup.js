@@ -49,6 +49,10 @@ Flags:
   --skip-pull            Skip the model-pull step.
   --no-abliterated       Don't default to the abliterated (uncensored) model
                          when it fits; pick the largest stock Qwen instead.
+  --no-house-models      Don't pull Infernet house models (saved to config).
+  --no-uncensored-models Skip uncensored house models only (saved to config).
+  --house-models-max-gb <n>
+                         Cap the disk house models may use (saved to config).
   --backend <kind>       Pin engine backend (vllm | ollama | mojo | stub). Default: auto (prefers vLLM, falls back to Ollama).
   --host <url>           Override Ollama host. Default: http://localhost:11434.
   --port <n>             P2P port to open in the firewall. Default: ${DEFAULT_P2P_PORT}.
@@ -853,6 +857,20 @@ export default async function setup(args) {
         }
     }
 
+    // ---- House models: persist any opt-out before the daemon (re)starts ----
+    if (isProvider) {
+        const patch = {};
+        if (args.has("no-house-models")) patch.enabled = false;
+        if (args.has("no-uncensored-models")) patch.uncensored = false;
+        const capArg = Number(args.get("house-models-max-gb"));
+        if (args.get("house-models-max-gb") !== undefined && Number.isFinite(capArg)) patch.maxDiskGb = capArg;
+        if (Object.keys(patch).length > 0) {
+            const cfgNow = (await loadConfig()) ?? {};
+            cfgNow.houseModels = { ...(cfgNow.houseModels ?? {}), ...patch };
+            await saveConfig(cfgNow);
+        }
+    }
+
     // ---- Daemon (always restart so it picks up current CLI code; providers only) ----
     if (!skipDaemon && isProvider && configAfterId) {
         n += 1;
@@ -963,6 +981,20 @@ export default async function setup(args) {
     if (alreadySignedIn && !didLogin && isProvider && configAfterId?.node?.publicKey) {
         const code = await runSubcommand("pubkey", ["link"]);
         if (code !== 0) warn("  pubkey link did not complete — re-run `infernet pubkey link` manually");
+    }
+
+    if (isProvider) {
+        const { resolveSettings } = await import("../lib/house-models.js");
+        const hs = resolveSettings({ config: (await loadConfig()) ?? {} });
+        process.stdout.write("\n");
+        if (hs.enabled) {
+            ok(`house models: ON — this node will pull the models listed at ${hs.manifestUrl}`);
+            process.stdout.write(`  that fit it (RAM, and always leaving 10% of the disk free, 10-50 GB${hs.maxDiskGb != null ? `, capped at ${hs.maxDiskGb} GB` : ""}),\n`);
+            process.stdout.write(`  in the background, and serve them on Infernet. Uncensored house models: ${hs.uncensored ? "on" : "off"}.\n`);
+            process.stdout.write("  Opt out: infernet house-models off   (uncensored only: infernet house-models uncensored off)\n");
+        } else {
+            ok("house models: off (turn on with `infernet house-models on`)");
+        }
     }
 
     process.stdout.write("\n");

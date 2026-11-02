@@ -331,6 +331,16 @@ A node restarts itself; you should never have to notice it went down.
 - Self-update drains running jobs, then exits with code **75**; the supervisor or unit starts the new version. Exit 0 means a deliberate stop and stays stopped.
 - If a node linked to your account is silent for 24 hours you get one email with the restart commands.
 
+### House models
+
+Every provider node pulls and serves Infernet's **house models** by default: the models listed in [`apps/web/public/house-models.json`](apps/web/public/house-models.json), served at <https://infernetprotocol.com/house-models.json>. Today that is Profullstack's `hf.co/profullstack/saas-business-strategist-agent-GGUF` plus the uncensored `huihui_ai/qwen3.5-abliterated:4b` and `:9b`.
+
+- On start and every 6 hours the daemon fetches the list (HTTPS, infernetprotocol.com / c0mpute.com only) and pulls each model that fits, one at a time and never during a job: RAM >= `min_ram_gb`, at least 10% of the disk left free afterwards (10-50 GB), and under the operator's disk cap if set.
+- Each pull is checked against the listed digest and size; a mismatch is deleted. Models that leave the list are removed. A model you pulled yourself is never removed; only models the daemon pulled (`~/.config/infernet/house-models-state.json`) are.
+- `infernet status` and `infernet house-models` show what is pulled and the disk it uses; `infernet house-models list` shows the list and what fits here.
+- **Opt out:** `infernet house-models off` (or `--no-house-models` on install/setup/start, or `INFERNET_HOUSE_MODELS=0`). Uncensored ones only: `infernet house-models uncensored off` (`--no-uncensored-models`, `INFERNET_UNCENSORED_MODELS=0`). Disk cap: `infernet house-models cap 20` (`INFERNET_HOUSE_MODELS_MAX_GB`).
+- **Add a model:** a PR adding `{name, source, digest, size_bytes, min_ram_gb, min_disk_gb, uncensored, license, description, added}` to that file. `digest` is the sha256 of the registry manifest (what `/api/tags` reports after a pull); `size_bytes` is all layers plus config. Details: [/docs/house-models](https://infernetprotocol.com/docs/house-models).
+
 ### Aggregators
 
 An aggregator verifies providers independently: every minute it dials each provider's advertised P2P address, checks it answers as the node it claims to be, and reports reachability and round-trip time (signed `POST /api/v1/node/aggregator/probes`). /status and each `/nodes/<id>` page show how many aggregators reached a provider in the last hour. Anyone can run one, on any small box:

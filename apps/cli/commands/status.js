@@ -8,6 +8,7 @@
 import { isDaemonAlive, sendToDaemon } from '../lib/ipc.js';
 import { formatEndpoint } from '../lib/network.js';
 import { formatBalance } from './payout.js';
+import { resolveSettings as resolveHouseSettings, readState as readHouseState, formatStatus as formatHouseStatus, ollamaTags } from '../lib/house-models.js';
 
 const HELP = `infernet status — show this node's state
 
@@ -59,7 +60,8 @@ export default async function status(args, ctx) {
     }
 
     if (args.has('json')) {
-        process.stdout.write(JSON.stringify({ row, daemon }, null, 2) + '\n');
+        const houseModels = node.role === 'provider' ? { settings: resolveHouseSettings({ config }), state: readHouseState() } : null;
+        process.stdout.write(JSON.stringify({ row, daemon, houseModels }, null, 2) + '\n');
         return 0;
     }
 
@@ -95,6 +97,12 @@ export default async function status(args, ctx) {
         const s = daemon.stats ?? {};
         process.stdout.write(`  heartbeats: ok=${s.heartbeatsOk} failed=${s.heartbeatsFailed}\n`);
         process.stdout.write(`  jobs:       completed=${s.jobsCompleted} active=${s.activeJobs}\n`);
+    }
+
+    if (node.role === 'provider') {
+        const houseSettings = resolveHouseSettings({ config });
+        const installed = await ollamaTags().catch(() => null);
+        process.stdout.write('\n' + formatHouseStatus({ settings: houseSettings, state: readHouseState(), installed }) + '\n\n');
     }
 
     if (node.role === 'provider') {
