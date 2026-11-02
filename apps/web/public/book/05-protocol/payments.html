@@ -322,8 +322,8 @@ Add Funds</strong>.</p>
 <p>Where rates are set by the network based on model tier. Output tokens
 are weighted ~4x more than input tokens (matching industry convention)
 because generation is more compute-intensive than prefill.</p>
-<p>Operators see the full payment minus the platform fee (currently
-15%).</p>
+<p>Operators see the full payment minus the house fee (currently
+2%).</p>
 <h2 id="multi-chain-support">Multi-Chain Support</h2>
 <p>Infernet Protocol supports multiple blockchains for payment
 settlement. The operator sets their preferred chain in the config, and
@@ -446,8 +446,10 @@ class="sourceCode json"><code class="sourceCode json"><span id="cb7-1"><a href="
 <span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tx_hash&quot;</span><span class="fu">:</span> <span class="st">&quot;0xabc123...&quot;</span></span>
 <span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
 <h2 id="platform-fee">Platform Fee</h2>
-<p>The current house fee is <strong>2%</strong> of each job’s
-payment. This funds:</p>
+<p>The current house fee is <strong>2%</strong> of each job’s payment.
+Infernet and the c0mpute market are separate products: c0mpute’s 5%
+market fee applies only to jobs bought through c0mpute.com/market and is
+never added to an Infernet job. The house fee funds:</p>
 <ul>
 <li>Control plane infrastructure</li>
 <li>Protocol development</li>
