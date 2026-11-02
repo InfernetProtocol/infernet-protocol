@@ -357,7 +357,10 @@ export async function createChatJob({
   reservationId = null,
   // Paid batch inference (lib/data/batches.js): the item this job serves.
   // Billed from the customer's prepaid hold, never a subsidy.
-  batchItemId = null
+  batchItemId = null,
+  // The caller asked for peer nodes only (p2p_only): never the hosted
+  // fallback, which is billed. No node free answers 503 like any other miss.
+  noFallback = false
 }) {
   const supabase = getSupabaseServerClient();
   const now = new Date().toISOString();
@@ -442,7 +445,7 @@ export async function createChatJob({
     }
   }
 
-  const nimAvailable = !p2pProvider && !providerId && !e2e && !pinned
+  const nimAvailable = !p2pProvider && !providerId && !e2e && !pinned && !noFallback
     && isNimConfigured() && (await hostedFallbackUnderDailyCap());
   const source = p2pProvider ? "p2p" : nimAvailable ? "nim" : "none";
   if (nimAvailable) {
