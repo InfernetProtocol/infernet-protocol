@@ -7,6 +7,7 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { getConversationKey, encrypt, decrypt } from "@/lib/nip44";
 import { CATALOG } from "@/lib/model-catalog";
+import { findDocumentUrls } from "@/lib/doc-urls";
 
 // served_models carries raw ids (ollama tags like `dolphin3:8b`, or the full
 // `hf:org/repo` pull name for vLLM). Map those to the catalog's friendly names
@@ -505,8 +506,36 @@ export default function ChatView({ initialModels = [] }) {
       }
     }
 
+    // A linked document (a PDF, a page) is read before answering, through readm3.
+    // Only the URL is sent to the server; the text comes back as this turn's context.
+    const docContexts = [];
+    const docUrls = findDocumentUrls(text);
+    for (const docUrl of docUrls) {
+      let host = docUrl;
+      try { host = new URL(docUrl).host; } catch { /* keep the URL */ }
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: `Reading ${host}…` })));
+      try {
+        const dr = await fetch("/api/chat/read", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: docUrl })
+        });
+        const dd = await dr.json().catch(() => null);
+        if (dr.ok && dd?.context) {
+          docContexts.push(dd.context);
+          const doc = { url: dd.finalUrl ?? docUrl, title: dd.title ?? host, kind: dd.kind, pages: dd.pages, chars: dd.chars };
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, documents: [...(m.documents ?? []), doc] })));
+        } else {
+          const note = `Could not read ${host}: ${dd?.error ?? "the reader failed"}`;
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, webNote: m.webNote ? `${m.webNote} ${note}` : note })));
+        }
+      } catch {
+        setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, webNote: `Could not read ${host}.` })));
+      }
+    }
+
     const history = [...messages, nextUser].map((m) => ({ role: m.role, content: m.content }));
-    // Web results and the selected OpenProfile persona apply to this turn only.
+    // Web results, linked documents and the selected OpenProfile persona apply to this turn only.
     const turnContext = [];
     if (voiceMode && voicePersona) {
       turnContext.push({
@@ -515,6 +544,7 @@ export default function ChatView({ initialModels = [] }) {
       });
     }
     if (webContext) turnContext.push({ role: "system", content: webContext });
+    for (const docContext of docContexts) turnContext.push({ role: "system", content: docContext });
     const outgoingMessages = [
       ...history.slice(0, -1),
       ...turnContext,
@@ -1392,7 +1422,7 @@ function Readm3Button({ text }) {
 }
 
 function Bubble({ message }) {
-  const { role, content, provider, pending, failed, status, sources, webNote, finishReason } = message;
+  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason } = message;
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -1420,6 +1450,19 @@ function Bubble({ message }) {
         ) : null}
         {failed ? <span className="ml-2 text-xs text-[var(--warn)]">failed</span> : null}
         {!isUser && webNote ? <p className="mt-2 text-xs text-[var(--warn)]">{webNote}</p> : null}
+        {!isUser && documents?.length ? (
+          <ul className="mt-3 space-y-1 border-t border-white/10 pt-2 text-xs text-[var(--muted)]">
+            {documents.map((d) => (
+              <li key={d.url} className="truncate">
+                Read{" "}
+                <a href={d.url} target="_blank" rel="noopener noreferrer nofollow" className="text-[var(--accent)] hover:underline">
+                  {d.title}
+                </a>
+                {d.kind === "pdf" && d.pages ? ` · PDF, ${d.pages} pages` : d.kind ? ` · ${d.kind}` : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {!isUser && sources?.length ? (
           <ol className="mt-3 space-y-1 border-t border-white/10 pt-2 text-xs text-[var(--muted)]">
             {sources.map((s) => (
