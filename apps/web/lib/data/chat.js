@@ -5,6 +5,7 @@ import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 import { matchServedModel } from "@/lib/model-names";
 import { getModelDenylist } from "@/lib/data/blocklists";
 import { deniedModel } from "@/lib/moderation/blocklists";
+import { smartPick, isOverloaded, countInflight } from "@/lib/routing/smart-pick";
 
 /**
  * Pick a P2P provider to serve a chat job.
@@ -57,15 +58,41 @@ export async function pickChatProvider({ modelName, minTrustTier, requireE2E = f
         .eq("status", "available")
         .gte("last_seen", twoMinAgo);
       if (fallback.error) throw fallback.error;
-      return finishPick(fallback.data ?? [], { modelName, minTrustTier, requireE2E });
+      return finishPick(fallback.data ?? [], { modelName, minTrustTier, requireE2E }, await inflightByProvider(supabase, fallback.data ?? []));
     }
     throw error;
   }
 
-  return finishPick(data ?? [], { modelName, minTrustTier, requireE2E });
+  return finishPick(data ?? [], { modelName, minTrustTier, requireE2E }, await inflightByProvider(supabase, data ?? []));
 }
 
-function finishPick(rows, { modelName, minTrustTier, requireE2E = false }) {
+/**
+ * Live assigned/running chat jobs per provider. Heartbeats report
+ * active_jobs every minute or so; a burst of requests in between would all
+ * land on the same "idle" node without this. Jobs older than 15 minutes
+ * are ignored (the maintenance cron fails stuck ones). Never throws:
+ * routing falls back to heartbeat load alone.
+ */
+async function inflightByProvider(supabase, rows) {
+  const ids = rows.map((r) => r?.id).filter(Boolean);
+  if (ids.length === 0) return {};
+  try {
+    const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("jobs")
+      .select("provider_id")
+      .in("status", ["assigned", "running"])
+      .in("provider_id", ids)
+      .gte("created_at", since)
+      .limit(5000);
+    if (error) return {};
+    return countInflight(data);
+  } catch {
+    return {};
+  }
+}
+
+function finishPick(rows, { modelName, minTrustTier, requireE2E = false }, inflight = {}) {
   let candidates = rows;
 
   if (requireE2E) {
@@ -102,10 +129,13 @@ function finishPick(rows, { modelName, minTrustTier, requireE2E = false }) {
   // Hard filter: drop saturated nodes. A node with active_jobs at or
   // above its concurrency cap shouldn't get more work — it's currently
   // unable to serve. Default cap = 4 if the node didn't advertise one.
-  candidates = candidates.filter(notSaturated);
+  // Live in-flight jobs count toward the cap too (isOverloaded).
+  candidates = candidates.filter((p) => notSaturated(p) && !isOverloaded(p, inflight));
 
   if (candidates.length === 0) return null;
-  return reputationWeightedPick(candidates);
+  // Smart routing: the most capable provider that isn't overloaded
+  // (lib/routing/smart-pick.js), least utilized first among equals.
+  return smartPick(candidates, inflight);
 }
 
 const DEFAULT_CONCURRENCY_CAP = 4;
