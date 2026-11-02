@@ -21,10 +21,11 @@ import {
     setupRuntime,
     verifyBundle
 } from "@infernetprotocol/liquid-agent";
+import { cmdTextRuntime, cmdTextTrain, isTextJob, TEXT_HELP } from "./model-text.js";
 
 export const TEMPORAL_SUBCOMMANDS = new Set(["train", "evaluate", "eval", "predict", "serve", "capabilities", "runtime", "synth"]);
 
-export const TEMPORAL_HELP = `
+export const TEMPORAL_HELP = `${TEXT_HELP}
 Temporal policies (workloads ${WORKLOADS.TRAIN}, ${WORKLOADS.INFER}):
   infernet model runtime [status]        Is the infernet-liquid runtime installed?
   infernet model runtime setup [--accelerator cpu|cuda] [--yes]
@@ -285,10 +286,16 @@ async function cmdSynth(args) {
 export async function runTemporal(sub, args) {
     switch (sub) {
         case "runtime":
-            return cmdRuntime(args);
+            return args.has("peft") ? cmdTextRuntime(args) : cmdRuntime(args);
         case "capabilities":
             return cmdCapabilities(args);
         case "train":
+            // A text job (kind lora/peft) goes to the peft backend; anything
+            // else is a liquid-agent temporal job as before.
+            if (args.has("job") && !args.has("dataset")) {
+                const job = await readJson(args.get("job")).catch(() => null);
+                if (isTextJob(job)) return cmdTextTrain(args, args.get("job"));
+            }
             return cmdTrain(args);
         case "evaluate":
         case "eval":
