@@ -180,7 +180,7 @@ export async function registerNode({ role, pubkey, body }) {
     const { data: existing } = await supabase
         .from(table)
         .select(role === "provider"
-            ? "id, public_key, is_public, archived_at, archived_is_public"
+            ? "id, public_key, is_public, archived_at, archived_is_public, disabled_at"
             : "id, public_key, is_public")
         .eq("node_id", nodeId)
         .maybeSingle();
@@ -217,6 +217,8 @@ export async function registerNode({ role, pubkey, body }) {
     if (role === "client") {
         delete payload.status;
     }
+    // An admin-disabled provider stays disabled however it re-registers.
+    if (role === "provider" && existing?.disabled_at) payload.status = "disabled";
 
     const { data, error } = await supabase
         .from(table)
@@ -238,7 +240,7 @@ export async function heartbeatNode({ role, pubkey, body, clientIp = null }) {
     const supabase = getSupabaseServerClient();
     const { data: existing, error: lookupErr } = await supabase
         .from(table)
-        .select(role === "client" ? "id, public_key" : "id, public_key, geo_ip")
+        .select(role === "client" ? "id, public_key" : role === "provider" ? "id, public_key, geo_ip, disabled_at" : "id, public_key, geo_ip")
         .eq("public_key", pubkey)
         .maybeSingle();
 
@@ -248,6 +250,9 @@ export async function heartbeatNode({ role, pubkey, body, clientIp = null }) {
     const patch = { last_seen: new Date().toISOString() };
     if (role !== "client") {
         patch.status = body.status === "offline" ? "offline" : "available";
+        // Admin kill switch (POST /api/v1/admin/providers/:id/disable): a
+        // heartbeat never brings a disabled provider back into routing.
+        if (existing.disabled_at) patch.status = "disabled";
         // Back online: the next outage may mail the owner again.
         if (patch.status === "available") patch.silence_emailed_at = null;
         // Location: the advertised address when public, else where the request came from.
@@ -326,11 +331,12 @@ export async function pollJobsForNode({ pubkey, limit = 5 }) {
     const supabase = getSupabaseServerClient();
     const { data: provider, error: provErr } = await supabase
         .from("providers")
-        .select("id")
+        .select("id, disabled_at")
         .eq("public_key", pubkey)
         .maybeSingle();
     if (provErr) throw withStatus(provErr.message, 500);
     if (!provider) throw withStatus("no provider row for this pubkey", 404);
+    if (provider.disabled_at) return { provider_id: provider.id, jobs: [], disabled: true };
 
     const { data, error } = await supabase
         .from("jobs")
@@ -354,7 +360,7 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
 
     const { data: provider, error: provErr } = await supabase
         .from("providers")
-        .select("id")
+        .select("id, disabled_at")
         .eq("public_key", pubkey)
         .maybeSingle();
     if (provErr) throw withStatus(provErr.message, 500);
@@ -362,7 +368,7 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
 
     const { data: job, error: jobErr } = await supabase
         .from("jobs")
-        .select("id, provider_id, payment_offer, payment_coin, payment_status, model_name, status")
+        .select("id, provider_id, payment_offer, payment_coin, payment_status, model_name, status, input_spec, reservation_id")
         .eq("id", jobId)
         .maybeSingle();
     if (jobErr) throw withStatus(jobErr.message, 500);
@@ -398,12 +404,16 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
 
     // Credit the serving provider: its share of a paid job, or the house
     // subsidy on a free one. Earnings accrue whether or not a payout address
-    // is set. Never fails the completion.
-    if (!failed) {
+    // is set. Never fails the completion. A disabled provider earns nothing.
+    // The reported token count is clamped to the job's own max_tokens.
+    if (!failed && !provider.disabled_at) {
         const { creditCompletedJob } = await import("@/lib/data/earnings");
+        const { input_spec: spec, ...jobRow } = job;
+        let maxTokens = null;
+        try { maxTokens = decryptJSON(spec)?.max_tokens ?? null; } catch { /* clamp to the ceiling */ }
         await creditCompletedJob({
             supabase,
-            job: { ...job, provider_id: provider.id, completed_at: completedAt },
+            job: { ...jobRow, max_tokens: maxTokens, provider_id: provider.id, completed_at: completedAt },
             result: body.result,
             source: "node-api"
         });

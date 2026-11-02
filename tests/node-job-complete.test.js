@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // completeJobForNode must be idempotent: a daemon that retries a completion
 // (slow or lost response) must not re-mark the job or queue another CPR
 // receipt. Production had 353 receipts queued for a single job.
-const state = { job: null, updates: [], enqueued: 0, credits: [] };
+const state = { job: null, updates: [], enqueued: 0, credits: [], provider: { id: "prov-1" } };
 
 function fakeClient() {
     return {
@@ -22,7 +22,7 @@ function fakeClient() {
                     return Promise.resolve({ error: null });
                 },
                 maybeSingle() {
-                    if (table === "providers") return Promise.resolve({ data: { id: "prov-1" }, error: null });
+                    if (table === "providers") return Promise.resolve({ data: { ...state.provider }, error: null });
                     return Promise.resolve({ data: state.job ? { ...state.job } : null, error: null });
                 },
                 then(resolve, reject) {
@@ -58,6 +58,7 @@ beforeEach(() => {
     state.updates = [];
     state.enqueued = 0;
     state.credits = [];
+    state.provider = { id: "prov-1" };
 });
 
 describe("completeJobForNode", () => {
@@ -80,6 +81,26 @@ describe("completeJobForNode", () => {
         expect(state.updates).toHaveLength(1);
         expect(state.enqueued).toBe(1);
         expect(state.credits).toHaveLength(1);
+    });
+
+    it("clamps the reported token_count to the job's max_tokens", async () => {
+        state.job.input_spec = { messages: [], max_tokens: 128 };
+        await completeJobForNode({ pubkey: "pk", jobId: "job-1", body: { status: "completed", result: { token_count: 999_999 } } });
+        expect(state.credits[0]).toMatchObject({ output_tokens: 128, tokens_estimated: false });
+        expect(state.credits[0]).not.toHaveProperty("input_spec");
+    });
+
+    it("a job served for a reservation earns no subsidy", async () => {
+        state.job.reservation_id = "res-1";
+        await completeJobForNode({ pubkey: "pk", jobId: "job-1", body: { status: "completed", result: { token_count: 50 } } });
+        expect(state.credits).toHaveLength(0);
+    });
+
+    it("a disabled provider's completion is recorded but earns nothing", async () => {
+        state.provider = { id: "prov-1", disabled_at: "2026-11-02T00:00:00Z" };
+        const out = await completeJobForNode({ pubkey: "pk", jobId: "job-1", body: { status: "completed", result: { token_count: 50 } } });
+        expect(out.status).toBe("completed");
+        expect(state.credits).toHaveLength(0);
     });
 
     it("does not overwrite a job the reaper already failed", async () => {

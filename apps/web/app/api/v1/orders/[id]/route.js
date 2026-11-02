@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getOrder, orderTokenMatches, fulfilOrder, publicOrder, verifyOrderAtCoinpay } from "@/lib/data/reservation-orders";
+import { getOrder, orderTokenMatches, fulfilOrder, publicOrder, verifyOrderAtCoinpayDetail } from "@/lib/data/reservation-orders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,8 +27,9 @@ export async function GET(request, { params }) {
         let current = order;
         // A paid order is booked however late it is noticed; fulfilOrder refunds
         // one whose hours are over, and the DB refuses hours sold to someone else.
-        if (order.status === "awaiting_payment" && order.rail === "checkout" && await verifyOrderAtCoinpay(order) === "paid") {
-            current = (await fulfilOrder(order)).order;
+        if (order.status === "awaiting_payment" && order.rail === "checkout") {
+            const check = await verifyOrderAtCoinpayDetail(order);
+            if (check.verdict === "paid") current = (await fulfilOrder(order, { txHash: check.txHash })).order;
         }
         return NextResponse.json({ data: await publicOrder(current) }, { headers: { "cache-control": "no-store" } });
     } catch (e) {

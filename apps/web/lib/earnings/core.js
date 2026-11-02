@@ -10,7 +10,13 @@
  *                   confirmed by the CoinPay webhook, then 'confirmed'.
  *   kind 'subsidy'  a free job (playground, payment_offer 0). The house pays
  *                   a rate per 1k output tokens. 'pending_approval' until
- *                   Anthony approves the rate, then 'confirmed'.
+ *                   Anthony approves the rate, then 'confirmed'. The token
+ *                   count is the provider's, so it is clamped to the job's
+ *                   max_tokens, and outliers wait for an admin.
+ *   kind 'reservation'  a node reservation order the buyer prepaid: one row
+ *                   per reservation (no job), the hours less the house fee.
+ *                   Always 'pending_approval' until an admin confirms it.
+ *                   Jobs served for a reservation earn no subsidy on top.
  *
  * Earnings accrue whether or not a payout address is set. The address is
  * only needed to withdraw:
@@ -73,16 +79,95 @@ export function resolveEarningsConfig({ env = process.env, settings = null } = {
     return out;
 }
 
+// No credited job is ever worth more than this many output tokens, whatever
+// the daemon reports: the subsidy is paid on the provider's own count.
+export const MAX_CREDITED_OUTPUT_TOKENS = 32768;
+// A subsidy credit this many times the provider's median credit is held for
+// an admin instead of being confirmed (lib/data/earnings.js).
+export const OUTLIER_MEDIAN_FACTOR = 3;
+// Fewer credits than this and the median says nothing yet.
+export const OUTLIER_MIN_HISTORY = 5;
+
 /**
- * Output tokens for a finished job. The daemon reports token_count in the
- * result; RPC and older daemons only give text, so estimate ~4 chars/token.
+ * Output tokens for a finished job, and how the number was arrived at.
+ * The daemon reports token_count in the result; RPC and older daemons only
+ * give text, so estimate ~4 chars/token. Either way the provider is the one
+ * saying it, so the count is clamped to the job's max_tokens (or the hard
+ * ceiling when the job set none).
+ *
+ * @returns {{ tokens: number, estimated: boolean, reported: number, clamped: boolean }}
  */
-export function outputTokensFor(result) {
+export function outputTokenCount(result, { maxTokens } = {}) {
     const r = result && typeof result === "object" ? result : {};
-    const reported = Number(r.token_count ?? r.output_tokens ?? r.usage?.completion_tokens);
-    if (Number.isFinite(reported) && reported > 0) return Math.round(reported);
-    const text = typeof r.text === "string" ? r.text : "";
-    return text ? Math.ceil(text.length / 4) : 0;
+    const n = Number(r.token_count ?? r.output_tokens ?? r.usage?.completion_tokens);
+    let reported = 0;
+    let estimated = false;
+    if (Number.isFinite(n) && n > 0) {
+        reported = Math.round(n);
+    } else {
+        const text = typeof r.text === "string" ? r.text : "";
+        reported = text ? Math.ceil(text.length / 4) : 0;
+        estimated = reported > 0;
+    }
+    const max = Number(maxTokens);
+    const cap = Number.isFinite(max) && max > 0
+        ? Math.min(Math.floor(max), MAX_CREDITED_OUTPUT_TOKENS)
+        : MAX_CREDITED_OUTPUT_TOKENS;
+    const tokens = Math.min(reported, cap);
+    return { tokens, estimated, reported, clamped: tokens < reported };
+}
+
+/** Output tokens for a finished job (clamped; see outputTokenCount). */
+export function outputTokensFor(result, opts) {
+    return outputTokenCount(result, opts).tokens;
+}
+
+export function median(values) {
+    const v = (values ?? []).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+    if (v.length === 0) return null;
+    const mid = Math.floor(v.length / 2);
+    return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+}
+
+/**
+ * Why a subsidy credit of `tokens` should wait for an admin, or null.
+ * `history` is that provider's other subsidy credits (output_tokens).
+ */
+export function outlierReason(tokens, history, { factor = OUTLIER_MEDIAN_FACTOR, ceiling = MAX_CREDITED_OUTPUT_TOKENS, minHistory = OUTLIER_MIN_HISTORY } = {}) {
+    const t = Number(tokens) || 0;
+    if (t > ceiling) return `output_tokens ${t} above the ${ceiling} ceiling`;
+    const list = (history ?? []).map(Number).filter((x) => Number.isFinite(x) && x > 0);
+    if (list.length < minHistory) return null;
+    const m = median(list);
+    if (m && t > factor * m) return `output_tokens ${t} > ${factor}x provider median ${m}`;
+    return null;
+}
+
+/**
+ * Split pending subsidy credits into the ones an approval may confirm and
+ * the outliers it must leave pending for review. Each row's median is over
+ * the same provider's rows in the batch plus `history[provider_id]`.
+ *
+ * @param {Array<{id, provider_id, output_tokens, held_reason?}>} rows
+ * @param {Record<string, number[]>} [history]
+ */
+export function splitSubsidyOutliers(rows, history = {}, opts = {}) {
+    const byProvider = new Map();
+    for (const r of rows ?? []) {
+        const list = byProvider.get(r.provider_id) ?? [];
+        list.push(Number(r.output_tokens) || 0);
+        byProvider.set(r.provider_id, list);
+    }
+    const confirm = [];
+    const hold = [];
+    for (const r of rows ?? []) {
+        if (r.held_reason) { hold.push({ id: r.id, reason: r.held_reason }); continue; }
+        const sample = [...(byProvider.get(r.provider_id) ?? []), ...(history[r.provider_id] ?? [])];
+        const reason = outlierReason(r.output_tokens, sample, opts);
+        if (reason) hold.push({ id: r.id, reason });
+        else confirm.push(r.id);
+    }
+    return { confirm, hold };
 }
 
 /** Round to 8 decimals: stored as numeric, displayed with up to 6. */
@@ -123,14 +208,20 @@ export function normaliseShares(shares, providerId) {
  * @param {Array}  [p.shares]  [{ provider_id, share, role }] for multi-provider jobs
  * @param {object} p.config    resolveEarningsConfig() output
  * @param {string} [p.source]  where the credit came from, for the audit trail
+ *
+ * job.max_tokens (from its input_spec) clamps the provider's reported count.
+ * A free job served for a reservation (job.reservation_id) earns no subsidy:
+ * the operator is paid from the reservation itself (computeReservationCredit).
  */
 export function computeJobCredits({ job, result, shares, config, source = "completion" }) {
     if (!job?.id) return [];
     const parts = normaliseShares(shares, job.provider_id);
     if (parts.length === 0) return [];
-    const tokens = outputTokensFor(result);
+    const count = outputTokenCount(result, { maxTokens: job.max_tokens });
+    const tokens = count.tokens;
     const offer = num(job.payment_offer, 0);
     const paid = offer > 0;
+    if (!paid && job.reservation_id) return [];
     const feePct = paid ? config.house_fee_pct : 0;
     const rate = paid ? null : config.subsidy_per_1k_output_usd;
     const gross = paid ? offer : (tokens / 1000) * (rate ?? 0);
@@ -149,6 +240,8 @@ export function computeJobCredits({ job, result, shares, config, source = "compl
             role: s.role,
             share: roundUsd(s.share),
             output_tokens: Math.round(tokens * s.share),
+            tokens_estimated: count.estimated,
+            held_reason: null,
             rate_per_1k_usd: rate,
             gross_usd: roundUsd(shareGross),
             fee_usd: roundUsd(fee),
@@ -158,9 +251,77 @@ export function computeJobCredits({ job, result, shares, config, source = "compl
             model_name: job.model_name ?? null,
             confirmed_at: status === "confirmed" ? now : null,
             earned_at: job.completed_at ?? now,
-            metadata: { source, house_fee_pct: feePct }
+            metadata: {
+                source,
+                house_fee_pct: feePct,
+                ...(count.clamped ? { reported_tokens: count.reported, clamped_to: tokens } : {})
+            }
         };
     });
+}
+
+/**
+ * Hold outlier subsidy credits for review: a credit far above its provider's
+ * median stays 'pending_approval' (with held_reason) even when the subsidy is
+ * approved. `history` maps provider_id to that provider's recent subsidy
+ * output_tokens. Paid credits are left alone: the client paid that amount.
+ */
+export function applyOutlierHolds(rows, history = {}, opts = {}) {
+    return (rows ?? []).map((r) => {
+        if (r.kind !== "subsidy") return r;
+        const reason = outlierReason(r.output_tokens, history[r.provider_id] ?? [], opts);
+        if (!reason) return r;
+        return { ...r, status: "pending_approval", confirmed_at: null, held_reason: reason };
+    });
+}
+
+/**
+ * The one provider_earnings row a fulfilled node reservation order produces:
+ * the hours the buyer prepaid (total less the setup fee, which covers our
+ * warm-up and stays with the house) less the house fee. Always
+ * 'pending_approval': an admin confirms it once the hours were delivered, so
+ * it is never withdrawable on its own. Salad orders (no provider) earn none.
+ *
+ * @param {object} p
+ * @param {object} p.order          reservation_orders row (fulfilled)
+ * @param {string} p.reservationId  the reservation it created
+ * @param {object} p.config         resolveEarningsConfig() output
+ */
+export function computeReservationCredit({ order, reservationId, config }) {
+    if (!order?.provider_id || !reservationId) return null;
+    const total = num(order.total_usd, 0);
+    const setup = Math.min(num(order.setup_fee, 0), total);
+    const gross = total - setup;
+    if (!(gross > 0)) return null;
+    const feePct = num(config?.house_fee_pct, DEFAULT_EARNINGS_CONFIG.house_fee_pct);
+    const fee = gross * (Math.min(feePct, 100) / 100);
+    return {
+        job_id: null,
+        reservation_id: reservationId,
+        provider_id: order.provider_id,
+        kind: "reservation",
+        role: "single",
+        share: 1,
+        output_tokens: 0,
+        tokens_estimated: false,
+        rate_per_1k_usd: null,
+        gross_usd: roundUsd(gross),
+        fee_usd: roundUsd(fee),
+        amount_usd: roundUsd(gross - fee),
+        coin: null,
+        status: "pending_approval",
+        model_name: Array.isArray(order.models) ? (order.models[0] ?? null) : null,
+        confirmed_at: null,
+        earned_at: order.paid_at ?? new Date().toISOString(),
+        metadata: {
+            source: "reservation_order",
+            order_id: order.id ?? null,
+            house_fee_pct: feePct,
+            total_usd: total,
+            setup_fee: setup,
+            hours: order.hours ?? null
+        }
+    };
 }
 
 /**
@@ -227,6 +388,12 @@ export function fmtAmount(n) {
 export function fmtUsdPrecise(n) {
     return `$${fmtAmount(n)}`;
 }
+
+export const EARNING_KIND_LABELS = {
+    paid: "paid job",
+    subsidy: "house subsidy",
+    reservation: "reservation"
+};
 
 export const EARNING_STATUS_LABELS = {
     pending_approval: "pending approval",

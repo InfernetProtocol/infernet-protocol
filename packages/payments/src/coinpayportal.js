@@ -451,8 +451,12 @@ export async function getPayment(paymentId) {
  * @param {number} p.amountUsd
  * @param {string} p.cryptocurrency   CoinPay code, e.g. "USDC_POL"
  * @param {object} [p.metadata]
+ * @param {string} [p.idempotencyKey]  e.g. payout:<request id>; sent as the
+ *   idempotency-key header (as createCheckout does) and in metadata. CoinPay's
+ *   /api/payouts/create does not dedupe on it yet, so the caller's own
+ *   requested -> sending claim stays the guard against a double send.
  */
-export async function createPayout({ recipientEmail, recipientWallet, amountUsd, cryptocurrency, metadata = {}, apiKey: payoutKey }) {
+export async function createPayout({ recipientEmail, recipientWallet, amountUsd, cryptocurrency, metadata = {}, apiKey: payoutKey, idempotencyKey }) {
     // Payouts move money, so they use the operator's SEALED payout key, passed in
     // by the caller after an operator unlock (apps/web/lib/operator-vault.js).
     // Never the environment key: there is no fallback.
@@ -465,12 +469,13 @@ export async function createPayout({ recipientEmail, recipientWallet, amountUsd,
             method: "POST",
             timeoutMs: 90_000,
             key: payoutKey,
+            headers: idempotencyKey ? { "idempotency-key": String(idempotencyKey) } : {},
             body: {
                 recipient_email: recipientEmail,
                 recipient_wallet: recipientWallet,
                 amount_usd: Number(amountUsd),
                 cryptocurrency,
-                metadata: { property: PROPERTY, ...metadata }
+                metadata: { property: PROPERTY, ...metadata, ...(idempotencyKey ? { idempotency_key: String(idempotencyKey) } : {}) }
             }
         });
     } catch (err) {

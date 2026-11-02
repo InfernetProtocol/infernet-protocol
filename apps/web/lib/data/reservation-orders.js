@@ -8,7 +8,8 @@ import { createOrderGroup } from "@/lib/data/salad";
 import { randomBytes } from "node:crypto";
 import { checkoutClient, sessionState } from "@profullstack/x402-gateway";
 import { getPayment } from "@infernetprotocol/payments";
-import { verifyOrderPayment, orderWindowOver } from "@/lib/reservations/payment-check";
+import { verifyOrderPaymentDetail, orderWindowOver } from "@/lib/reservations/payment-check";
+import { creditReservationOrder } from "@/lib/data/earnings";
 
 /**
  * Self-serve reservation orders — database access
@@ -20,7 +21,7 @@ import { verifyOrderPayment, orderWindowOver } from "@/lib/reservations/payment-
 
 export const HOLD_MS = 90 * 60 * 1000;
 
-const COLUMNS = "id, status, rail, gpu_class, models, provider_id, operator_name, start_at, hours, price_per_hour, setup_fee, total_usd, name, email, buyer_token_hash, payment_ref, payer, reservation_id, error, salad_group, salad_state, refund_state, refund_note, created_at, paid_at, updated_at";
+const COLUMNS = "id, status, rail, gpu_class, models, provider_id, operator_name, start_at, hours, price_per_hour, setup_fee, total_usd, name, email, buyer_token_hash, payment_ref, payer, reservation_id, error, salad_group, salad_state, refund_state, refund_note, payment_tx_hash, created_at, paid_at, updated_at";
 const PROVIDER_COLUMNS = "id, name, status, last_seen, reputation, gpu_model, specs, trust_tier";
 
 function db() {
@@ -40,7 +41,7 @@ function normalize(row) {
 /** Providers seen in the last few minutes, the only ones worth matching. */
 export async function onlineProviders(now = Date.now()) {
     const since = new Date(now - 5 * 60 * 1000).toISOString();
-    let q = await db().from("providers").select(PROVIDER_COLUMNS).eq("status", "available").gte("last_seen", since);
+    let q = await db().from("providers").select(PROVIDER_COLUMNS).eq("status", "available").is("disabled_at", null).gte("last_seen", since);
     if (q.error && /trust_tier/.test(q.error.message ?? "")) {
         q = await db().from("providers").select(PROVIDER_COLUMNS.replace(", trust_tier", "")).eq("status", "available").gte("last_seen", since);
     }
@@ -122,27 +123,45 @@ export function orderTokenMatches(order, token) {
  * lock: whoever moves the row off awaiting_payment creates the reservation, so
  * the webhook and a polling buyer racing each other cannot book it twice.
  * With `withKey`, the first API key is issued and returned (the x402 path,
- * where the response is the only thing the agent gets back).
+ * where the response is the only thing the agent gets back). `txHash` is the
+ * chain transaction that paid it, when the rail reports one (receipts).
+ *
+ * A node order also credits its operator one 'reservation' earning,
+ * pending admin approval (lib/data/earnings.js creditReservationOrder).
  */
-export async function fulfilOrder(order, { withKey = false, payer = null } = {}) {
+export async function fulfilOrder(order, { withKey = false, payer = null, txHash = null } = {}) {
     const now = new Date().toISOString();
+    const tx = txHash ? { payment_tx_hash: String(txHash).slice(0, 200) } : {};
     // Paid after the booked hours already ended (a very late webhook or poll):
     // nothing can be served, so it goes straight to the refund queue.
     if (order.status === "awaiting_payment" && orderWindowOver(order)) {
         const { data: late } = await db().from("reservation_orders")
-            .update({ status: "failed", refund_state: "due", paid_at: order.paid_at ?? now, error: "paid after the booked hours ended", updated_at: now })
+            .update({ status: "failed", refund_state: "due", paid_at: order.paid_at ?? now, error: "paid after the booked hours ended", ...tx, updated_at: now })
             .eq("id", order.id).eq("status", "awaiting_payment").select(COLUMNS).maybeSingle();
         if (!late) return { order: await getOrder(order.id), already: true };
         throw Object.assign(new Error("payment received after the booked hours ended; it will be refunded"), { status: 409 });
     }
     const { data: claimed, error } = await db().from("reservation_orders")
-        .update({ status: "fulfilled", paid_at: order.paid_at ?? now, payer: payer ?? order.payer ?? null, updated_at: now })
+        .update({ status: "fulfilled", paid_at: order.paid_at ?? now, payer: payer ?? order.payer ?? null, ...tx, updated_at: now })
         .eq("id", order.id).eq("status", "awaiting_payment").select(COLUMNS).maybeSingle();
     if (error) throw error;
-    if (!claimed) return { order: await getOrder(order.id), already: true };
+    if (!claimed) {
+        // Already settled (the poll beat the webhook): still keep the tx hash for the receipt.
+        if (tx.payment_tx_hash) {
+            await db().from("reservation_orders").update({ ...tx, updated_at: now })
+                .eq("id", order.id).is("payment_tx_hash", null).neq("status", "awaiting_payment");
+        }
+        return { order: await getOrder(order.id), already: true };
+    }
     try {
         // A Salad order gets its container group now, stopped; the cron starts it an hour before start_at.
         let endpoint = null;
+        const nodeOrder = Boolean(claimed.provider_id) && !isSaladClass(claimed.gpu_class);
+        if (nodeOrder) {
+            // A node an admin disabled after the order was placed is not booked.
+            const { data: prov } = await db().from("providers").select("disabled_at").eq("id", claimed.provider_id).maybeSingle();
+            if (prov?.disabled_at) throw new Error("the operator node was disabled; it cannot be booked");
+        }
         if (isSaladClass(claimed.gpu_class)) {
             const apiKey = randomBytes(24).toString("base64url");
             const group = await createOrderGroup({ orderId: order.id, gpuClass: claimed.gpu_class, model: claimed.models[0], apiKey });
@@ -154,6 +173,8 @@ export async function fulfilOrder(order, { withKey = false, payer = null } = {})
             buyerTokenHash: claimed.buyer_token_hash
         });
         await db().from("reservation_orders").update({ reservation_id: reservation.id, updated_at: new Date().toISOString() }).eq("id", order.id);
+        // The operator's share of the prepaid hours. Never throws.
+        if (nodeOrder) await creditReservationOrder({ order: normalize(claimed), reservationId: reservation.id });
         const key = withKey ? await issueKey(reservation.id, { label: "first key" }) : null;
         return { order: { ...normalize(claimed), reservation_id: reservation.id }, reservation, key };
     } catch (e) {
@@ -186,6 +207,7 @@ export async function publicOrder(order, now = Date.now()) {
         total_usd: order.total_usd,
         currency: "USD",
         paid_at: order.paid_at,
+        payment_tx_hash: order.payment_tx_hash ?? null,
         reservation_id: order.reservation_id,
         reservation: reservation ? publicReservation(reservation) : null,
         error: order.status === "failed" ? order.error : undefined,
@@ -213,12 +235,17 @@ export async function setSaladState(id, state, err = null) {
  * The webhook body and the buyer's poll are never believed on their own.
  */
 export async function verifyOrderAtCoinpay(order, ref = order?.payment_ref) {
+    return (await verifyOrderAtCoinpayDetail(order, ref)).verdict;
+}
+
+/** verifyOrderAtCoinpay plus the paying tx hash when CoinPay reports one. */
+export async function verifyOrderAtCoinpayDetail(order, ref = order?.payment_ref) {
     const apiKey = process.env.COINPAY_API_KEY || process.env.COINPAYPORTAL_API_KEY;
     // COINPAY_API_URL carries an /api suffix; checkout paths add their own.
     const baseUrl = (process.env.COINPAY_API_URL || "https://coinpayportal.com").replace(/\/+$/, "").replace(/\/api$/, "");
-    if (!apiKey) return "unknown";
+    if (!apiKey) return { verdict: "unknown", txHash: null };
     const client = checkoutClient({ apiKey, baseUrl });
-    return verifyOrderPayment(ref, order.total_usd, {
+    return verifyOrderPaymentDetail(ref, order.total_usd, {
         getSession: (r) => client.get(r),
         sessionState,
         getPayment

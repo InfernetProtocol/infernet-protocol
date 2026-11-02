@@ -443,7 +443,7 @@ async function creditRpcJob({ supabase, job, primary, chosenSlices, layerByPeer,
       .map((s) => ({ provider_id: s.provider.id, share: s.share, role: s.role }));
     await creditCompletedJob({
       supabase,
-      job: { ...job, provider_id: job.provider_id ?? primary.id, completed_at: new Date().toISOString() },
+      job: { ...job, max_tokens: job.input_spec?.max_tokens ?? null, provider_id: job.provider_id ?? primary.id, completed_at: new Date().toISOString() },
       result: { text },
       shares,
       source: "rpc"

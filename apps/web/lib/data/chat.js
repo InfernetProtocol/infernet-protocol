@@ -3,6 +3,8 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { isNimConfigured, nimVirtualProvider } from "@infernetprotocol/nim-adapter";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 import { matchServedModel } from "@/lib/model-names";
+import { getModelDenylist } from "@/lib/data/blocklists";
+import { deniedModel } from "@/lib/moderation/blocklists";
 
 /**
  * Pick a P2P provider to serve a chat job.
@@ -43,6 +45,7 @@ export async function pickChatProvider({ modelName, minTrustTier, requireE2E = f
     .from("providers")
     .select("id, node_id, name, reputation, price, gpu_model, specs, public_key, trust_tier")
     .eq("status", "available")
+    .is("disabled_at", null)
     .gte("last_seen", twoMinAgo);
 
   if (error) {
@@ -318,10 +321,19 @@ export async function createChatJob({
   minTrustTier,
   // Managed reservations: serve on providerId or not at all. No re-pick, no
   // alias rewrite, no hosted fallback (docs/prd/16-managed-endpoints.md).
-  pinned = false
+  pinned = false,
+  // The reservation this job serves: tagged on the job so it earns no
+  // subsidy (the operator is paid from the reservation order instead).
+  reservationId = null
 }) {
   const supabase = getSupabaseServerClient();
   const now = new Date().toISOString();
+
+  // Admin kill switch: settings row 'model_denylist'.
+  const denylist = await getModelDenylist();
+  if (deniedModel(denylist, modelName)) {
+    throw withStatus(`model "${modelName}" is not available on Infernet`, 403);
+  }
 
   const e2e = Boolean(encryptedMessages && clientPubkey);
   if (encryptedMessages && (!providerId || !clientPubkey)) {
@@ -336,6 +348,7 @@ export async function createChatJob({
       .select("id, node_id, name, reputation, price, gpu_model, specs, public_key, trust_tier")
       .eq("id", providerId)
       .eq("status", "available")
+      .is("disabled_at", null)
       .maybeSingle();
     if (data && minTrustTier && !meetsTrustTier(data, minTrustTier)) {
       // Client demanded a higher tier than the addressed provider has —
@@ -407,6 +420,11 @@ export async function createChatJob({
     servedModel = fallbackModel;
   }
 
+  // The name the job really runs under (alias or fallback model) counts too.
+  if (servedModel && servedModel !== modelName && deniedModel(denylist, servedModel)) {
+    throw withStatus(`model "${servedModel}" is not available on Infernet`, 403);
+  }
+
   const inputSpec = {
     ...(e2e
       ? { encrypted_messages: encryptedMessages }
@@ -441,6 +459,7 @@ export async function createChatJob({
     insertRow.completed_at = now;
   }
 
+  if (reservationId) insertRow.reservation_id = reservationId;
   if (e2e && clientPubkey) insertRow.client_pubkey = clientPubkey;
   if (e2e && modelPubkey) insertRow.model_pubkey = modelPubkey;
 
@@ -515,6 +534,7 @@ export async function listChatModels() {
     .from("providers")
     .select("specs")
     .eq("status", "available")
+    .is("disabled_at", null)
     .gte("last_seen", tenMinAgo);
   if (pErr) throw pErr;
 
@@ -609,4 +629,8 @@ export async function liveModelNames() {
   } catch {
     return [];
   }
+}
+
+function withStatus(message, status) {
+  return Object.assign(new Error(message), { status });
 }

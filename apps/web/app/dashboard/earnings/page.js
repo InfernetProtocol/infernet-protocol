@@ -37,10 +37,14 @@ export default async function EarningsDetailsPage({ searchParams }) {
     const providerById = new Map(providers.map((provider) => [provider.id, provider]));
     const jobsById = new Map();
     for (const entry of summary.recent ?? []) {
-        let job = jobsById.get(entry.job_id);
+        // A reservation credit has no job: it is its own row.
+        const key = entry.job_id ?? `reservation:${entry.reservation_id ?? entry.id}`;
+        let job = jobsById.get(key);
         if (!job) {
             job = {
-                job_id: entry.job_id,
+                key,
+                job_id: entry.job_id ?? null,
+                reservation_id: entry.reservation_id ?? null,
                 earned_at: entry.earned_at,
                 gross_usd: 0,
                 fee_usd: 0,
@@ -52,7 +56,7 @@ export default async function EarningsDetailsPage({ searchParams }) {
                 model_name: entry.model_name ?? null,
                 credit_entries: 0
             };
-            jobsById.set(entry.job_id, job);
+            jobsById.set(key, job);
         }
         job.credit_entries += 1;
         job.provider_ids.add(entry.provider_id);
@@ -149,14 +153,16 @@ export default async function EarningsDetailsPage({ searchParams }) {
                                     ? "Mixed"
                                     : job.kinds.has("subsidy")
                                         ? "Playground subsidy"
-                                        : "Paid inference";
+                                        : job.kinds.has("reservation")
+                                            ? "Reservation"
+                                            : "Paid inference";
                                 const statuses = [...job.statuses]
                                     .map((status) => EARNING_STATUS_LABELS[status] ?? status);
                                 return (
-                                    <tr key={job.job_id} className="border-t border-white/5 text-white/90">
+                                    <tr key={job.key} className="border-t border-white/5 text-white/90">
                                         <td className="whitespace-nowrap py-3 pr-4 text-[var(--muted)]">{formatDate(job.earned_at)}</td>
                                         <td className="max-w-72 py-3 pr-4">
-                                            <span className="block truncate">{record?.title || `Job ${job.job_id.slice(0, 8)}`}</span>
+                                            <span className="block truncate">{record?.title || (job.job_id ? `Job ${job.job_id.slice(0, 8)}` : `Reservation ${String(job.reservation_id ?? "").slice(0, 8)}`)}</span>
                                             <span className="block truncate text-xs text-[var(--muted)]">{record?.model_name ?? job.model_name ?? "Model not recorded"}</span>
                                         </td>
                                         <td className="max-w-64 py-3 pr-4 text-xs text-[var(--muted)]">{nodeNames.join(" · ") || "Provider unavailable"}</td>

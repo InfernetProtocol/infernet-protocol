@@ -105,7 +105,8 @@ export async function POST(request) {
             minTrustTier
         });
     } catch (e) {
-        return err(500, e?.message ?? "failed to create chat job");
+        const status = Number.isInteger(e?.status) && e.status >= 400 && e.status < 500 ? e.status : 500;
+        return err(status, e?.message ?? "failed to create chat job");
     }
 
     if (jobBundle.source === "none") {

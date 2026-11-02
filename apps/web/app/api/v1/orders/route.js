@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { createCheckout } from "@infernetprotocol/payments";
 import { validateOrderInput, quoteFor, pickNode, ORDER_TERMS } from "@/lib/reservations/orders";
 import { onlineProviders, bookings, placeOrder, setPaymentRef, fulfilOrder, publicOrder, orderByPaymentRef } from "@/lib/data/reservation-orders";
-import { orderOffer, offerHeaders, paymentFrom, settleOrderPayment, settlementHeader, siteUrl, x402Configured } from "@/lib/reservations/order-payment";
+import { orderOffer, offerHeaders, paymentFrom, payerOf, settleOrderPayment, settlementHeader, siteUrl, x402Configured } from "@/lib/reservations/order-payment";
+import { getOrderBlocklist } from "@/lib/data/blocklists";
+import { orderBlockReason } from "@/lib/moderation/blocklists";
 import { publicReservation } from "@/lib/data/reservations";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { getOrderPricing } from "@/lib/data/order-pricing";
@@ -62,6 +64,12 @@ export async function POST(request) {
     const value = v.value;
 
     try {
+        // Admin block list (settings row 'order_blocklist'): refused before any money moves.
+        const blocklist = await getOrderBlocklist();
+        if (orderBlockReason(blocklist, { email: value.email, payer: payerOf(paymentFrom(request)) })) {
+            return fail(403, "orders from this buyer are not accepted");
+        }
+
         const [providers, booked, pricing] = await Promise.all([onlineProviders(), bookings(), getOrderPricing()]);
         const quote = quoteFor(value.gpu_class, value.hours, pricing.min_margin_pct);
         const salad = isSaladClass(value.gpu_class);
@@ -136,7 +144,7 @@ export async function POST(request) {
             throw Object.assign(new Error("payment received but the order could not be recorded; it will be refunded"), { status: 500 });
         }
         const { order, buyerToken } = placed;
-        const done = await fulfilOrder(order, { withKey: true, payer: settled.payer });
+        const done = await fulfilOrder(order, { withKey: true, payer: settled.payer, txHash: settled.txHash ?? null });
         return ok({
             order: await publicOrder(done.order),
             reservation: done.reservation ? publicReservation(done.reservation) : null,

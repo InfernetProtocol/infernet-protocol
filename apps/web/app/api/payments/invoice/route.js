@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { createCheckout, toCoinpayMethod } from "@infernetprotocol/payments";
+import { maybeVerifySignedNextRequest, parseJsonBody } from "@/lib/auth/verify-signed-request";
+import { requestUser } from "@/lib/auth/request-user";
+import { isSameOriginRequest } from "@/lib/auth/admin";
+import { adminActor } from "@/lib/reservations/http";
+import { isJobOwner, reusableCheckout } from "@/lib/payments/invoice";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,12 +25,26 @@ function errorResponse(status, error, detail) {
  * optional and the buyer picks on CoinPay's page.
  *
  * The amount is the job's own payment_offer; the caller never sends one.
+ *
+ * Only the job's owner may invoice it: a request signed (X-Infernet-Auth) by
+ * the job's client pubkey, or a signed-in user (CLI bearer, or the site
+ * cookie on a same-origin request) who linked that client pubkey. An open
+ * checkout for the job is returned again instead of opening another, and
+ * CoinPay gets idempotency key job:<id> so a retry cannot open a second one.
  */
 export async function POST(request) {
   let payload;
+  let signedPubkey = null;
   try {
-    payload = await request.json();
-  } catch {
+    const signed = await maybeVerifySignedNextRequest(request);
+    if (signed) {
+      signedPubkey = signed.pubkey;
+      payload = parseJsonBody(signed.body);
+    } else {
+      payload = await request.json();
+    }
+  } catch (err) {
+    if (err?.status === 401) return errorResponse(401, "Invalid signed request", err.message);
     return errorResponse(400, "Invalid JSON body");
   }
 
@@ -51,7 +70,7 @@ export async function POST(request) {
   // 1. Look up the job.
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select("id, title, client_id, payment_offer, payment_status")
+    .select("id, title, client_id, payment_offer, payment_status, payment_invoice")
     .eq("id", jobId)
     .maybeSingle();
 
@@ -61,8 +80,48 @@ export async function POST(request) {
   if (!job) {
     return errorResponse(404, "Job not found", { jobId });
   }
+
+  // 2. Only the job's owner (or an admin) may invoice it.
+  if (!adminActor(request)) {
+    let client = null;
+    if (job.client_id) {
+      const { data } = await supabase.from("clients").select("id, public_key").eq("id", job.client_id).maybeSingle();
+      client = data ?? null;
+    }
+    let linkedPubkeys = [];
+    if (!signedPubkey && client?.public_key) {
+      const user = await requestUser(request);
+      if (user && (user.via !== "cookie" || isSameOriginRequest(request.headers))) {
+        const { data: links } = await supabase
+          .from("pubkey_links")
+          .select("pubkey")
+          .eq("user_id", user.id)
+          .eq("role", "client")
+          .eq("pubkey", client.public_key);
+        linkedPubkeys = (links ?? []).map((l) => l.pubkey);
+      }
+    }
+    if (!isJobOwner({ client, signedPubkey, linkedPubkeys })) {
+      return errorResponse(signedPubkey || linkedPubkeys.length ? 403 : 401, "Only the job's owner can invoice it");
+    }
+  }
+
   if (job.payment_status === "confirmed") {
     return errorResponse(409, "Job is already paid", { jobId });
+  }
+
+  // 3. A checkout already open for this job is handed back, not duplicated.
+  if (job.payment_status === "invoiced" && job.payment_invoice) {
+    const { data: tx } = await supabase
+      .from("payment_transactions")
+      .select("invoice_id, status, coin, amount, amount_usd, address, metadata, created_at")
+      .eq("invoice_id", job.payment_invoice)
+      .eq("direction", "inbound")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const open = reusableCheckout(job, tx);
+    if (open) return NextResponse.json({ ...open, network: network ?? null });
   }
 
   const amountUsd = Number(job.payment_offer);
@@ -72,7 +131,7 @@ export async function POST(request) {
 
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://infernetprotocol.com").replace(/\/+$/, "");
 
-  // 2. Open the checkout at CoinPay.
+  // 4. Open the checkout at CoinPay.
   let checkout;
   try {
     checkout = await createCheckout({
@@ -84,14 +143,15 @@ export async function POST(request) {
       email: buyerEmail,
       metadata: { job_id: job.id },
       successUrl: `${appUrl}/dashboard?paid=${encodeURIComponent(job.id)}`,
-      cancelUrl: `${appUrl}/dashboard`
+      cancelUrl: `${appUrl}/dashboard`,
+      idempotencyKey: `job:${job.id}`
     });
   } catch (err) {
     const status = err.status && err.status < 500 ? 400 : 502;
     return errorResponse(status, "Failed to create checkout at CoinPay", err.message);
   }
 
-  // 3. Point the job at the CoinPay id; the webhook settles by it.
+  // 5. Point the job at the CoinPay id; the webhook settles by it.
   const { error: jobUpdErr } = await supabase
     .from("jobs")
     .update({
@@ -105,7 +165,7 @@ export async function POST(request) {
     return errorResponse(500, "Failed to update job with invoice", jobUpdErr.message);
   }
 
-  // 4. Inbound ledger row.
+  // 6. Inbound ledger row.
   const { error: ledgerErr } = await supabase.from("payment_transactions").insert({
     direction: "inbound",
     job_id: job.id,
@@ -132,7 +192,7 @@ export async function POST(request) {
     return errorResponse(500, "Failed to record payment transaction", ledgerErr.message);
   }
 
-  // 5. Same field names as before, plus the rail and the URL to send the buyer to.
+  // 7. Same field names as before, plus the rail and the URL to send the buyer to.
   return NextResponse.json({
     invoiceId: checkout.id,
     rail: checkout.rail,
