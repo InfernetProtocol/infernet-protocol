@@ -12,8 +12,14 @@ import "server-only";
  * search query reaches the server, and only when the user turned search on.
  */
 
-// ValueSERP runs a live Google query: ~10.5 s measured from dev2 (2026-10-21).
-const SEARCH_TIMEOUT_MS = 25_000;
+// ValueSERP runs a live Google query: ~10.5 s measured from dev2 (2026-10-21),
+// but about one in five takes 25 s or more (2026-11-02: 6.6/10/11/13/25.8 s), and
+// a single 25 s cap failed those searches outright. So: if the first request has
+// not answered by SEARCH_HEDGE_MS, send a second one and take whichever answers
+// first, within SEARCH_TIMEOUT_MS overall. The hedge costs one extra credit only
+// on slow queries. nginx allows 300 s, so 45 s + the page reads fit.
+export const SEARCH_TIMEOUT_MS = 45_000;
+export const SEARCH_HEDGE_MS = 12_000;
 const PAGE_TIMEOUT_MS = 20_000;
 const RESULTS = 5;
 const PAGES = 3;
@@ -60,16 +66,78 @@ export function usablePageText(markdown) {
     return INTERSTITIAL.test(text.slice(0, 600)) ? "" : text;
 }
 
+/** Raised when ValueSERP does not answer in time, so the route can say so. */
+export class SearchTimeoutError extends Error {
+    constructor() {
+        super("search provider timed out");
+        this.name = "SearchTimeoutError";
+    }
+}
+
+/**
+ * One ValueSERP call, with a hedge: a second identical request if the first is
+ * slow. Resolves with the first successful Response, aborts the loser, rejects
+ * with SearchTimeoutError at the deadline or with the last error if both fail.
+ */
+function hedgedFetch(url, { fetchImpl, timeoutMs, hedgeMs }) {
+    const MAX_ATTEMPTS = 2;
+    return new Promise((resolve, reject) => {
+        const controllers = [];
+        let settled = false;
+        let inFlight = 0;
+        let lastError = null;
+        const timers = [];
+        const finish = (fn, value, keep) => {
+            if (settled) return;
+            settled = true;
+            timers.forEach(clearTimeout);
+            controllers.forEach((c) => { if (c !== keep) c.abort(); });
+            fn(value);
+        };
+        // A failed attempt starts the next one at once; out of attempts and none
+        // in flight, the last error is the answer.
+        const failed = (e) => {
+            lastError = e;
+            if (controllers.length < MAX_ATTEMPTS) attempt();
+            else if (inFlight === 0) finish(reject, lastError);
+        };
+        const attempt = () => {
+            if (settled || controllers.length >= MAX_ATTEMPTS) return;
+            const c = new AbortController();
+            controllers.push(c);
+            inFlight += 1;
+            Promise.resolve()
+                .then(() => fetchImpl(url, { signal: c.signal, cache: "no-store" }))
+                .then((res) => {
+                    inFlight -= 1;
+                    if (settled) return;
+                    if (res.ok) return finish(resolve, res, c);
+                    const e = new Error(`search provider returned ${res.status}`);
+                    // A 4xx (bad key, out of credits) will not improve on a retry.
+                    if (res.status < 500 && res.status !== 429) return finish(reject, e);
+                    failed(e);
+                }, (e) => {
+                    inFlight -= 1;
+                    if (!settled) failed(e);
+                });
+        };
+        timers.push(setTimeout(() => finish(reject, new SearchTimeoutError()), timeoutMs));
+        timers.push(setTimeout(attempt, hedgeMs));
+        attempt();
+    });
+}
+
 /** @returns {Promise<Array<{ title: string, url: string, snippet: string }>>} */
-export async function searchWeb(query, { apiKey = process.env.VALUESERP_API_KEY, fetchImpl = fetch } = {}) {
+export async function searchWeb(query, {
+    apiKey = process.env.VALUESERP_API_KEY,
+    fetchImpl = fetch,
+    timeoutMs = SEARCH_TIMEOUT_MS,
+    hedgeMs = SEARCH_HEDGE_MS
+} = {}) {
     if (!apiKey) throw new Error("web search is not configured (VALUESERP_API_KEY)");
     // English results and dates; unset, dev2 got Google Japan ("2026年8月3日").
     const params = new URLSearchParams({ api_key: apiKey, q: query, num: String(RESULTS + 1), hl: "en", gl: "us", google_domain: "google.com" });
-    const res = await fetchImpl(`https://api.valueserp.com/search?${params}`, {
-        signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-        cache: "no-store"
-    });
-    if (!res.ok) throw new Error(`search provider returned ${res.status}`);
+    const res = await hedgedFetch(`https://api.valueserp.com/search?${params}`, { fetchImpl, timeoutMs, hedgeMs });
     const body = await res.json();
     return (body?.organic_results ?? [])
         .filter((r) => typeof r?.link === "string" && /^https?:\/\//.test(r.link))

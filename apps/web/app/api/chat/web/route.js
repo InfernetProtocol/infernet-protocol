@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
-import { buildWebContext, QUERY_MAX_LEN } from "@/lib/web-search";
+import { buildWebContext, QUERY_MAX_LEN, SearchTimeoutError } from "@/lib/web-search";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +41,9 @@ export async function POST(request) {
         return NextResponse.json(await buildWebContext(query));
     } catch (e) {
         console.error("[chat/web]", e?.message ?? e);
+        if (e instanceof SearchTimeoutError) {
+            return err(504, "Web search took too long. Try again, or turn web search off.");
+        }
         return err(502, "Web search failed. Try again, or turn web search off.");
     }
 }
