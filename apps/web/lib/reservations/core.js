@@ -257,6 +257,25 @@ export function tokenAllowanceLeft(res) {
     return Math.max(0, Number(res.included_tokens ?? 0) - Number(res.tokens_used ?? 0));
 }
 
+// What a request without max_tokens is assumed to cost when reserving tokens
+// (createChatJob's own default). The call is reconciled to actual usage after.
+export const DEFAULT_TOKEN_RESERVE = 512;
+
+/**
+ * Tokens to reserve, atomically in the DB, before a call on a reservation
+ * with an included-token cap: the prompt estimate plus max_tokens, never more
+ * than the whole allowance (so one request is not refused forever).
+ * 0 when the reservation has no cap.
+ */
+export function tokenReservationFor(res, body) {
+    const cap = Number(res?.included_tokens ?? 0);
+    if (!(cap > 0)) return 0;
+    const max = Number(body?.max_tokens);
+    const completion = Number.isFinite(max) && max > 0 ? Math.floor(max) : DEFAULT_TOKEN_RESERVE;
+    const prompt = estimateTokens(JSON.stringify(body?.messages ?? []));
+    return Math.max(1, Math.min(prompt + completion, cap));
+}
+
 /** Rough token estimate when an upstream does not report usage. */
 export function estimateTokens(text) {
     return Math.ceil(String(text ?? "").length / 4);
@@ -364,20 +383,28 @@ export function buildReport(res, probes, usage, now = Date.now()) {
 }
 
 /**
- * Post-paid invoice data: only compliant hours are owed. Nothing is charged
- * here; this is the figure a buyer verifies before paying.
+ * Invoice data. Two kinds of reservation:
+ *
+ *   post-paid  an admin-created reservation: only compliant hours are owed,
+ *              and this is the figure the buyer verifies before paying.
+ *   prepaid    a self-serve order (`order` given): the buyer already paid the
+ *              quoted total; non-compliant hours are owed back to them, and
+ *              so is the setup fee if no hour was ever delivered.
+ *
+ * @param {object} res
+ * @param {object} report  buildReport() output
+ * @param {object} [opts]
+ * @param {object} [opts.order]  { id, rail, total_usd, paid_at, payment_tx_hash, refund_state }
  */
-export function buildInvoice(res, report) {
+export function buildInvoice(res, report, { order = null } = {}) {
     const compliant = report.hours.filter((h) => h.status === "compliant").length;
     const nonCompliant = report.hours.filter((h) => h.status === "non_compliant").length;
     const open = report.hours.filter((h) => h.status === "upcoming" || h.status === "in_progress").length;
     const priced = res.price_per_hour !== null && res.price_per_hour !== undefined;
     const price = priced ? Number(res.price_per_hour) : null;
-    // The setup fee covers warming the GPU, so it is owed once the
-    // reservation has delivered at least one compliant hour.
-    const setupFee = priced && res.setup_fee !== null && res.setup_fee !== undefined && compliant > 0
-        ? Number(res.setup_fee) : 0;
-    return {
+    const final = open === 0;
+    const round = (n) => Math.round(n * 100) / 100;
+    const base = {
         reservation_id: res.id,
         buyer: res.buyer ?? null,
         operator_name: res.operator_name,
@@ -385,21 +412,56 @@ export function buildInvoice(res, report) {
         currency: res.currency ?? "USD",
         gpu_class: res.gpu_class ?? null,
         price_per_hour: price,
-        setup_fee: priced ? setupFee : null,
         priced,
-        final: open === 0,
+        final,
         hours_reserved: res.hours,
         hours_compliant: compliant,
         hours_non_compliant: nonCompliant,
         hours_open: open,
-        amount_due: priced ? Math.round((compliant * price + setupFee) * 100) / 100 : null,
         lines: report.hours.map((h) => ({
             hour: h.hour,
             start: h.start,
             status: h.status,
             confirmed_minutes: h.minutes.confirmed,
             amount: priced ? (h.status === "compliant" ? price : 0) : null
-        })),
+        }))
+    };
+
+    if (order) {
+        const paid = Number(order.total_usd) || 0;
+        const fee = res.setup_fee !== null && res.setup_fee !== undefined ? Number(res.setup_fee) : 0;
+        // Nothing was ever delivered: the warm-up fee goes back too.
+        const setupBack = final && compliant === 0 && report.hours.length > 0 ? fee : 0;
+        const refundable = priced ? round(Math.min(paid, nonCompliant * price + setupBack)) : 0;
+        const tx = order.payment_tx_hash ? ` (tx ${order.payment_tx_hash})` : "";
+        const when = order.paid_at ? ` on ${String(order.paid_at).slice(0, 10)}` : "";
+        return {
+            ...base,
+            billing: "prepaid",
+            order_id: order.id ?? null,
+            setup_fee: fee,
+            amount_paid: round(paid),
+            paid_at: order.paid_at ?? null,
+            payment_rail: order.rail ?? null,
+            payment_tx_hash: order.payment_tx_hash ?? null,
+            refundable_usd: refundable,
+            refund_state: order.refund_state ?? null,
+            amount_due: 0,
+            note: `Prepaid: ${round(paid).toFixed(2)} ${base.currency} paid${order.rail ? ` by ${order.rail}` : ""}${when}${tx}. `
+                + `Non-compliant hours are refundable at the hourly price${setupBack ? ", and the setup fee since no hour was delivered" : ""}: `
+                + `${refundable.toFixed(2)} ${base.currency}${final ? "" : " so far"}. Nothing more is owed.`
+        };
+    }
+
+    // The setup fee covers warming the GPU, so it is owed once the
+    // reservation has delivered at least one compliant hour.
+    const setupFee = priced && res.setup_fee !== null && res.setup_fee !== undefined && compliant > 0
+        ? Number(res.setup_fee) : 0;
+    return {
+        ...base,
+        billing: "post-paid",
+        setup_fee: priced ? setupFee : null,
+        amount_due: priced ? round(compliant * price + setupFee) : null,
         note: priced
             ? "Post-paid. Only compliant hours are billable; non-compliant hours are owed nothing. No payment is collected by this system."
             : "No price has been agreed for this reservation; amount_due is null until price_per_hour is set."

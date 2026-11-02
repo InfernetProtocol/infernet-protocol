@@ -126,6 +126,11 @@ export function renderInvoice(inv) {
         ''
     ];
     for (const l of inv.lines) lines.push(`  h${String(l.hour).padStart(3)} ${l.start}  ${l.status.padEnd(13)} ${String(l.confirmed_minutes).padStart(2)} min  ${money(l.amount)}`);
-    lines.push('', `amount due: ${money(inv.amount_due)}`, inv.note);
+    lines.push('');
+    if (inv.billing === 'prepaid') {
+        lines.push(`amount paid: ${money(inv.amount_paid)}${inv.payment_tx_hash ? `  tx ${inv.payment_tx_hash}` : ''}`);
+        lines.push(`refundable: ${money(inv.refundable_usd)}${inv.refund_state ? ` (${inv.refund_state})` : ''}`);
+    }
+    lines.push(`amount due: ${money(inv.amount_due)}`, inv.note);
     return lines.join('\n');
 }

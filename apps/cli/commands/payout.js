@@ -116,7 +116,7 @@ async function runList(args, ctx) {
             for (const e of recent) {
                 const when = String(e.earned_at ?? '').replace('T', ' ').slice(0, 16);
                 process.stdout.write(
-                    `  ${when}  ${String(e.job_id).slice(0, 8)}  ${(e.model_name ?? '-').padEnd(18)} ` +
+                    `  ${when}  ${e.job_id ? String(e.job_id).slice(0, 8) : `res ${String(e.reservation_id ?? '').slice(0, 4)}`}  ${(e.model_name ?? '-').padEnd(18)} ` +
                     `${String(e.output_tokens ?? 0).padStart(6)} tok  ${fmtUsd(e.amount_usd).padStart(11)}  ` +
                     `${e.kind}  ${STATUS_LABEL[e.status] ?? e.status}\n`
                 );

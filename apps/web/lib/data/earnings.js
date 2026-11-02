@@ -3,6 +3,9 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import {
     resolveEarningsConfig,
     computeJobCredits,
+    computeReservationCredit,
+    applyOutlierHolds,
+    splitSubsidyOutliers,
     summariseBalance,
     checkPayoutRequest,
     isAutoApprovable,
@@ -71,21 +74,65 @@ export async function updateEarningsConfig(patch, { actor } = {}) {
         repriced = Number(data) || 0;
     }
     let confirmed = 0;
+    let held = 0;
     if (next.subsidy_approved && !current.subsidy_approved) {
-        confirmed = await confirmPendingSubsidy(supabase);
+        ({ confirmed, held } = await confirmPendingSubsidy(supabase));
     }
-    return { config: next, repriced_subsidy_credits: repriced, confirmed_subsidy_credits: confirmed };
+    return { config: next, repriced_subsidy_credits: repriced, confirmed_subsidy_credits: confirmed, held_subsidy_credits: held };
 }
 
+/**
+ * Approving the subsidy confirms the pending credits, except outliers (far
+ * above their provider's median, or above the token ceiling): those stay
+ * pending_approval with a held_reason for an admin to review one by one.
+ */
 async function confirmPendingSubsidy(supabase) {
-    const { data, error } = await supabase
+    const rows = await selectAll(() => supabase
         .from("provider_earnings")
-        .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
+        .select("id, provider_id, output_tokens, held_reason")
         .eq("kind", "subsidy")
         .eq("status", "pending_approval")
-        .select("id");
-    if (error) throw withStatus(error.message, 500);
-    return data?.length ?? 0;
+        .order("id"));
+    const { confirm, hold } = splitSubsidyOutliers(rows);
+    const now = new Date().toISOString();
+    let confirmed = 0;
+    for (let i = 0; i < confirm.length; i += 200) {
+        const { data, error } = await supabase
+            .from("provider_earnings")
+            .update({ status: "confirmed", confirmed_at: now })
+            .in("id", confirm.slice(i, i + 200))
+            .eq("status", "pending_approval")
+            .select("id");
+        if (error) throw withStatus(error.message, 500);
+        confirmed += data?.length ?? 0;
+    }
+    const fresh = new Set(rows.filter((r) => !r.held_reason).map((r) => r.id));
+    for (const h of hold.filter((x) => fresh.has(x.id))) {
+        const { error } = await supabase
+            .from("provider_earnings")
+            .update({ held_reason: h.reason })
+            .eq("id", h.id)
+            .eq("status", "pending_approval");
+        if (error) console.warn(`provider_earnings hold ${h.id} failed: ${error.message}`);
+    }
+    return { confirmed, held: hold.length };
+}
+
+/** The provider's recent subsidy credits (output_tokens), for outlier checks. */
+async function subsidyHistory(client, providerIds) {
+    const out = {};
+    for (const id of [...new Set(providerIds)].filter(Boolean)) {
+        const { data, error } = await client
+            .from("provider_earnings")
+            .select("output_tokens")
+            .eq("provider_id", id)
+            .eq("kind", "subsidy")
+            .order("earned_at", { ascending: false })
+            .limit(50);
+        if (error) throw error;
+        out[id] = (data ?? []).map((r) => Number(r.output_tokens) || 0);
+    }
+    return out;
 }
 
 /**
@@ -97,8 +144,16 @@ export async function creditCompletedJob({ supabase, job, result, shares, source
     try {
         const client = db(supabase);
         const config = await getEarningsConfig(client);
-        const rows = computeJobCredits({ job, result, shares, config, source });
+        let rows = computeJobCredits({ job, result, shares, config, source });
         if (rows.length === 0) return { credited: 0 };
+        // An approved subsidy confirms on the spot, so an outlier is held here.
+        if (rows.some((r) => r.kind === "subsidy" && r.status === "confirmed")) {
+            try {
+                rows = applyOutlierHolds(rows, await subsidyHistory(client, rows.map((r) => r.provider_id)));
+            } catch (err) {
+                console.warn(`subsidy outlier check skipped: ${err?.message ?? err}`);
+            }
+        }
         const { error } = await client
             .from("provider_earnings")
             .upsert(rows, { onConflict: "job_id,provider_id", ignoreDuplicates: true });
@@ -106,11 +161,83 @@ export async function creditCompletedJob({ supabase, job, result, shares, source
             console.warn(`provider_earnings insert failed: ${error.message}`);
             return { credited: 0, error: error.message };
         }
-        return { credited: rows.length };
+        return { credited: rows.length, held: rows.filter((r) => r.held_reason).length };
     } catch (err) {
         console.warn(`provider_earnings credit failed: ${err?.message ?? err}`);
         return { credited: 0, error: String(err?.message ?? err) };
     }
+}
+
+/**
+ * Credit the operator of a fulfilled node reservation order: one row per
+ * reservation, 'pending_approval' until an admin confirms it. Idempotent on
+ * (reservation_id, provider_id). Never throws: the buyer's booking must not
+ * fail because the ledger did.
+ */
+export async function creditReservationOrder({ order, reservationId, supabase } = {}) {
+    try {
+        const client = db(supabase);
+        const row = computeReservationCredit({ order, reservationId, config: await getEarningsConfig(client) });
+        if (!row) return { credited: 0 };
+        const { error } = await client.from("provider_earnings").insert(row);
+        if (error) {
+            if (error.code === "23505" || /duplicate key/.test(error.message ?? "")) return { credited: 0, already: true };
+            console.warn(`reservation earnings insert failed for order ${order?.id}: ${error.message}`);
+            return { credited: 0, error: error.message };
+        }
+        return { credited: 1, amount_usd: row.amount_usd };
+    } catch (err) {
+        console.warn(`reservation earnings credit failed for order ${order?.id}: ${err?.message ?? err}`);
+        return { credited: 0, error: String(err?.message ?? err) };
+    }
+}
+
+/** Admin review queue: reservation credits and held subsidy outliers. */
+export async function listEarningsForReview({ limit = 200 } = {}) {
+    const { data, error } = await db()
+        .from("provider_earnings")
+        .select("id, job_id, reservation_id, provider_id, kind, output_tokens, tokens_estimated, gross_usd, fee_usd, amount_usd, status, held_reason, model_name, metadata, earned_at")
+        .eq("status", "pending_approval")
+        .or("kind.eq.reservation,held_reason.not.is.null")
+        .order("earned_at", { ascending: true })
+        .limit(Math.min(Math.max(Number(limit) || 200, 1), 1000));
+    if (error) throw withStatus(error.message, 500);
+    return data ?? [];
+}
+
+/**
+ * Admin decides one credit waiting for review: approve (confirmed, so it can
+ * be withdrawn) or void. Only rows that are waiting can be decided.
+ */
+export async function reviewEarning(id, { action, actor, note } = {}) {
+    if (!["approve", "void"].includes(action)) throw withStatus("action must be approve or void", 400);
+    const supabase = db();
+    const { data: row, error } = await supabase
+        .from("provider_earnings")
+        .select("id, kind, status, held_reason, metadata")
+        .eq("id", id)
+        .maybeSingle();
+    if (error) throw withStatus(error.message, 500);
+    if (!row) throw withStatus("earning not found", 404);
+    if (row.status !== "pending_approval") throw withStatus(`earning is ${row.status}, not pending_approval`, 409);
+    if (row.kind === "subsidy" && !row.held_reason) {
+        throw withStatus("unheld subsidy credits are approved with the subsidy setting, not one by one", 409);
+    }
+    const now = new Date().toISOString();
+    const metadata = { ...(row.metadata ?? {}), reviewed_by: actor ?? "admin", reviewed_at: now, ...(note ? { review_note: String(note).slice(0, 300) } : {}) };
+    const patch = action === "approve"
+        ? { status: "confirmed", confirmed_at: now, metadata }
+        : { status: "void", metadata };
+    const { data, error: upErr } = await supabase
+        .from("provider_earnings")
+        .update(patch)
+        .eq("id", id)
+        .eq("status", "pending_approval")
+        .select("id, kind, status, amount_usd, provider_id")
+        .maybeSingle();
+    if (upErr) throw withStatus(upErr.message, 500);
+    if (!data) throw withStatus("earning was already decided", 409);
+    return data;
 }
 
 /** CoinPay confirmed the client's payment: its provider credits are now real. */
@@ -150,7 +277,7 @@ export async function getEarningsForProviders(providerIds, { recent = 20 } = {})
     const [earnings, payouts] = await Promise.all([
         selectAll(() => supabase
             .from("provider_earnings")
-            .select("id, job_id, provider_id, kind, role, output_tokens, rate_per_1k_usd, amount_usd, fee_usd, status, model_name, earned_at")
+            .select("id, job_id, reservation_id, provider_id, kind, role, output_tokens, tokens_estimated, rate_per_1k_usd, amount_usd, fee_usd, status, held_reason, model_name, earned_at")
             .in("provider_id", ids)
             .order("earned_at", { ascending: false })),
         selectAll(() => supabase
@@ -403,7 +530,8 @@ export async function approvePayoutRequest(id, { actor, send } = {}) {
             recipientWallet: reqRow.address,
             amountUsd: Number(reqRow.amount_usd),
             cryptocurrency,
-            metadata: { payout_request_id: id, provider_id: reqRow.provider_id }
+            metadata: { payout_request_id: id, provider_id: reqRow.provider_id },
+            idempotencyKey: `payout:${id}`
         });
     } catch (err) {
         outcome = { outcome: "failed", error: String(err?.message ?? err) };

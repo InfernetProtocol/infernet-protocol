@@ -71,6 +71,12 @@ describe("heartbeatNode — body.specs handling", () => {
         }
     });
 
+    it("never brings an admin-disabled provider back to available", async () => {
+        supabaseState.lookupResult = { data: { id: "row-1", public_key: "PK", disabled_at: "2026-11-02T00:00:00Z" }, error: null };
+        await heartbeatNode({ role: "provider", pubkey: "PK", body: {} });
+        expect(supabaseState.updateCalls[0].patch.status).toBe("disabled");
+    });
+
     it("flags status=offline correctly when body.status === 'offline'", async () => {
         await heartbeatNode({ role: "provider", pubkey: "PK", body: { status: "offline" } });
         const patch = supabaseState.updateCalls[0].patch;

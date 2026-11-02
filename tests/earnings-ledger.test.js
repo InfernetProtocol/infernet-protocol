@@ -37,6 +37,11 @@ function builder(name) {
                         continue;
                     }
                 }
+                if (name === "provider_earnings" && r.kind === "reservation" &&
+                    rows.some((x) => x.kind === "reservation" && x.reservation_id === r.reservation_id && x.provider_id === r.provider_id)) {
+                    error = { code: "23505", message: "duplicate key value violates unique constraint \"provider_earnings_reservation_provider_key\"" };
+                    break;
+                }
                 if (name === "payout_requests" && ["requested", "approved", "sending"].includes(r.status ?? "requested") &&
                     rows.some((x) => x.provider_id === r.provider_id && ["requested", "approved", "sending"].includes(x.status))) {
                     error = { message: "duplicate key value violates unique constraint \"payout_requests_one_open\"" };
@@ -152,6 +157,75 @@ describe("earnings ledger", () => {
     });
 });
 
+describe("token clamp and outliers", () => {
+    it("clamps a provider's token_count to the job's max_tokens and marks text estimates", async () => {
+        await earnings.creditCompletedJob({ job: { id: "jc", provider_id: "p1", payment_offer: 0, max_tokens: 256 }, result: { token_count: 10_000_000 } });
+        await earnings.creditCompletedJob({ job: { id: "je", provider_id: "p1", payment_offer: 0 }, result: { text: "x".repeat(400) } });
+        const [clamped, est] = table("provider_earnings");
+        expect(clamped).toMatchObject({ output_tokens: 256, tokens_estimated: false });
+        expect(clamped.metadata).toMatchObject({ reported_tokens: 10_000_000, clamped_to: 256 });
+        expect(est).toMatchObject({ output_tokens: 100, tokens_estimated: true });
+    });
+
+    it("approving the subsidy leaves outliers pending with a held_reason", async () => {
+        for (let i = 0; i < 6; i++) await credit(`n${i}`);
+        await earnings.creditCompletedJob({ job: { id: "big", provider_id: "p1", payment_offer: 0 }, result: { token_count: 20_000 } });
+        const out = await earnings.updateEarningsConfig({ subsidy_approved: true });
+        expect(out).toMatchObject({ confirmed_subsidy_credits: 6, held_subsidy_credits: 1 });
+        const big = table("provider_earnings").find((r) => r.job_id === "big");
+        expect(big.status).toBe("pending_approval");
+        expect(big.held_reason).toMatch(/median/);
+    });
+
+    it("once approved, a new outlier credit is held instead of confirmed", async () => {
+        await earnings.updateEarningsConfig({ subsidy_approved: true });
+        for (let i = 0; i < 6; i++) await credit(`n${i}`);
+        await earnings.creditCompletedJob({ job: { id: "big", provider_id: "p1", payment_offer: 0 }, result: { token_count: 20_000 } });
+        const big = table("provider_earnings").find((r) => r.job_id === "big");
+        expect(big).toMatchObject({ status: "pending_approval", confirmed_at: null });
+        expect(big.held_reason).toMatch(/median/);
+        const reviewed = await earnings.reviewEarning(big.id, { action: "approve", actor: "admin" });
+        expect(reviewed.status).toBe("confirmed");
+    });
+
+    it("a job served for a reservation earns no subsidy", async () => {
+        await earnings.creditCompletedJob({ job: { id: "jr", provider_id: "p1", payment_offer: 0, reservation_id: "r1" }, result: { token_count: 500 } });
+        expect(table("provider_earnings")).toHaveLength(0);
+    });
+});
+
+describe("reservation earnings", () => {
+    const order = { id: "o1", provider_id: "p1", total_usd: 12.92, setup_fee: 6.98, hours: 3, models: ["qwen3:8b"], paid_at: "2026-11-02T00:00:00Z" };
+
+    it("credits the operator once, pending approval, never withdrawable until approved", async () => {
+        const first = await earnings.creditReservationOrder({ order, reservationId: "r1" });
+        const again = await earnings.creditReservationOrder({ order, reservationId: "r1" });
+        expect(first).toMatchObject({ credited: 1 });
+        expect(again).toMatchObject({ credited: 0, already: true });
+        const rows = table("provider_earnings");
+        expect(rows).toHaveLength(1);
+        // (12.92 - 6.98) = 5.94 of hours, less the 2% house fee.
+        expect(rows[0]).toMatchObject({ kind: "reservation", job_id: null, reservation_id: "r1", status: "pending_approval", gross_usd: 5.94, amount_usd: 5.8212 });
+        const before = await earnings.getEarningsForNode({ pubkey: "pk1" });
+        expect(before.balance).toMatchObject({ available_usd: 0, pending_approval_usd: 5.8212 });
+        // Approving the subsidy does not touch it.
+        await earnings.updateEarningsConfig({ subsidy_approved: true });
+        expect(rows[0].status).toBe("pending_approval");
+        await earnings.reviewEarning(rows[0].id, { action: "approve", actor: "admin" });
+        const after = await earnings.getEarningsForNode({ pubkey: "pk1" });
+        expect(after.balance.available_usd).toBe(5.8212);
+    });
+
+    it("a Salad order (no provider) earns nothing", async () => {
+        expect(await earnings.creditReservationOrder({ order: { ...order, provider_id: null }, reservationId: "r2" })).toEqual({ credited: 0 });
+    });
+
+    it("refuses to review an unheld subsidy credit one by one", async () => {
+        await credit("j1");
+        await expect(earnings.reviewEarning(table("provider_earnings")[0].id, { action: "approve" })).rejects.toThrow(/subsidy setting/);
+    });
+});
+
 describe("payout requests", () => {
     beforeEach(async () => {
         db.tables.provider_payouts = [{ provider_id: "p1", coin: "USDC", network: "polygon", address: "0xabc", is_default: true, created_at: "2026-10-01" }];
@@ -178,7 +252,7 @@ describe("payout requests", () => {
         const out = await earnings.approvePayoutRequest(request.id, { actor: "admin-token", send });
         expect(out.outcome).toBe("sent");
         expect(send).toHaveBeenCalledTimes(1);
-        expect(send.mock.calls[0][0]).toMatchObject({ recipientWallet: "0xabc", amountUsd: 6, cryptocurrency: "USDC_POL", recipientEmail: "op@example.com" });
+        expect(send.mock.calls[0][0]).toMatchObject({ recipientWallet: "0xabc", amountUsd: 6, cryptocurrency: "USDC_POL", recipientEmail: "op@example.com", idempotencyKey: `payout:${request.id}` });
         await expect(earnings.approvePayoutRequest(request.id, { send })).rejects.toThrow(/sent, not requested/);
         expect(send).toHaveBeenCalledTimes(1);
         const { balance } = await earnings.getEarningsForNode({ pubkey: "pk1" });

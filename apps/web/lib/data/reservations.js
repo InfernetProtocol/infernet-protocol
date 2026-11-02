@@ -197,6 +197,30 @@ export async function addTokens(reservationId, tokens) {
     return data;
 }
 
+/**
+ * Reserve `tokens` against the included allowance in one statement, so
+ * concurrent requests (in any process) cannot all spend the last of it.
+ * Returns { ok: true } when reserved, { ok: false } when it does not fit,
+ * { ok: null } when the DB could not be asked (caller falls back).
+ */
+export async function reserveTokens(reservationId, tokens) {
+    const { data, error } = await db().rpc("reservation_reserve_tokens", { p_reservation_id: reservationId, p_tokens: tokens });
+    if (error) {
+        console.error("[reservations] token reserve failed:", error.message);
+        return { ok: null };
+    }
+    return { ok: data !== null && data !== undefined, tokensUsed: data ?? null };
+}
+
+/** Replace a reservation made by reserveTokens with what the call really used. */
+export async function settleTokens(reservationId, reserved, actual) {
+    const { data, error } = await db().rpc("reservation_settle_tokens", {
+        p_reservation_id: reservationId, p_reserved: reserved, p_actual: actual
+    });
+    if (error) console.error("[reservations] token settle failed:", error.message);
+    return data;
+}
+
 /** Reservations whose window covers `now` (the prober's work list). */
 export async function activeReservations(now = new Date()) {
     // Windows are at most 720h, so anything that started more than 30 days ago is over.
@@ -245,7 +269,16 @@ export async function reportFor(res, now = Date.now()) {
 
 export async function invoiceFor(res, now = Date.now()) {
     const { report } = await reportFor(res, now);
-    return buildInvoice(res, report);
+    // A self-serve order was prepaid; an admin reservation is post-paid.
+    let order = null;
+    if (String(res.created_by ?? "").startsWith("order:")) {
+        const { data, error } = await db().from("reservation_orders")
+            .select("id, rail, total_usd, paid_at, payment_tx_hash, refund_state")
+            .eq("reservation_id", res.id).maybeSingle();
+        if (error) throw error;
+        order = data ? { ...data, total_usd: Number(data.total_usd) } : null;
+    }
+    return buildInvoice(res, report, { order });
 }
 
 export { publicReservation };

@@ -110,6 +110,7 @@ export async function POST(request) {
       streamUrl: `/api/chat/stream/${job.id}`
     });
   } catch (e) {
+    if (Number.isInteger(e?.status) && e.status >= 400 && e.status < 500) return err(e.status, e.message);
     return err(500, "Failed to create chat job", e?.message ?? String(e));
   }
 }

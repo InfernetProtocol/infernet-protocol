@@ -1,8 +1,10 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { createLimiter, phaseOf, limitHeaders, tokenAllowanceLeft, estimateTokens, publicReservation } from "@/lib/reservations/core";
-import { resolveKey, recordUsage, addTokens } from "@/lib/data/reservations";
+import { createLimiter, phaseOf, limitHeaders, tokenAllowanceLeft, tokenReservationFor, estimateTokens, publicReservation } from "@/lib/reservations/core";
+import { resolveKey, recordUsage, addTokens, reserveTokens, settleTokens } from "@/lib/data/reservations";
+import { getModelDenylist } from "@/lib/data/blocklists";
+import { deniedModel } from "@/lib/moderation/blocklists";
 import { forwardToEndpoint } from "@/lib/data/reservation-upstream";
 import { createChatJob } from "@/lib/data/chat";
 import { streamJobEvents } from "@/lib/data/chat-stream";
@@ -67,6 +69,10 @@ export async function serveChatCompletion(request, rawKey) {
         return err(400, `model must be one of the reserved models: ${res.models.join(", ")}`, "model_not_reserved", {}, { reserved_models: res.models });
     }
 
+    if (deniedModel(await getModelDenylist(), model)) {
+        return err(403, `model "${model}" is not available on Infernet`, "model_denied");
+    }
+
     const base = { reservation_id: res.id, key_id: key.id, model };
 
     if (res.included_tokens > 0 && tokenAllowanceLeft(res) <= 0) {
@@ -81,11 +87,31 @@ export async function serveChatCompletion(request, rawKey) {
         return err(429, `${slot.scope} ${slot.type} limit of ${slot.limit} reached`, `limit_${slot.type}_${slot.scope}`, slot.headers);
     }
 
+    // The included-token cap is enforced in the DB: reserve the most this
+    // call can use (prompt + max_tokens) atomically, settle to actual after.
+    let reserved = 0;
+    const want = tokenReservationFor(res, body);
+    if (want > 0) {
+        const r = await reserveTokens(res.id, want);
+        if (r.ok === false) {
+            slot.release();
+            await recordUsage({ ...base, outcome: "limit_tokens", limit_scope: "shared", http_status: 429 });
+            const left = tokenAllowanceLeft(res);
+            return err(429, `included token allowance (${res.included_tokens}) cannot cover this request: about ${left} left, the request may use up to ${want}; lower max_tokens`, "token_allowance_exhausted",
+                limitHeaders(res, { type: "tokens", scope: "shared", limit: res.included_tokens, remaining: left, retryAfterMs: 3600_000 }));
+        }
+        if (r.ok) reserved = want;
+    }
+
     const t0 = Date.now();
+    let finished = false;
     const finish = async ({ outcome, prompt = 0, completion = 0, estimated = false, status }) => {
+        if (finished) return;
+        finished = true;
         slot.release();
         await recordUsage({ ...base, outcome, prompt_tokens: prompt, completion_tokens: completion, tokens_estimated: estimated, latency_ms: Date.now() - t0, http_status: status });
-        if (prompt + completion > 0) await addTokens(res.id, prompt + completion);
+        if (reserved > 0) await settleTokens(res.id, reserved, prompt + completion);
+        else if (prompt + completion > 0) await addTokens(res.id, prompt + completion);
     };
     const headers = { ...slot.headers, "X-Infernet-Reservation": res.id, "X-Infernet-Operator": res.operator_name };
 
@@ -192,6 +218,7 @@ async function viaNode(res, body, headers, finish) {
         modelName: model,
         providerId: res.provider_id,
         pinned: true,
+        reservationId: res.id,
         maxTokens: Number.isFinite(body.max_tokens) ? body.max_tokens : undefined,
         temperature: Number.isFinite(body.temperature) ? body.temperature : undefined
     });

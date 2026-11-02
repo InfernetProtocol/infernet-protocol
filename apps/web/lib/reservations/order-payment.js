@@ -13,6 +13,9 @@ const env = (name) => process.env[name];
 /** The proof's single-use nonce, which CoinPay keys replay detection on. */
 const nonceOf = (payment) => payment?.payload?.authorization?.nonce ?? null;
 
+/** The address the proof says it pays from (EIP-3009 authorization.from), before settling. */
+export const payerOf = (payment) => payment?.payload?.authorization?.from ?? null;
+
 export const siteUrl = () => (env("SITE_URL") || env("NEXT_PUBLIC_APP_URL") || "https://infernetprotocol.com").replace(/\/+$/, "");
 // COINPAY_API_URL is set with its /api suffix (the payments package wants that); x402 paths add their own.
 const coinpayBase = () => (env("COINPAY_API_URL") || "https://coinpayportal.com").replace(/\/+$/, "").replace(/\/api$/, "");
