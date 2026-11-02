@@ -366,11 +366,16 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
     if (provErr) throw withStatus(provErr.message, 500);
     if (!provider) throw withStatus("no provider row for this pubkey", 404);
 
-    const { data: job, error: jobErr } = await supabase
+    const JOB_COLUMNS = "id, provider_id, payment_offer, payment_coin, payment_status, model_name, status, input_spec, reservation_id";
+    let { data: job, error: jobErr } = await supabase
         .from("jobs")
-        .select("id, provider_id, payment_offer, payment_coin, payment_status, model_name, status, input_spec, reservation_id")
+        .select(`${JOB_COLUMNS}, batch_item_id`)
         .eq("id", jobId)
         .maybeSingle();
+    // Before the paid-batch migration there is no batch_item_id column.
+    if (jobErr && /batch_item_id/.test(jobErr.message ?? "")) {
+        ({ data: job, error: jobErr } = await supabase.from("jobs").select(JOB_COLUMNS).eq("id", jobId).maybeSingle());
+    }
     if (jobErr) throw withStatus(jobErr.message, 500);
     if (!job) throw withStatus("job not found", 404);
     if (job.provider_id !== provider.id) throw withStatus("job not assigned to this provider", 403);
@@ -406,7 +411,19 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
     // subsidy on a free one. Earnings accrue whether or not a payout address
     // is set. Never fails the completion. A disabled provider earns nothing.
     // The reported token count is clamped to the job's own max_tokens.
-    if (!failed && !provider.disabled_at) {
+    // A prepaid batch item settles from the customer's hold (charge the
+    // server-estimated cost, release the rest, credit the provider) and earns
+    // no subsidy. Never fails the completion.
+    if (job.batch_item_id) {
+        const { settleBatchJob } = await import("@/lib/data/batches");
+        await settleBatchJob({
+            supabase,
+            job: { id: job.id, batch_item_id: job.batch_item_id, provider_id: provider.id, model_name: job.model_name },
+            result: failed ? { error: body.error } : body.result,
+            failed,
+            noCharge: Boolean(provider.disabled_at)
+        });
+    } else if (!failed && !provider.disabled_at) {
         const { creditCompletedJob } = await import("@/lib/data/earnings");
         const { input_spec: spec, ...jobRow } = job;
         let maxTokens = null;

@@ -44,11 +44,16 @@ Payments:
   redeem       Redeem a credit code: infernet redeem CR-XXXX-XXXX-XXXX-XXXX
   invites      Scarce invites (both sides get credits) and your affiliate link
 
+Paid inference:
+  batch        Paid batch inference from a JSONL file: quote, submit, status, results
+  billing      Compute balance: node earnings, prepaid top-ups, funding order
+  keys         API keys (ik_live_...) for the batch API
+
 Managed endpoints:
   reservation  Book a pinned operator + exact model by the hour; keys, limits,
                per-minute availability report, post-paid invoice data
   order        Order a dedicated model endpoint yourself: pay by x402 or CoinPay
-  mcp          MCP server (stdio): order, reservation, credit and invite tools
+  mcp          MCP server (stdio): order, reservation, credit, invite and batch tools
 
 Other:
   help         Show this help

@@ -400,6 +400,10 @@ export async function requestPayout({ providerId, amountUsd = null, via = "cli",
         if (/payout_requests_one_open|duplicate key/.test(error.message)) {
             throw withStatus("a payout request is already waiting for approval", 409);
         }
+        // The DB guard (payout_requests_guard): earnings were just spent on compute.
+        if (/insufficient_earnings/.test(error.message)) {
+            throw withStatus("that amount is no longer available: some earnings were just spent on compute", 409);
+        }
         throw withStatus(error.message, 500);
     }
     if (isAutoApprovable(data.amount_usd, config)) {

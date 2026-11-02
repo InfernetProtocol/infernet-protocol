@@ -13,6 +13,10 @@ export const dynamic = "force-dynamic";
  *   curl -fsS -X POST https://infernetprotocol.com/api/cron/maintenance \
  *        -H 'Authorization: Bearer $CRON_SECRET'
  *
+ * Also ticks paid batch inference (lib/data/batches.js tickBatches): items
+ * whose job finished without the completion hook or timed out (15 min) are
+ * settled, and queued items are dispatched up to each batch's bound.
+ *
  * Auth: CRON_SECRET via Authorization: Bearer or x-cron-secret.
  * ?dry_run=1 returns what would be reaped and changes nothing.
  */
@@ -44,7 +48,18 @@ export async function POST(request) {
                 console.error("[maintenance] silent-node emails:", err instanceof Error ? err.message : err);
             }
         }
-        return NextResponse.json({ data: { ...reaped, silent } });
+        // Paid batch inference: settle finished/timed-out items, dispatch queued ones.
+        let batches = null;
+        if (!dryRun) {
+            try {
+                const { tickBatches } = await import("@/lib/data/batches");
+                batches = await tickBatches();
+                if (batches.settled || batches.timed_out || batches.dispatched) console.log(`[maintenance] batches ${JSON.stringify(batches)}`);
+            } catch (err) {
+                console.error("[maintenance] batches:", err instanceof Error ? err.message : err);
+            }
+        }
+        return NextResponse.json({ data: { ...reaped, silent, ...(batches ? { batches } : {}) } });
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("[maintenance]", message);

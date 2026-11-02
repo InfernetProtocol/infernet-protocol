@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { confirmPaidJobCredits } from "@/lib/data/earnings";
 import { orderByPaymentRef, getOrder, fulfilOrder, verifyOrderAtCoinpayDetail } from "@/lib/data/reservation-orders";
+import { topupByPaymentRef, getTopup, settleTopup } from "@/lib/data/billing";
 import {
   verifyWebhookSignature,
   parseWebhookPayload,
@@ -96,6 +97,25 @@ export async function POST(request) {
       }
     } catch (err) {
       return errorResponse(500, "Failed to settle reservation order", err?.message ?? String(err));
+    }
+    // Not an order either: maybe a compute-balance top-up (POST /api/v1/billing/topup).
+    try {
+      const topup = (await topupByPaymentRef(refs)) ?? (event.orderId ? await getTopup(String(event.orderId)) : null);
+      if (topup) {
+        if (event.status !== "confirmed") {
+          return NextResponse.json({ ok: true, settled: false, reason: `topup ${topup.id}: status ${event.providerStatus || event.status}` });
+        }
+        // Never credit on the webhook's word: settleTopup asks CoinPay whether the full amount was collected.
+        const s = await settleTopup(topup);
+        if (s.verdict === "unknown") return errorResponse(502, "Could not verify the top-up with CoinPay; retry");
+        if (s.verdict !== "paid") {
+          console.warn(`[webhook] topup ${topup.id}: confirmed event but CoinPay does not show $${topup.amount_usd} collected`);
+          return NextResponse.json({ ok: true, settled: false, reason: `topup ${topup.id}: payment not verified for the full amount` });
+        }
+        return NextResponse.json({ ok: true, settled: true, topupId: topup.id, credited: s.credited });
+      }
+    } catch (err) {
+      return errorResponse(500, "Failed to settle top-up", err?.message ?? String(err));
     }
     // Not ours (or a test event): acknowledge so CoinPay stops retrying.
     return NextResponse.json({ ok: true, settled: false, reason: "unknown payment" });

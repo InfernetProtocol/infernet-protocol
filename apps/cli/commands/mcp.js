@@ -14,6 +14,7 @@ import { createInterface } from 'node:readline';
 import { resolveClientOptions, createReservationsClient } from '../lib/reservations-client.js';
 import { createOrdersClient, x402KeyFrom, DEFAULT_MAX_USD } from '../lib/orders-client.js';
 import { resolveCreditsOptions, createCreditsClient } from '../lib/credits-client.js';
+import { resolveBatchOptions, createBatchClient } from '../lib/batch-client.js';
 import { CURRENT_VERSION } from '../lib/version.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -27,6 +28,22 @@ const ORDER_PROPS = {
     email: { type: 'string' },
     name: { type: 'string' }
 };
+const BATCH_ITEMS = {
+    type: 'array',
+    description: 'requests: { custom_id, messages: [{ role, content }], max_tokens, temperature? }',
+    items: {
+        type: 'object',
+        required: ['custom_id', 'messages', 'max_tokens'],
+        properties: {
+            custom_id: { type: 'string' },
+            messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } } },
+            max_tokens: { type: 'integer', minimum: 1 },
+            temperature: { type: 'number' }
+        }
+    }
+};
+const batchId = { type: 'string', description: 'batch id (uuid)' };
+
 const orderInput = (a) => Object.fromEntries(['gpu_class', 'models', 'hours', 'start_at', 'email', 'name'].filter((k) => a[k] !== undefined).map((k) => [k, a[k]]));
 
 export const TOOLS = [
@@ -135,7 +152,41 @@ export const TOOLS = [
         description: 'Create a single-use invite link (shown once). Both people get credits when a new account joins on it and confirms its email.',
         inputSchema: { type: 'object', properties: { note: { type: 'string' } } },
         run: (c, a) => c.credits.createInvite(a.note)
-    }
+    },
+    // Paid batch inference (INFERNET_API_KEY or the login bearer). Only
+    // batch_submit can spend, and only up to the max_cost_usd you pass.
+    {
+        name: 'batch_quote',
+        description: 'Price a batch of chat requests without spending: per-item and total max cost and a quote_id valid 15 minutes. Token counts are server-side estimates (ceil(chars/4)).',
+        inputSchema: { type: 'object', required: ['model', 'items'], properties: { model: { type: 'string' }, items: BATCH_ITEMS } },
+        run: (c, a) => c.batch.quote({ model: a.model, items: a.items })
+    },
+    {
+        name: 'batch_submit',
+        description: 'SPENDS MONEY. Submit a paid batch: holds up to max_cost_usd from your funding sources (node earnings, prepaid balance; never a wallet payment from here), charges each item its estimated cost and releases the rest. Pass quote_id (from batch_quote) or model + items. max_cost_usd and idempotency_key are required; the same key returns the same batch.',
+        inputSchema: {
+            type: 'object',
+            required: ['max_cost_usd', 'idempotency_key'],
+            properties: {
+                quote_id: { type: 'string' },
+                model: { type: 'string' },
+                items: BATCH_ITEMS,
+                max_cost_usd: { type: 'string', description: 'hard cap in USD, e.g. "2.50"' },
+                idempotency_key: { type: 'string' },
+                funding: { type: 'string', enum: ['earned_first', 'prepaid_first', 'earned_only', 'prepaid_only', 'no_wallet'] }
+            }
+        },
+        run: async (c, a) => {
+            if (a.max_cost_usd === undefined || a.max_cost_usd === null || a.max_cost_usd === '') throw new Error('max_cost_usd is required');
+            if (!a.idempotency_key) throw new Error('idempotency_key is required');
+            const body = { max_cost_usd: String(a.max_cost_usd), idempotency_key: a.idempotency_key, funding: a.funding ?? 'no_wallet' };
+            if (a.quote_id) body.quote_id = a.quote_id; else Object.assign(body, { model: a.model, items: a.items });
+            return c.batch.submit(body);
+        }
+    },
+    { name: 'batch_status', description: 'A batch: status, item counts, cost so far, funding, and outputs once finished.', inputSchema: { type: 'object', required: ['id'], properties: { id: batchId } }, run: (c, a) => c.batch.status(a.id) },
+    { name: 'batch_results', description: 'A batch\'s results as JSONL: custom_id, status, output, estimated tokens, cost.', inputSchema: { type: 'object', required: ['id'], properties: { id: batchId } }, run: (c, a) => c.batch.results(a.id) },
+    { name: 'billing_balance', description: 'Your compute balance: earned (node earnings) spendable, prepaid available, holds, funding order.', inputSchema: { type: 'object', properties: {} }, run: (c) => c.batch.balance() }
 ];
 
 /** Handle one JSON-RPC message; returns the response object or null for notifications. */
@@ -171,12 +222,13 @@ export async function handleMessage(msg, client) {
 
 export default async function mcp(args) {
     if (args.has('help') || args.has('h')) {
-        process.stdout.write('infernet mcp — MCP server (stdio): self-serve orders, managed-endpoint reservations, credits and invites\n\n  claude mcp add infernet -- infernet mcp\n');
+        process.stdout.write('infernet mcp — MCP server (stdio): self-serve orders, managed-endpoint reservations, credits, invites and paid batch inference\n\n  claude mcp add infernet -- infernet mcp\n');
         return 0;
     }
     const client = createReservationsClient(await resolveClientOptions({ url: args.get('url'), token: args.get('token'), buyerToken: args.get('buyer-token') }));
     client.orders = createOrdersClient({ baseUrl: (await resolveClientOptions({ url: args.get('url') })).baseUrl });
     client.credits = createCreditsClient(await resolveCreditsOptions({ url: args.get('url'), token: args.get('token') }));
+    client.batch = createBatchClient(await resolveBatchOptions({ url: args.get('url'), key: args.get('key'), token: args.get('token') }));
     const rl = createInterface({ input: process.stdin });
     for await (const line of rl) {
         if (!line.trim()) continue;
