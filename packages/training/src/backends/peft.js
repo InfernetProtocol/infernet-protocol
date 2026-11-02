@@ -18,7 +18,7 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,8 +58,26 @@ export async function setupPeftRuntime({ accelerator = "cpu", python = "python3"
     const dir = peftRuntimeDir();
     await mkdir(dir, { recursive: true });
     const venv = path.join(dir, "venv");
-    if (!existsSync(path.join(venv, "bin", "python"))) await run(python, ["-m", "venv", venv], log);
     const py = path.join(venv, "bin", "python");
+    if (!existsSync(py)) {
+        try {
+            await run(python, ["-m", "venv", venv], log);
+        } catch (err) {
+            // Debian/Ubuntu ship venv without ensurepip unless python3-venv is
+            // installed (needs root). A pip-less venv plus get-pip.py works anyway.
+            log?.(`python -m venv failed (${err.message}); retrying without pip`);
+            await rm(venv, { recursive: true, force: true });
+            await run(python, ["-m", "venv", "--without-pip", venv], log);
+        }
+    }
+    const hasPip = await run(py, ["-m", "pip", "--version"]).then(() => true, () => false);
+    if (!hasPip) {
+        const getPip = path.join(dir, "get-pip.py");
+        const res = await fetch("https://bootstrap.pypa.io/get-pip.py");
+        if (!res.ok) throw new Error(`could not download get-pip.py: HTTP ${res.status}`);
+        await writeFile(getPip, Buffer.from(await res.arrayBuffer()));
+        await run(py, [getPip, "--quiet"], log);
+    }
     await run(py, ["-m", "pip", "install", "--upgrade", "--quiet", "pip"], log);
     const torchIndex = accelerator === "cuda" ? [] : ["--index-url", "https://download.pytorch.org/whl/cpu"];
     await run(py, ["-m", "pip", "install", "--quiet", "torch", ...torchIndex], log);
