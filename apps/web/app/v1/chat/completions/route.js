@@ -5,6 +5,7 @@ import { createChatJob, liveModelNames } from "@/lib/data/chat";
 import { streamJobEvents } from "@/lib/data/chat-stream";
 import { bearerFrom, isReservationKey } from "@/lib/reservations/core";
 import { serveChatCompletion } from "@/lib/reservations/serve";
+import { checkChatLimit, wantsP2pOnly } from "@/lib/trusted-clients";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,7 +66,8 @@ export async function POST(request) {
     if (isReservationKey(presented)) return serveChatCompletion(request, presented);
 
     const ip = getClientIp(request);
-    const r = limit.check(ip);
+    // A trusted client key (lib/trusted-clients.js) spends its own budget.
+    const r = checkChatLimit({ bearer: presented, ip, publicLimit: limit });
     if (!r.ok) return err(429, "Rate limit exceeded — try again later");
 
     let body;
@@ -102,7 +104,8 @@ export async function POST(request) {
             modelName: typeof model === "string" ? model : undefined,
             maxTokens: Number.isFinite(max_tokens) ? max_tokens : undefined,
             temperature: Number.isFinite(temperature) ? temperature : undefined,
-            minTrustTier
+            minTrustTier,
+            noFallback: wantsP2pOnly(body)
         });
     } catch (e) {
         const status = Number.isInteger(e?.status) && e.status >= 400 && e.status < 500 ? e.status : 500;

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createChatJob, liveModelNames } from "@/lib/data/chat";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
+import { bearerFrom } from "@/lib/reservations/core";
+import { checkChatLimit, wantsP2pOnly } from "@/lib/trusted-clients";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +19,12 @@ function err(status, error, detail) {
 
 export async function POST(request) {
   const ip = getClientIp(request);
-  const r = limit.check(ip);
+  // A trusted client key (lib/trusted-clients.js) spends its own budget.
+  const r = checkChatLimit({
+    bearer: bearerFrom(request.headers.get("authorization")),
+    ip,
+    publicLimit: limit
+  });
   if (!r.ok) {
     return err(429, "Rate limit exceeded — try again later", {
       resetAt: new Date(r.resetAt).toISOString()
@@ -79,7 +86,8 @@ export async function POST(request) {
       // instead of dispatching to a single provider. Persisted on the
       // job so the SSE handler picks the correct streaming path.
       distributed: distributed === true,
-      minTrustTier
+      minTrustTier,
+      noFallback: wantsP2pOnly(payload)
     });
     if (source === "none") {
       const available = await liveModelNames();

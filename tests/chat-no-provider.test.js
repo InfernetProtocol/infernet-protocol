@@ -54,6 +54,16 @@ afterEach(() => {
     delete process.env.NVIDIA_NIM_API_KEY;
 });
 
+describe("createChatJob with noFallback", () => {
+    it("never hands the job to the hosted fallback", async () => {
+        process.env.NVIDIA_NIM_API_KEY = "nvapi-test";
+        const { source } = await createChatJob({ messages, noFallback: true });
+        expect(source).toBe("none");
+        const again = await createChatJob({ messages });
+        expect(again.source).toBe("nim");
+    });
+});
+
 describe("createChatJob with nothing to serve the request", () => {
     it("records the job as failed with a no_provider error, never pending", async () => {
         const { job, provider, source } = await createChatJob({ messages, modelName: "gpt-4o-mini" });
