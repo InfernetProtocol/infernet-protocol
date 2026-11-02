@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkoutClient, sessionState } from "@profullstack/x402-gateway";
-import { getPayment } from "@infernetprotocol/payments";
-import { getOrder, orderTokenMatches, fulfilOrder, publicOrder, HOLD_MS } from "@/lib/data/reservation-orders";
+import { getOrder, orderTokenMatches, fulfilOrder, publicOrder, verifyOrderAtCoinpay } from "@/lib/data/reservation-orders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,30 +12,8 @@ export const dynamic = "force-dynamic";
  * polls is booked even if the webhook is late. Nothing the caller says about
  * payment is believed.
  */
-const env = (name) => process.env[name];
-
 function fail(status, error) {
     return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } });
-}
-
-async function paidAtCoinpay(ref, totalUsd) {
-    const apiKey = env("COINPAY_API_KEY") || env("COINPAYPORTAL_API_KEY");
-    // COINPAY_API_URL carries an /api suffix; checkout paths add their own.
-    const baseUrl = (env("COINPAY_API_URL") || "https://coinpayportal.com").replace(/\/+$/, "").replace(/\/api$/, "");
-    if (!apiKey || !ref) return false;
-    try {
-        const session = await checkoutClient({ apiKey, baseUrl }).get(ref);
-        if (session) {
-            const st = sessionState(session);
-            return st.paid && (st.cents === null || st.cents >= Math.round(totalUsd * 100));
-        }
-    } catch { /* not a session: try it as a payment */ }
-    try {
-        const p = await getPayment(ref);
-        return ["confirmed", "completed", "forwarded", "paid"].includes(String(p?.status ?? "").toLowerCase());
-    } catch {
-        return false;
-    }
 }
 
 export async function GET(request, { params }) {
@@ -49,8 +25,9 @@ export async function GET(request, { params }) {
         if (!orderTokenMatches(order, token)) return fail(401, "the order's buyer token is required (X-Buyer-Token)");
 
         let current = order;
-        const fresh = Date.now() - Date.parse(order.created_at) <= HOLD_MS * 2;
-        if (order.status === "awaiting_payment" && order.rail === "checkout" && fresh && await paidAtCoinpay(order.payment_ref, order.total_usd)) {
+        // A paid order is booked however late it is noticed; fulfilOrder refunds
+        // one whose hours are over, and the DB refuses hours sold to someone else.
+        if (order.status === "awaiting_payment" && order.rail === "checkout" && await verifyOrderAtCoinpay(order) === "paid") {
             current = (await fulfilOrder(order)).order;
         }
         return NextResponse.json({ data: await publicOrder(current) }, { headers: { "cache-control": "no-store" } });

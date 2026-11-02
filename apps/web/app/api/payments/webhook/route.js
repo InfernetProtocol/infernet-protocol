@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { confirmPaidJobCredits } from "@/lib/data/earnings";
-import { orderByPaymentRef, getOrder, fulfilOrder } from "@/lib/data/reservation-orders";
+import { orderByPaymentRef, getOrder, fulfilOrder, verifyOrderAtCoinpay } from "@/lib/data/reservation-orders";
 import {
   verifyWebhookSignature,
   parseWebhookPayload,
@@ -78,6 +78,15 @@ export async function POST(request) {
       if (order) {
         if (event.status !== "confirmed") {
           return NextResponse.json({ ok: true, settled: false, reason: `order ${order.id}: status ${event.providerStatus || event.status}` });
+        }
+        if (order.status === "awaiting_payment") {
+          // Never fulfil on the webhook's word: CoinPay must confirm it collected the full total.
+          const verdict = await verifyOrderAtCoinpay(order);
+          if (verdict === "unknown") return errorResponse(502, "Could not verify the order payment with CoinPay; retry");
+          if (verdict !== "paid") {
+            console.warn(`[webhook] order ${order.id}: confirmed event but CoinPay does not show $${order.total_usd} collected`);
+            return NextResponse.json({ ok: true, settled: false, reason: `order ${order.id}: payment not verified for the full total` });
+          }
         }
         const done = await fulfilOrder(order);
         return NextResponse.json({ ok: true, settled: true, orderId: order.id, reservationId: done.order?.reservation_id ?? null });
