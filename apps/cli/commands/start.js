@@ -551,6 +551,17 @@ async function runDaemon(args, ctx) {
         }
     }
 
+    // When each job finished here. Polls overlap (a batch is awaited job by
+    // job while the interval fires again), so a batch can still hold a job
+    // that another batch ran to completion meanwhile; bonita re-ran three
+    // completed chat jobs that way. Skip a job that finished after the poll
+    // that returned it was sent.
+    const finishedJobAt = new Map();
+    function markFinished(id) {
+        finishedJobAt.set(id, Date.now());
+        if (finishedJobAt.size > 1000) finishedJobAt.delete(finishedJobAt.keys().next().value);
+    }
+
     async function processJob(job) {
         const t0 = new Date().toISOString();
         stats.jobsPicked += 1;
@@ -581,10 +592,12 @@ async function runDaemon(args, ctx) {
             await client.completeJob(job.id, { status: 'completed', result: resultPayload });
             stats.jobsCompleted += 1;
             stats.activeJobIds.delete(job.id);
+            markFinished(job.id);
             process.stdout.write(`[${new Date().toISOString()}] completed job ${job.id} type=${job.type ?? 'inference'}\n`);
         } catch (err) {
             stats.jobsFailed += 1;
             stats.activeJobIds.delete(job.id);
+            markFinished(job.id);
             const msg = err?.message ?? String(err);
             process.stderr.write(`job ${job.id} failed: ${msg}\n`);
             if (job.type === 'chat') {
@@ -605,6 +618,7 @@ async function runDaemon(args, ctx) {
             return;
         }
         if (stats.draining) return;
+        const polledAt = Date.now();
         try {
             const result = await client.pollJobs({ limit: 5 });
             stats.pollsOk += 1;
@@ -614,6 +628,13 @@ async function runDaemon(args, ctx) {
                 // complete, so without this guard the poll loop queues the
                 // same job on every tick while it's in flight.
                 if (stats.activeJobIds.has(job.id)) continue;
+                if ((finishedJobAt.get(job.id) ?? 0) >= polledAt) continue;
+                // A self-update can start draining while this batch runs
+                // (each job is awaited in turn). Stop picking the rest up, or
+                // a busy node keeps taking jobs for minutes after "taking no
+                // new ones" (bonita, 0.1.83 -> 0.1.84). They stay assigned
+                // and the restarted daemon picks them up.
+                if (stats.draining) break;
                 await processJob(job);
             }
         } catch (err) {

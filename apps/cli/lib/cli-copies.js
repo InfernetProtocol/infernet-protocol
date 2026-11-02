@@ -51,8 +51,17 @@ export function globalModuleRoots({ env = process.env, home = os.homedir(), npmP
     const roots = [];
     const add = (prefix) => { if (prefix) roots.push(path.join(prefix, 'lib', 'node_modules')); };
 
-    const miseData = env.MISE_DATA_DIR || path.join(env.XDG_DATA_HOME || path.join(home, '.local', 'share'), 'mise');
-    for (const d of listDirs(path.join(miseData, 'installs', 'node'))) add(d);
+    // Both mise data dirs: the installer relocates mise to a big volume with
+    // MISE_DATA_DIR on some boxes, while the operator's own shell keeps the
+    // default one (vienna had a stale copy in the default dir only).
+    const miseDirs = new Set([
+        env.MISE_DATA_DIR,
+        path.join(env.XDG_DATA_HOME || path.join(home, '.local', 'share'), 'mise'),
+        path.join(home, '.local', 'share', 'mise')
+    ].filter(Boolean));
+    for (const miseData of miseDirs) {
+        for (const d of listDirs(path.join(miseData, 'installs', 'node'))) add(d);
+    }
     for (const d of listDirs(path.join(env.NVM_DIR || path.join(home, '.nvm'), 'versions', 'node'))) add(d);
     for (const d of listDirs(path.join(home, '.asdf', 'installs', 'nodejs'))) add(d);
     for (const d of listDirs(path.join(env.FNM_DIR || path.join(home, '.local', 'share', 'fnm'), 'node-versions'))) add(path.join(d, 'installation'));
