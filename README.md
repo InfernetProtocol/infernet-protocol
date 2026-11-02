@@ -333,7 +333,7 @@ A node restarts itself; you should never have to notice it went down.
 
 ### House models
 
-Every provider node pulls and serves Infernet's **house models** by default: the models listed in [`apps/web/public/house-models.json`](apps/web/public/house-models.json), served at <https://infernetprotocol.com/house-models.json>. Today that is Profullstack's `hf.co/profullstack/saas-business-strategist-agent-GGUF` plus the uncensored `huihui_ai/qwen3.5-abliterated:4b` and `:9b`.
+Every provider node pulls and serves Infernet's **house models** by default: the models listed in [`apps/web/public/house-models.json`](apps/web/public/house-models.json), served at <https://infernetprotocol.com/house-models.json>. Today that is Profullstack's `hf.co/profullstack/saas-business-strategist-agent-GGUF` and `hf.co/profullstack/not-a-lawyer-agent-GGUF` (legal research, not legal advice) plus the uncensored `huihui_ai/qwen3.5-abliterated:4b` and `:9b`.
 
 - On start and every 6 hours the daemon fetches the list (HTTPS, infernetprotocol.com / c0mpute.com only) and pulls each model that fits, one at a time (a pull waits up to 10 minutes for a running job to finish): RAM >= `min_ram_gb`, at least 10% of the disk left free afterwards (10-50 GB), and under the operator's disk cap if set.
 - Each pull is checked against the listed digest and size; a mismatch is deleted. Models that leave the list are removed. A model you pulled yourself is never removed; only models the daemon pulled (`~/.config/infernet/house-models-state.json`) are.
