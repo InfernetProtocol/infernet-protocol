@@ -918,8 +918,11 @@ export default function ChatView({ initialModels = [] }) {
                       setVoiceProfile(selected);
                       const profile = voiceCatalog?.agent_profiles?.find((item) => item.slug === selected);
                       if (profile) {
-                        setVoiceEngine(profile.engine);
-                        setVoiceId(profile.voice);
+                        const nextEngine = voiceEngine === "pocket" ? "pocket" : profile.engine;
+                        setVoiceEngine(nextEngine);
+                        setVoiceId(
+                          nextEngine === "pocket" ? (profile.pocket_voice || profile.voice) : profile.voice,
+                        );
                         setVoiceLocale(profile.locale || "en-US");
                         setVoiceAccent(profile.accent || "");
                         setVoicePersona(profile.persona);
@@ -934,7 +937,9 @@ export default function ChatView({ initialModels = [] }) {
                   >
                     <option value="custom">Custom voice</option>
                     {(voiceCatalog?.agent_profiles ?? []).map((profile) => (
-                      <option key={profile.slug} value={profile.slug}>@{profile.slug} · {profile.voice_gender} · {profile.locale}</option>
+                      <option key={profile.slug} value={profile.slug}>
+                        @{profile.slug} · {voiceEngine === "pocket" ? (profile.pocket_voice_gender || profile.voice_gender) : profile.voice_gender} · {profile.locale}
+                      </option>
                     ))}
                   </select>
                   <select
@@ -943,12 +948,23 @@ export default function ChatView({ initialModels = [] }) {
                     onChange={(event) => {
                       const nextEngine = event.target.value;
                       const voices = voiceCatalog?.engines?.find((item) => item.id === nextEngine)?.voices ?? [];
+                      const profile = voiceCatalog?.agent_profiles?.find((item) => item.slug === voiceProfile);
+                      const profileVoice =
+                        nextEngine === "pocket"
+                          ? profile?.pocket_voice
+                          : profile?.engine === nextEngine ? profile.voice : undefined;
                       setVoiceEngine(nextEngine);
-                      setVoiceId(voices[0]?.id ?? "");
-                      setVoiceProfile("custom");
-                      setVoiceLocale("en-US");
-                      setVoiceAccent("");
-                      setVoicePersona("");
+                      setVoiceId(profileVoice || voices[0]?.id || "");
+                      if (profile) {
+                        setVoiceLocale(profile.locale || "en-US");
+                        setVoiceAccent(profile.accent || "");
+                        setVoicePersona(profile.persona || "");
+                      } else {
+                        setVoiceProfile("custom");
+                        setVoiceLocale("en-US");
+                        setVoiceAccent("");
+                        setVoicePersona("");
+                      }
                     }}
                     disabled={!voiceCatalog || streaming || voiceListening}
                     className="rounded-full border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
