@@ -6,6 +6,9 @@ import { reservationFromOrder } from "@/lib/reservations/orders";
 import { isSaladClass } from "@/lib/reservations/salad";
 import { createOrderGroup } from "@/lib/data/salad";
 import { randomBytes } from "node:crypto";
+import { checkoutClient, sessionState } from "@profullstack/x402-gateway";
+import { getPayment } from "@infernetprotocol/payments";
+import { verifyOrderPayment, orderWindowOver } from "@/lib/reservations/payment-check";
 
 /**
  * Self-serve reservation orders — database access
@@ -17,7 +20,7 @@ import { randomBytes } from "node:crypto";
 
 export const HOLD_MS = 90 * 60 * 1000;
 
-const COLUMNS = "id, status, rail, gpu_class, models, provider_id, operator_name, start_at, hours, price_per_hour, setup_fee, total_usd, name, email, buyer_token_hash, payment_ref, payer, reservation_id, error, salad_group, salad_state, created_at, paid_at, updated_at";
+const COLUMNS = "id, status, rail, gpu_class, models, provider_id, operator_name, start_at, hours, price_per_hour, setup_fee, total_usd, name, email, buyer_token_hash, payment_ref, payer, reservation_id, error, salad_group, salad_state, refund_state, refund_note, created_at, paid_at, updated_at";
 const PROVIDER_COLUMNS = "id, name, status, last_seen, reputation, gpu_model, specs, trust_tier";
 
 function db() {
@@ -123,6 +126,15 @@ export function orderTokenMatches(order, token) {
  */
 export async function fulfilOrder(order, { withKey = false, payer = null } = {}) {
     const now = new Date().toISOString();
+    // Paid after the booked hours already ended (a very late webhook or poll):
+    // nothing can be served, so it goes straight to the refund queue.
+    if (order.status === "awaiting_payment" && orderWindowOver(order)) {
+        const { data: late } = await db().from("reservation_orders")
+            .update({ status: "failed", refund_state: "due", paid_at: order.paid_at ?? now, error: "paid after the booked hours ended", updated_at: now })
+            .eq("id", order.id).eq("status", "awaiting_payment").select(COLUMNS).maybeSingle();
+        if (!late) return { order: await getOrder(order.id), already: true };
+        throw Object.assign(new Error("payment received after the booked hours ended; it will be refunded"), { status: 409 });
+    }
     const { data: claimed, error } = await db().from("reservation_orders")
         .update({ status: "fulfilled", paid_at: order.paid_at ?? now, payer: payer ?? order.payer ?? null, updated_at: now })
         .eq("id", order.id).eq("status", "awaiting_payment").select(COLUMNS).maybeSingle();
@@ -147,8 +159,11 @@ export async function fulfilOrder(order, { withKey = false, payer = null } = {})
     } catch (e) {
         // Paid but not booked: keep the payment ref so it can be refunded or rebooked by hand.
         console.error(`[orders] paid order ${order.id} could not be booked: ${e?.message ?? e}`);
-        await db().from("reservation_orders").update({ status: "failed", error: String(e?.message ?? e).slice(0, 500), updated_at: new Date().toISOString() }).eq("id", order.id);
-        throw Object.assign(new Error("payment received but the reservation could not be created; it will be refunded or rebooked"), { status: 500 });
+        await db().from("reservation_orders").update({ status: "failed", refund_state: "due", error: String(e?.message ?? e).slice(0, 500), updated_at: new Date().toISOString() }).eq("id", order.id);
+        const overlap = /already booked|overlap/i.test(String(e?.message ?? ""));
+        throw Object.assign(new Error(overlap
+            ? "payment received but those hours were just sold to someone else; it will be refunded"
+            : "payment received but the reservation could not be created; it will be refunded or rebooked"), { status: overlap ? 409 : 500 });
     }
 }
 
@@ -191,4 +206,40 @@ export async function setSaladState(id, state, err = null) {
     if (err) patch.error = String(err).slice(0, 500);
     const { error } = await db().from("reservation_orders").update(patch).eq("id", id);
     if (error) throw error;
+}
+
+/**
+ * Ask CoinPay whether this order is really paid in full: "paid" | "unpaid" | "unknown".
+ * The webhook body and the buyer's poll are never believed on their own.
+ */
+export async function verifyOrderAtCoinpay(order, ref = order?.payment_ref) {
+    const apiKey = process.env.COINPAY_API_KEY || process.env.COINPAYPORTAL_API_KEY;
+    // COINPAY_API_URL carries an /api suffix; checkout paths add their own.
+    const baseUrl = (process.env.COINPAY_API_URL || "https://coinpayportal.com").replace(/\/+$/, "").replace(/\/api$/, "");
+    if (!apiKey) return "unknown";
+    const client = checkoutClient({ apiKey, baseUrl });
+    return verifyOrderPayment(ref, order.total_usd, {
+        getSession: (r) => client.get(r),
+        sessionState,
+        getPayment
+    });
+}
+
+/** Paid orders that could not be booked and are owed a refund (admin queue). */
+export async function refundsDue() {
+    const { data, error } = await db().from("reservation_orders").select(COLUMNS)
+        .eq("refund_state", "due").order("created_at", { ascending: true });
+    if (error) throw error;
+    return (data ?? []).map(normalize);
+}
+
+/** Admin: record that a due refund was paid back by hand (tx or note required). */
+export async function markRefunded(id, { note, actor }) {
+    if (!note || String(note).trim().length < 4) throw Object.assign(new Error("a refund tx hash or note is required"), { status: 400 });
+    const { data, error } = await db().from("reservation_orders")
+        .update({ refund_state: "refunded", refund_note: `${String(note).slice(0, 300)} (by ${actor ?? "admin"})`, updated_at: new Date().toISOString() })
+        .eq("id", id).eq("refund_state", "due").select(COLUMNS).maybeSingle();
+    if (error) throw error;
+    if (!data) throw Object.assign(new Error("no refund is due on that order"), { status: 404 });
+    return normalize(data);
 }
