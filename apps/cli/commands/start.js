@@ -227,6 +227,10 @@ async function runDaemon(args, ctx) {
     const heartbeatMs = Number.parseInt(args.get('heartbeat-interval') ?? '', 10) || DEFAULT_HEARTBEAT_MS;
     const pollMs     = Number.parseInt(args.get('poll-interval') ?? '', 10)      || DEFAULT_POLL_MS;
     const once       = args.has('once');
+    // Chat jobs run at once. Ollama on one GPU serves a single request at a
+    // time unless OLLAMA_NUM_PARALLEL is raised, so extra jobs only queue
+    // inside it; raise this together with that.
+    const maxConcurrentJobs = Number.parseInt(process.env.INFERNET_MAX_CONCURRENT_JOBS ?? '', 10) || 1;
 
     const p2pDisabled = args.has('no-p2p');
     const noAdvertise = args.has('no-advertise') || node.address === null;
@@ -618,6 +622,12 @@ async function runDaemon(args, ctx) {
             return;
         }
         if (stats.draining) return;
+        // Polls fire every pollMs whether or not the last batch finished, so
+        // without a cap a node ran one job per tick at once. The extras sat
+        // in Ollama's queue until fetch gave up ("fetch failed" at ~300 s,
+        // cullen3 2026-11-02). Jobs stay assigned here and run when a slot
+        // frees up.
+        if (stats.activeJobIds.size >= maxConcurrentJobs) return;
         const polledAt = Date.now();
         try {
             const result = await client.pollJobs({ limit: 5 });
@@ -635,6 +645,7 @@ async function runDaemon(args, ctx) {
                 // new ones" (bonita, 0.1.83 -> 0.1.84). They stay assigned
                 // and the restarted daemon picks them up.
                 if (stats.draining) break;
+                if (stats.activeJobIds.size >= maxConcurrentJobs) break;
                 await processJob(job);
             }
         } catch (err) {
