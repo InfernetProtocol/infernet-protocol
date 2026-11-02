@@ -68,6 +68,13 @@ describe("finding CLI copies", () => {
         expect(wrapperTarget({ env: b.env, home: b.home })).toBe(b.source);
     });
 
+    it("also scans the default mise dir when MISE_DATA_DIR points elsewhere", () => {
+        const b = bonitaHome(root);
+        const env = { ...b.env, MISE_DATA_DIR: path.join(root, "relocated-mise") };
+        const mine = findGlobalCopies({ env, home: b.home, npmPrefix: null }).filter((c) => c.dir.startsWith(b.home));
+        expect(mine.map((c) => c.dir)).toEqual([b.stale]);
+    });
+
     it("reads an npm-path wrapper (exec \"<prefix>/bin/infernet\" \"$@\")", () => {
         const b = bonitaHome(root);
         writeFileSync(path.join(b.bin, "infernet"), `#!/bin/sh\nexec "${path.join(b.real, "bin", "infernet")}" "$@"\n`);

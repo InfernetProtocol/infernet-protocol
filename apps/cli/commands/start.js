@@ -614,6 +614,12 @@ async function runDaemon(args, ctx) {
                 // complete, so without this guard the poll loop queues the
                 // same job on every tick while it's in flight.
                 if (stats.activeJobIds.has(job.id)) continue;
+                // A self-update can start draining while this batch runs
+                // (each job is awaited in turn). Stop picking the rest up, or
+                // a busy node keeps taking jobs for minutes after "taking no
+                // new ones" (bonita, 0.1.83 -> 0.1.84). They stay assigned
+                // and the restarted daemon picks them up.
+                if (stats.draining) break;
                 await processJob(job);
             }
         } catch (err) {
