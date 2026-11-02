@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const { findDocumentUrls } = await import("@/lib/doc-urls");
-const { readDocument, fitText, documentContext, ReadError } = await import("@/lib/read-url");
+const { readDocument, fitText, documentContext, dropBackMatter, ReadError } = await import("@/lib/read-url");
 
 describe("finding links to read", () => {
     it("finds the link in a summarize request", () => {
@@ -60,5 +60,20 @@ describe("fitting a document into a small model", () => {
         expect(ctx).toContain("PDF, 17 pages");
         expect(ctx).toContain("Abstract: intuition matters.");
         expect(ctx).toContain("Do not invent");
+    });
+});
+
+describe("dropping a paper's reference list", () => {
+    it("cuts a trailing References section so the end is the conclusion", () => {
+        const body = Array.from({ length: 50 }, (_, i) => `body line ${i}`).join("\n");
+        const paper = `${body}\nConclusion\nIntuition matters.\nReferences\nSchutz, B. F. (2020). A First Course.\nEinstein (1916).`;
+        const out = dropBackMatter(paper);
+        expect(out.endsWith("Intuition matters.")).toBe(true);
+        expect(out).not.toContain("Schutz, B. F.");
+    });
+    it("leaves a document without one alone, and ignores an early heading", () => {
+        expect(dropBackMatter("a\nb\nc")).toBe("a\nb\nc");
+        const early = `References\n${Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n")}`;
+        expect(dropBackMatter(early)).toBe(early);
     });
 });

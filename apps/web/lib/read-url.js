@@ -70,9 +70,24 @@ export function fitText(text, budget = DOC_CHARS) {
     return { text: `${head}\n\n[… ${omitted.toLocaleString("en-US")} characters from the middle of the document left out …]\n\n${tail}`, omitted };
 }
 
+const BACK_MATTER = /^\s*(?:\d+\.?\s+)?(references|bibliography|works cited|literature cited|notes and references)\s*:?\s*$/i;
+
+/**
+ * The text without a paper's trailing reference list: with only room for the
+ * start and the end, the end should be the conclusion, not forty citations.
+ * Only a heading in the last half counts, so a "References" early on stays.
+ */
+export function dropBackMatter(text) {
+    const lines = String(text ?? "").split("\n");
+    for (let i = lines.length - 1; i >= Math.floor(lines.length / 2); i--) {
+        if (BACK_MATTER.test(lines[i])) return lines.slice(0, i).join("\n").trimEnd();
+    }
+    return String(text ?? "");
+}
+
 /** The system message for one read document. */
 export function documentContext(doc, { budget = DOC_CHARS } = {}) {
-    const { text, omitted } = fitText(doc.text, budget);
+    const { text, omitted } = fitText(dropBackMatter(doc.text), budget);
     const about = [doc.kind === "pdf" ? "PDF" : doc.kind, doc.pages ? `${doc.pages} pages` : null, `${Number(doc.chars ?? text.length).toLocaleString("en-US")} characters`]
         .filter(Boolean).join(", ");
     return [
