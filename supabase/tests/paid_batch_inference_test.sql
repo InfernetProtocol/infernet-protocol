@@ -181,6 +181,18 @@ begin
     exception when check_violation then null;
     end;
 
+    -- A failed request re-opened above what is available is refused too
+    -- (re-opening must pass the guard, not skip it as an in-flight update).
+    insert into public.payout_requests (provider_id, amount_usd, coin, address, status) values (prov, 0.4, 'USDC', '0x0', 'failed') returning id into tid;
+    update public.payout_requests set amount_usd = 0.4 where id = tid;  -- still failed: no check needed
+    begin
+        update public.payout_requests set amount_usd = 1, status = 'failed' where id = tid;
+        update public.payout_requests set status = 'requested' where id = tid;
+        raise exception 'ASSERT FAILED: re-opened payout above available was accepted';
+    exception when check_violation then null;
+    end;
+    delete from public.payout_requests where id = tid;
+
     -- Charge $0.30; the unused $1.70 returns to earnings at batch end.
     perform public.inference_claim_items(bid);
     select id into it from public.inference_batch_items where batch_id = bid;

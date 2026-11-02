@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ok, fail } from "@/lib/reservations/http";
 import { requireCaller, failFrom } from "@/lib/billing/http";
-import { prepareSubmit, commitSubmit, publicBatch } from "@/lib/data/batches";
+import { prepareSubmit, commitSubmit, publicBatch, listBatches } from "@/lib/data/batches";
 import { fundingPreview, creditWalletPayment, openTopup } from "@/lib/data/billing";
 import { planFunding, shortfallCents, microToUsd } from "@/lib/billing/core";
 import { paymentFrom, settleOrderPayment, settlementHeader, x402Configured } from "@/lib/reservations/order-payment";
@@ -34,6 +34,14 @@ function insufficient(r, extra = {}, headers = {}) {
         prepaid_available_usd: microToUsd(r.prepaid_available_micro ?? 0),
         ...extra
     }, { status: 402, headers: { "cache-control": "no-store", ...headers } });
+}
+
+/** GET /api/v1/batches?limit= : the caller's recent batches (no items). */
+export async function GET(request) {
+    const { user, error } = await requireCaller(request);
+    if (error) return error;
+    const limit = new URL(request.url).searchParams.get("limit");
+    try { return ok(await listBatches(user, { limit })); } catch (e) { return failFrom(e, "batches"); }
 }
 
 export async function POST(request) {

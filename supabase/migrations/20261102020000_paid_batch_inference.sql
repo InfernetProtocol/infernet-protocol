@@ -218,7 +218,11 @@ begin
     if new.status not in ('requested', 'approved', 'sending', 'sent') then
         return new;
     end if;
-    if tg_op = 'UPDATE' and new.amount_usd <= old.amount_usd then
+    -- An already-open request moving along (requested -> approved -> sending
+    -- -> sent) at the same or a lower amount took its money when it opened.
+    -- A failed/rejected one re-opened must pass the check again.
+    if tg_op = 'UPDATE' and new.amount_usd <= old.amount_usd
+       and old.status in ('requested', 'approved', 'sending', 'sent') then
         return new;
     end if;
     perform 1 from public.providers where id = new.provider_id for update;

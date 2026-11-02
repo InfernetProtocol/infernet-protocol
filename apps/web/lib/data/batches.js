@@ -482,3 +482,13 @@ export async function batchReceipt(user, id) {
     }
     return buildReceipt({ batch, items, providerMicro });
 }
+
+/** GET /api/v1/batches: the caller's recent batches, newest first (no items). */
+export async function listBatches(user, { limit = 20 } = {}) {
+    const n = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const { data, error } = await getSupabaseServerClient()
+        .from("inference_batches").select(BATCH_COLUMNS)
+        .eq("user_id", user.id).order("created_at", { ascending: false }).limit(n);
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+    return { data: (data ?? []).map((b) => { const { items, ...rest } = publicBatch(b, []); return rest; }) };
+}

@@ -106,7 +106,8 @@ export default async function DashboardPage({ searchParams }) {
                             <>
                                 {fmtUsdPrecise(earnings.confirmed_usd)} confirmed · {fmtUsdPrecise(earnings.pending_approval_usd)} pending approval · {fmtUsdPrecise(earnings.paid_usd)} paid out · {earnings.jobs_credited} jobs
                                 <br />
-                                <Link href="/dashboard/earnings" className="mt-1 inline-block text-[var(--accent)] hover:underline">See all jobs across your nodes →</Link>
+                                <Link href="/dashboard/earnings" className="mt-1 inline-block text-[var(--accent)] hover:underline">See all jobs across your nodes →</Link>{" "}
+                                <Link href="/dashboard/billing" className="ml-3 mt-1 inline-block text-[var(--accent)] hover:underline">Billing, API keys and batches →</Link>
                             </>
                         )}
                     />
