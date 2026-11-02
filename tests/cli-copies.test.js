@@ -15,6 +15,7 @@ import {
 } from "../apps/cli/lib/cli-copies.js";
 import { RUNNING_VERSION, readRunningVersion, readInstalledVersion } from "../apps/cli/lib/version.js";
 import { judgeCliInstall } from "../apps/cli/commands/doctor.js";
+import { setupRunsFrom } from "../apps/cli/commands/update.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PKG = "@infernetprotocol/cli";
@@ -212,5 +213,18 @@ describe("doctor: CLI install check", () => {
         expect(judgeCliInstall({ running, copies: one, wrapper: "/src/apps/cli", daemon: { version: "0.1.83" } }).summary)
             .toMatch(/daemon runs v0\.1\.83, CLI is v0\.1\.84/);
         expect(judgeCliInstall({ running, copies: one, wrapper: "/src/apps/cli", daemon: { version: null } }).status).toBe("fail");
+    });
+});
+
+describe("update: post-upgrade setup runs from the installed CLI", () => {
+    // bonita, 0.1.86 rollout: the hourly `update` ran from an npm copy, ran
+    // setup in-process (which rewrote infernet.service to that copy), then
+    // removed the copy. The daemon crash-looped until the unit was rewritten.
+    it("hands setup to the installed CLI when this process is another copy", () => {
+        expect(setupRunsFrom("/home/u/.infernet/source/apps/cli", "/mise/node/24/lib/node_modules/@infernetprotocol/cli")).toBe("installed");
+    });
+    it("runs setup itself when it is the installed CLI, or there is no wrapper", () => {
+        expect(setupRunsFrom("/src/apps/cli", "/src/apps/cli")).toBe("self");
+        expect(setupRunsFrom(null, "/src/apps/cli")).toBe("self");
     });
 });

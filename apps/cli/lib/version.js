@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 const _dir = dirname(fileURLToPath(import.meta.url));
 
 /** The CLI package directory this code is running from. */
-export const CLI_DIR = join(_dir, '..');
+export const CLI_DIR = (() => {
+    const dir = join(_dir, '..');
+    try { return realpathSync(dir); } catch { return dir; }
+})();
 
 /**
  * The version of the code that is actually running: the package.json next to

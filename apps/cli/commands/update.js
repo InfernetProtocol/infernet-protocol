@@ -11,8 +11,8 @@
 import { spawn } from 'node:child_process';
 import { compareVersions } from '@profullstack/cli';
 import setup from './setup.js';
-import { CURRENT_VERSION, fetchLatestVersion } from '../lib/version.js';
-import { pruneCliCopies, wrapperTarget } from '../lib/cli-copies.js';
+import { CLI_DIR, CURRENT_VERSION, fetchLatestVersion } from '../lib/version.js';
+import { pruneCliCopies, wrapperPath, wrapperTarget } from '../lib/cli-copies.js';
 
 const HELP = `infernet update — pull latest CLI + autonomous post-upgrade setup
 
@@ -125,23 +125,61 @@ export default async function update(args, ctx) {
     const ok = await pullLatestBinary({ quiet });
     if (!ok) return 1;
 
-    // The installer already pruned other copies (install.sh); this catches an
-    // older installer and copies the installer could not see.
-    if (!args.has('keep-copies')) cleanCliCopies({ quiet, version: latest });
-
     if (args.has('skip-setup')) {
+        if (!args.has('keep-copies')) cleanCliCopies({ quiet, version: latest });
         process.stdout.write("\n✓ Binary updated (skipped setup).\n");
         return 0;
     }
 
     process.stdout.write("\n→ Running post-upgrade setup (keys + register + daemon restart)\n");
 
-    const setupArgs = new Map([['yes', true], ['confirm', true], ['skip-pull', true]]);
+    const passthrough = [];
     for (const k of ['port', 'address', 'no-advertise']) {
-        if (args.has(k)) setupArgs.set(k, args.get(k) ?? true);
+        if (!args.has(k)) continue;
+        const v = args.get(k);
+        passthrough.push(`--${k}`, ...(v === undefined ? [] : [String(v)]));
     }
 
-    return setup(setupArgs, ctx);
+    // Setup writes the daemon's unit from the CLI that runs it. If this
+    // process is not the CLI the installer just installed (a stale npm-global
+    // copy, or the npm copy of a node the installer kept on git), running
+    // setup here would point infernet.service at this copy, which the cleanup
+    // below then deletes: bonita's daemon crash-looped on exactly that during
+    // the 0.1.86 rollout. Hand setup to the installed CLI instead, and clean
+    // up copies only after it has rewritten the unit.
+    const installed = wrapperTarget();
+    let code;
+    if (setupRunsFrom(installed, CLI_DIR) === 'installed') {
+        process.stdout.write(`  (running setup from the installed CLI at ${installed})\n`);
+        code = await runInstalledSetup(['setup', '--yes', '--confirm', '--skip-pull', ...passthrough]);
+    } else {
+        const setupArgs = new Map([['yes', true], ['confirm', true], ['skip-pull', true]]);
+        for (const k of ['port', 'address', 'no-advertise']) {
+            if (args.has(k)) setupArgs.set(k, args.get(k) ?? true);
+        }
+        code = await setup(setupArgs, ctx);
+    }
+
+    // The installer already pruned other copies (install.sh); this catches an
+    // older installer and copies it could not see. After setup, never before.
+    if (!args.has('keep-copies')) cleanCliCopies({ quiet, version: latest });
+    return code;
+}
+
+/** 'installed' when the wrapper runs another CLI than this process. */
+export function setupRunsFrom(installedDir, selfDir) {
+    return installedDir && installedDir !== selfDir ? 'installed' : 'self';
+}
+
+function runInstalledSetup(argv) {
+    return new Promise((resolve) => {
+        const child = spawn(wrapperPath(), argv, { stdio: 'inherit' });
+        child.on('exit', (c) => resolve(c ?? 1));
+        child.on('error', (err) => {
+            process.stderr.write(`error: could not run the installed CLI: ${err?.message ?? err}\n`);
+            resolve(1);
+        });
+    });
 }
 
 export { HELP, INSTALLER_URL };
