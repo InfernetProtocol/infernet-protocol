@@ -33,6 +33,7 @@
 #   INFERNET_REF=branch           branch/tag/commit for git path (master)
 #   INFERNET_NPM_VERSION=X.Y.Z    pin npm version (latest)
 #   INFERNET_FORCE_GIT=1          skip npm, force git path
+#   INFERNET_PREFER_NPM=1         move an existing git install to npm
 #   INFERNET_KEEP_OTHER_COPIES=1  don't remove other npm-global CLI copies
 #   INFERNET_MIN_DISK_MB=N        override disk-space threshold (3 / 10 / 15 GB)
 #   INFERNET_SKIP_DISK_CHECK=1    skip the disk-space preflight
@@ -1117,6 +1118,24 @@ prune_stray_cli_copies() {
     fi
 }
 
+# A node installed from git (because npm lagged a release at the time) has
+# its daemon unit and wrapper pointing at ~/.infernet/source. Switching that
+# node to npm on a later update leaves the daemon on the old source forever
+# (bonita, 2026-11-02: npm got 0.1.84, the unit kept running 0.1.83). Keep
+# such a node on git; INFERNET_PREFER_NPM=1 switches it deliberately.
+existing_git_install_in_use() {
+    [ -d "$SOURCE_DIR/.git" ] || return 1
+    git -C "$SOURCE_DIR" rev-parse --git-dir >/dev/null 2>&1 || return 1
+    for _f in "$HOME"/.config/systemd/user/infernet*.service \
+              /etc/systemd/system/infernet*.service \
+              "$HOME"/Library/LaunchAgents/com.infernetprotocol*.plist \
+              "$WRAPPER"; do
+        [ -f "$_f" ] && grep -qsF "$SOURCE_DIR/apps/cli" "$_f" && { unset _f; return 0; }
+    done
+    unset _f
+    return 1
+}
+
 # Try installing via npm. Returns 0 on success (binary now on PATH via
 # npm's global prefix), 1 to fall back to the git clone path.
 try_npm_install() {
@@ -1504,6 +1523,11 @@ main() {
     check_node
     # bun is the preferred runtime + dep installer (node stays as fallback).
     ensure_bun
+
+    if [ -z "$INFERNET_FORCE_GIT" ] && [ "${INFERNET_PREFER_NPM:-}" != "1" ] && existing_git_install_in_use; then
+        info "existing git install at $SOURCE_DIR is in use (service/wrapper) — updating it in place (INFERNET_PREFER_NPM=1 switches to npm)"
+        INFERNET_FORCE_GIT=1
+    fi
 
     if [ -z "$INFERNET_FORCE_GIT" ] && try_npm_install; then
         # npm dropped the binary at $(npm prefix -g)/bin/infernet. Symlink
