@@ -263,11 +263,25 @@ describe("syncHouseModels against a fake Ollama", () => {
         expect(text).toMatch(/disk used by house models: 3.8 GB/);
     });
 
-    it("does not start a pull while the node is busy", async () => {
+    it("waits for the node to go idle before a pull, but not forever", async () => {
         const { fetchImpl, calls } = fakeOllama({ tags: [] });
-        const s = await syncHouseModels({ settings: on, manifest, fetchImpl, host: "http://ollama.test", statePath: path.join(dir, "s.json"), capacity, isBusy: () => true });
-        expect(s.pulled).toEqual([]);
-        expect(calls.filter((c) => c.includes("pull"))).toEqual([]);
+        let busyChecks = 0;
+        const slept = [];
+        const s = await syncHouseModels({
+            settings: on, manifest, fetchImpl, host: "http://ollama.test", statePath: path.join(dir, "s.json"), capacity,
+            isBusy: () => { busyChecks += 1; return busyChecks <= 2; },
+            sleep: async (ms) => { slept.push(ms); }
+        });
+        expect(slept).toEqual([15000, 15000]); // waited while busy, then pulled
+        expect(s.pulled).toHaveLength(3);
+        // An always-busy node still pulls once the wait runs out.
+        const always = fakeOllama({ tags: [] });
+        const s2 = await syncHouseModels({
+            settings: on, manifest, fetchImpl: always.fetchImpl, host: "http://ollama.test", statePath: path.join(dir, "s2.json"), capacity,
+            isBusy: () => true, busyWaitMs: 0, sleep: async () => {}
+        });
+        expect(s2.pulled).toHaveLength(3);
+        expect(calls.filter((c) => c.includes("pull"))).toHaveLength(3);
     });
 
     it("opt-out removes what it pulled on the next sync", async () => {

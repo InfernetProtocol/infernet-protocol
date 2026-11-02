@@ -7,7 +7,7 @@
  * house-models.json), served at https://infernetprotocol.com/house-models.json.
  * Adding a model is a PR to that file. The daemon fetches it on start and every
  * few hours, pulls each listed model that fits this machine into Ollama (one at
- * a time, never while a job is running), verifies the pulled model's digest and
+ * a time, preferring idle moments), verifies the pulled model's digest and
  * size against the manifest, and removes house models that leave the manifest.
  * Pulled models show up in served_models like any other Ollama model.
  *
@@ -383,8 +383,10 @@ export function ramGb() {
 
 /**
  * Fetch the manifest, plan, then remove and pull one model at a time.
- * `isBusy()` is checked before each pull so a pull never starts while the
- * node is running a job. Writes the state file. Returns a summary.
+ * Before each pull it waits up to `busyWaitMs` (10 min) for the node to be
+ * idle (`isBusy()`), then pulls anyway: a pull is network and disk work that
+ * Ollama does beside inference, and a node that is never idle must still get
+ * its house models. Writes the state file. Returns a summary.
  */
 export async function syncHouseModels({
     settings,
@@ -392,6 +394,8 @@ export async function syncHouseModels({
     host = ollamaHost(),
     statePath = getStatePath(),
     isBusy = () => false,
+    busyWaitMs = 10 * 60 * 1000,
+    sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     log = () => {},
     capacity = null,
     manifest = null
@@ -428,10 +432,8 @@ export async function syncHouseModels({
         }
 
         for (const m of plan.pull) {
-            if (isBusy()) {
-                summary.skipped.push({ name: m.ollama_name, reason: 'node busy with a job; next sync' });
-                continue;
-            }
+            const waitUntil = Date.now() + busyWaitMs;
+            while (isBusy() && Date.now() < waitUntil) await sleep(15_000);
             log(`pulling ${m.ollama_name} (${(m.size_bytes / GB).toFixed(1)} GB)`);
             try {
                 let lastLog = 0;
