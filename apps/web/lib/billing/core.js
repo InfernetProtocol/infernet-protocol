@@ -208,13 +208,15 @@ export function itemChargeMicro({ item, result, price }) {
 
 /**
  * Provider share of a charge. The house fee (house_fee_pct, read from the
- * 'earnings' settings) is rounded up to the micro-dollar; the provider gets
- * the rest. Returns integer micro-USD.
+ * 'earnings' settings) is rounded DOWN to the micro-dollar and the provider
+ * gets the rest, so rounding always favours the operator: they never get
+ * less than (100 - fee)% of what the customer paid. (Rounding the fee up gave
+ * the house 100% of every 1-micro item.) Returns integer micro-USD.
  */
 export function providerSplitMicro(chargeMicro, houseFeePct) {
     const bps = BigInt(Math.round(Math.min(Math.max(Number(houseFeePct) || 0, 0), 100) * 100));
     const charge = BigInt(Math.max(0, Math.floor(Number(chargeMicro) || 0)));
-    const fee = ceilDiv(charge * bps, 10_000n);
+    const fee = (charge * bps) / 10_000n; // BigInt division truncates: floor for non-negatives
     const capped = fee > charge ? charge : fee;
     return { feeMicro: Number(capped), providerMicro: Number(charge - capped) };
 }
