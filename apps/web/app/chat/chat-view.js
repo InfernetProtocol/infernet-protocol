@@ -194,6 +194,8 @@ export default function ChatView({ initialModels = [] }) {
   // Per-job conversation key: Map<jobId, Uint8Array>
   const convKeysRef = useRef(new Map());
   const streamedTextRef = useRef("");
+  // Jobs whose answer has arrived, so a status poll started by a dropped stream stops.
+  const finishedJobsRef = useRef(new Set());
   const recorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const audioRef = useRef(null);
@@ -698,6 +700,7 @@ export default function ChatView({ initialModels = [] }) {
       setStreaming(false);
       if (voiceMode) void speakAssistant(finalText.trim());
       convKeysRef.current.delete(jobId);
+      finishedJobsRef.current.add(jobId);
       try { es.close(); } catch { /* ignore */ }
       esRef.current = null;
     });
@@ -728,11 +731,24 @@ export default function ChatView({ initialModels = [] }) {
     };
   }
 
-  async function fetchPersistedFailure(jobId, fallback) {
+  // A dropped event stream is not a failed job. A long prompt (a linked PDF, say)
+  // keeps a CPU node reading for a while before its first token, and a proxy or a
+  // restart can cut the stream meanwhile; EventSource reconnects on its own. So
+  // while the job is still running, keep checking its status, for up to 5 minutes.
+  async function fetchPersistedFailure(jobId, fallback, startedAt = Date.now()) {
+    if (finishedJobsRef.current.has(jobId)) return;
     try {
       const res = await fetch(`/api/chat/${encodeURIComponent(jobId)}/status`);
       if (res.ok) {
         const body = await res.json();
+        if (finishedJobsRef.current.has(jobId)) return;
+        const terminal = ["completed", "failed", "cancelled", "canceled", "expired", "error"].includes(body?.status);
+        const reported = body?.latest_error_message ?? body?.error ?? null;
+        if (!terminal && !reported && Date.now() - startedAt < 5 * 60_000) {
+          setMessages((prev) => updateLastAssistant(prev, (m) => (m.pending && !m.content ? { ...m, status: "Still working on it…" } : m)));
+          setTimeout(() => { void fetchPersistedFailure(jobId, fallback, startedAt); }, 3_000);
+          return;
+        }
         // Recover the final E2E-encrypted text if the SSE connection dropped
         // after the provider committed its completion event.
         if (body?.status === "completed") {
@@ -761,6 +777,7 @@ export default function ChatView({ initialModels = [] }) {
           setStreaming(false);
           setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, content: completedText, pending: false, done: true, finishReason })));
           convKeysRef.current.delete(jobId);
+          finishedJobsRef.current.add(jobId);
           if (voiceMode) void speakAssistant(completedText.trim());
           if (esRef.current) {
             try { esRef.current.close(); } catch { /* ignore */ }
