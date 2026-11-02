@@ -21,9 +21,9 @@ import {
     setupRuntime,
     verifyBundle
 } from "@infernetprotocol/liquid-agent";
-import { cmdTextRuntime, cmdTextTrain, isTextJob, TEXT_HELP } from "./model-text.js";
+import { cmdTextGenerate, cmdTextRuntime, cmdTextTrain, isTextJob, TEXT_HELP } from "./model-text.js";
 
-export const TEMPORAL_SUBCOMMANDS = new Set(["train", "evaluate", "eval", "predict", "serve", "capabilities", "runtime", "synth"]);
+export const TEMPORAL_SUBCOMMANDS = new Set(["train", "evaluate", "eval", "predict", "serve", "capabilities", "runtime", "synth", "generate"]);
 
 export const TEMPORAL_HELP = `${TEXT_HELP}
 Temporal policies (workloads ${WORKLOADS.TRAIN}, ${WORKLOADS.INFER}):
@@ -306,6 +306,8 @@ export async function runTemporal(sub, args) {
             return cmdServe(args);
         case "synth":
             return cmdSynth(args);
+        case "generate":
+            return cmdTextGenerate(args);
         default:
             throw new Error(`not a temporal subcommand: ${sub}`);
     }

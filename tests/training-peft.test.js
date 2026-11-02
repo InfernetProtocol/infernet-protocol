@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, writeFile, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createPeftBackend, createTrainer, PEFT_KINDS } from "../packages/training/src/index.js";
+import { createPeftBackend, createTrainer, PEFT_KINDS, peftGenerate } from "../packages/training/src/index.js";
 
 // A stand-in "python" that ignores its runner argument and prints what the
 // real runner prints: v1 events on stdout, logs on stderr, noise in between.
@@ -52,6 +52,14 @@ describe("peft training backend", () => {
         const events = await collect(createPeftBackend({ python }).start({ config: { ...JOB, kind: "temporal-policy" } }));
         expect(events.map((e) => e.type)).toEqual(["error", "done"]);
         expect(events[0].code).toBe("E_BAD_JOB");
+    });
+
+    it("peftGenerate returns the runner's answer and surfaces its error", async () => {
+        const ok = await fakePython(`echo 'Loading weights'\necho '{"v":1,"type":"answer","text":"Charge for value.","tokens":4}'`);
+        const res = await peftGenerate({ request: { adapter_dir: "a", messages: [{ role: "user", content: "hi" }] }, python: ok });
+        expect(res.text).toBe("Charge for value.");
+        const bad = await fakePython(`echo '{"v":1,"type":"error","message":"no adapter"}'\nexit 1`);
+        await expect(peftGenerate({ request: {}, python: bad })).rejects.toThrow("no adapter");
     });
 
     it("is selectable by name and knows its kinds", async () => {

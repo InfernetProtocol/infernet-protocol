@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 import {
     createPeftBackend,
     PEFT_KINDS,
+    peftGenerate,
     peftRuntimeStatus,
     setupPeftRuntime
 } from "@infernetprotocol/training";
@@ -30,7 +31,37 @@ Text fine-tunes (workload infernet.text.train):
   infernet model train --job <job.json> [--json]
                                          LoRA-tune job.base_model on job.dataset (jsonl of
                                          {title, text}); --json streams v1 events.
+  infernet model generate --adapter <dir> (--prompt "..." | --input <request.json>) [--json]
+                                         Answer with the base model + that LoRA adapter
+                                         (workload infernet.text.infer).
 `;
+
+export async function cmdTextGenerate(args) {
+    let request;
+    let requestPath = null;
+    if (args.has("input")) {
+        requestPath = path.resolve(args.get("input"));
+        request = JSON.parse(await readFile(requestPath, "utf8"));
+    } else {
+        const adapter = args.has("adapter") ? path.resolve(args.get("adapter")) : null;
+        const prompt = args.has("prompt") ? args.get("prompt") : null;
+        if (!adapter || !prompt) {
+            process.stderr.write("error: --adapter <dir> and --prompt <text> (or --input <request.json>) are required\n");
+            return 2;
+        }
+        request = { adapter_dir: adapter, messages: [{ role: "user", content: String(prompt) }] };
+        if (args.has("max-new-tokens")) request.max_new_tokens = Number(args.get("max-new-tokens"));
+    }
+    try {
+        const res = await peftGenerate({ request, requestPath });
+        process.stdout.write(args.has("json") ? `${JSON.stringify(res)}\n` : `${res.text}\n`);
+        return 0;
+    } catch (err) {
+        if (args.has("json")) process.stdout.write(`${JSON.stringify({ v: 1, type: "error", message: err.message })}\n`);
+        else process.stderr.write(`error: ${err.message}\n`);
+        return 1;
+    }
+}
 
 export function isTextJob(job) {
     return Boolean(job && PEFT_KINDS.includes(job.kind));
