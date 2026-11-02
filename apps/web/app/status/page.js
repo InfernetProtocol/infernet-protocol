@@ -56,8 +56,8 @@ export default async function HomePage() {
       <OverviewGrid cards={overview.cards} />
       <div className="grid gap-6 xl:grid-cols-2">
         <ResourceTable
-          title="Queued jobs"
-          description="Jobs in the queue right now."
+          title="Recent jobs"
+          description="The latest jobs on the network, newest first."
           columns={[
             { key: "title", label: "Job" },
             { key: "status", label: "Status" },
