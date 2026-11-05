@@ -303,7 +303,7 @@ export function applyOutlierHolds(rows, history = {}, opts = {}) {
  * the hours the buyer prepaid (total less the setup fee, which covers our
  * warm-up and stays with the house) less the house fee. Always
  * 'pending_approval': an admin confirms it once the hours were delivered, so
- * it is never withdrawable on its own. Salad orders (no provider) earn none.
+ * it is never withdrawable on its own. Rented-GPU orders (no provider) earn none.
  *
  * @param {object} p
  * @param {object} p.order          reservation_orders row (fulfilled)

@@ -3,9 +3,8 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { createReservation, issueKey, publicReservation, getReservation } from "@/lib/data/reservations";
 import { newBuyerToken, sha256 } from "@/lib/reservations/core";
 import { reservationFromOrder } from "@/lib/reservations/orders";
-import { isSaladClass } from "@/lib/reservations/salad";
-import { createOrderGroup } from "@/lib/data/salad";
-import { randomBytes } from "node:crypto";
+import { rentalProviderOf, operatorNameFor } from "@/lib/reservations/rental";
+import { provisionRental } from "@/lib/data/rental";
 import { checkoutClient, sessionState } from "@profullstack/x402-gateway";
 import { getPayment } from "@infernetprotocol/payments";
 import { verifyOrderPaymentDetail, orderWindowOver } from "@/lib/reservations/payment-check";
@@ -21,7 +20,7 @@ import { creditReservationOrder } from "@/lib/data/earnings";
 
 export const HOLD_MS = 90 * 60 * 1000;
 
-const COLUMNS = "id, status, rail, gpu_class, models, provider_id, operator_name, start_at, hours, price_per_hour, setup_fee, total_usd, name, email, buyer_token_hash, payment_ref, payer, reservation_id, error, salad_group, salad_state, refund_state, refund_note, payment_tx_hash, created_at, paid_at, updated_at";
+const COLUMNS = "id, status, rail, gpu_class, models, provider_id, operator_name, start_at, hours, price_per_hour, setup_fee, total_usd, name, email, buyer_token_hash, payment_ref, payer, reservation_id, error, salad_group, salad_state, rental_provider, rental_ref, rental_state, refund_state, refund_note, payment_tx_hash, created_at, paid_at, updated_at";
 const PROVIDER_COLUMNS = "id, name, status, last_seen, reputation, gpu_model, specs, trust_tier";
 
 function db() {
@@ -67,7 +66,7 @@ export async function bookings(now = Date.now()) {
  * Record an order. Returns { order, buyerToken }; the token is shown once and
  * reads the order and, once paid, the reservation.
  */
-/** Salad orders have no node: provider is null and the operator is us, on SaladCloud. */
+/** A rented order has no node: provider is null and the operator is us, on that cloud. */
 export async function placeOrder({ value, quote, provider, rail, paymentRef = null, payer = null }) {
     const token = newBuyerToken();
     const row = {
@@ -76,7 +75,7 @@ export async function placeOrder({ value, quote, provider, rail, paymentRef = nu
         gpu_class: value.gpu_class,
         models: value.models,
         provider_id: provider ? provider.id : null,
-        operator_name: provider ? (provider.name || `node ${provider.id}`) : "Infernet on SaladCloud",
+        operator_name: operatorNameFor(value.gpu_class, provider) ?? "Infernet",
         start_at: value.start_at,
         hours: value.hours,
         price_per_hour: quote.price_per_hour,
@@ -154,19 +153,24 @@ export async function fulfilOrder(order, { withKey = false, payer = null, txHash
         return { order: await getOrder(order.id), already: true };
     }
     try {
-        // A Salad order gets its container group now, stopped; the cron starts it an hour before start_at.
         let endpoint = null;
-        const nodeOrder = Boolean(claimed.provider_id) && !isSaladClass(claimed.gpu_class);
+        const rental = rentalProviderOf(claimed.gpu_class);
+        const nodeOrder = Boolean(claimed.provider_id) && !rental;
         if (nodeOrder) {
             // A node an admin disabled after the order was placed is not booked.
             const { data: prov } = await db().from("providers").select("disabled_at").eq("id", claimed.provider_id).maybeSingle();
             if (prov?.disabled_at) throw new Error("the operator node was disabled; it cannot be booked");
         }
-        if (isSaladClass(claimed.gpu_class)) {
-            const apiKey = randomBytes(24).toString("base64url");
-            const group = await createOrderGroup({ orderId: order.id, gpuClass: claimed.gpu_class, model: claimed.models[0], apiKey });
-            await db().from("reservation_orders").update({ salad_group: group.name, salad_state: "created", updated_at: new Date().toISOString() }).eq("id", order.id);
-            endpoint = { url: group.url, apiKey };
+        if (rental && rental.provision === "payment") {
+            // A Salad group can be created stopped, so it is made now and the
+            // cron starts it an hour before start_at.
+            const made = await provisionRental({ orderId: order.id, gpuClass: claimed.gpu_class, model: claimed.models[0] });
+            await setRentalRef(order.id, { provider: made.provider, ref: made.ref, state: made.state, saladGroup: made.ref });
+            endpoint = made.endpoint;
+        } else if (rental) {
+            // Billed from the moment it exists, so nothing is rented until
+            // warm-up: the order is marked pending and the cron rents it.
+            await setRentalRef(order.id, { provider: rental.id, ref: null, state: "pending" });
         }
         const { reservation } = await createReservation(reservationFromOrder(normalize(claimed), endpoint), {
             createdBy: `order:${order.id}`,
@@ -215,19 +219,56 @@ export async function publicOrder(order, now = Date.now()) {
     };
 }
 
-/** Paid Salad orders whose container group still exists, for the cron. */
-export async function saladOrdersToTend() {
+/**
+ * Paid rented orders the cron still has work for: pending ones waiting to be
+ * rented, and live ones waiting to serve or to be torn down.
+ *
+ * `rental_provider is null` covers rows written before the provider columns
+ * existed, which are Salad by definition — their state still reads from
+ * salad_state, so an order placed on the previous release keeps its lifecycle.
+ */
+export async function rentalOrdersToTend() {
     const { data, error } = await db().from("reservation_orders").select(COLUMNS)
-        .eq("status", "fulfilled").not("salad_group", "is", null).in("salad_state", ["created", "started"]);
+        .eq("status", "fulfilled")
+        .or("rental_state.in.(pending,created,started),and(rental_state.is.null,salad_state.in.(created,started))");
     if (error) throw error;
-    return (data ?? []).map(normalize);
+    return (data ?? []).map(normalize).map((o) => ({
+        ...o,
+        rental_provider: o.rental_provider ?? (o.salad_group ? "salad" : null),
+        rental_ref: o.rental_ref ?? o.salad_group ?? null,
+        rental_state: o.rental_state ?? o.salad_state ?? null
+    })).filter((o) => o.rental_provider);
 }
 
-export async function setSaladState(id, state, err = null) {
-    const patch = { salad_state: state, updated_at: new Date().toISOString() };
+/** Record what we rented for an order. `saladGroup` keeps the old column in step. */
+export async function setRentalRef(id, { provider, ref, state, saladGroup = null }) {
+    const patch = {
+        rental_provider: provider,
+        rental_ref: ref,
+        rental_state: state,
+        updated_at: new Date().toISOString()
+    };
+    // Salad rows keep writing the original columns so a rollback still tends them.
+    if (provider === "salad" && saladGroup) {
+        patch.salad_group = saladGroup;
+        patch.salad_state = state;
+    }
+    const { error } = await db().from("reservation_orders").update(patch).eq("id", id);
+    if (error) throw error;
+}
+
+export async function setRentalState(id, state, err = null) {
+    const patch = { rental_state: state, updated_at: new Date().toISOString() };
     if (err) patch.error = String(err).slice(0, 500);
     const { error } = await db().from("reservation_orders").update(patch).eq("id", id);
     if (error) throw error;
+    // Keep salad_state in step for Salad rows, for the same rollback reason.
+    // It only ever held created | started | deleted, and "pending" is not one
+    // of them (a Salad group exists from payment), so that state is not mirrored.
+    if (["created", "started", "deleted"].includes(state)) {
+        await db().from("reservation_orders").update({ salad_state: state })
+            .eq("id", id).eq("rental_provider", "salad");
+    }
 }
 
 /**

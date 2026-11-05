@@ -21,7 +21,7 @@ const PROTOCOL_VERSION = '2025-06-18';
 
 const id = { type: 'string', description: 'reservation id (uuid)' };
 const ORDER_PROPS = {
-    gpu_class: { type: 'string', description: 'l40s, a100, h100, h100x2, or a consumer card on demand (rtx5090, rtx4090, ... one model per order); see order_capacity' },
+    gpu_class: { type: 'string', description: 'a network class (l40s, a100, h100, h100x2), or a rented GPU on demand, one model per order: SaladCloud consumer cards (rtx5090, rtx4090, ...), vast-* on Vast.ai, thunder-* on Thunder Compute; see order_capacity' },
     models: { type: 'array', items: { type: 'string' }, description: 'exact model ids, from order_capacity' },
     hours: { type: 'integer', minimum: 1, maximum: 168 },
     start_at: { type: 'string', description: 'whole UTC hour, ISO; default the next hour' },

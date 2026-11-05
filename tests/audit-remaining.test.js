@@ -229,8 +229,8 @@ describe("7. revenue analytics", () => {
         expect(out.orders.gmv_usd).toBe(32.92);
         expect(out.jobs).toEqual({ paid_count: 1, gmv_usd: 4 });
         expect(out.gmv_usd).toBe(36.92);
-        // Fee: node order 12.92 - 5.8212, Salad keeps 20, job fee 0.08.
-        expect(out.platform_fee).toEqual({ node_orders_usd: 7.0988, salad_orders_usd: 20, paid_jobs_usd: 0.08 });
+        // Fee: node order 12.92 - 5.8212, the rented order keeps its whole 20, job fee 0.08.
+        expect(out.platform_fee).toEqual({ node_orders_usd: 7.0988, rented_orders_usd: 20, paid_jobs_usd: 0.08 });
         expect(out.platform_fee_usd).toBe(27.1788);
         expect(out.refunds).toEqual({ due_count: 1, due_usd: 7, refunded_count: 1, refunded_usd: 10 });
         expect(out.provider_payouts_sent_usd).toBe(7.5);

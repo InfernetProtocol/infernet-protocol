@@ -8,12 +8,14 @@ import { createOrdersClient, orderBodyFromFlags, x402KeyFrom, DEFAULT_MAX_USD } 
 const HELP = `infernet order — order a dedicated model endpoint by the hour
 
 We pin the models on one online node with the GPU class you pick, for the
-hours you book, and you get an OpenAI-compatible API key. Prepaid at the quoted
-price; non-compliant hours are credited or refunded.
+hours you book, and you get an OpenAI-compatible API key. Rented classes
+(rtx* on SaladCloud, vast-*, thunder-*) need no online node: we rent the GPU
+for your window and run the model on it. Prepaid at the quoted price;
+non-compliant hours are credited or refunded.
 
 Usage:
   infernet order capacity                  what is on sale now: classes, prices, free nodes, models
-  infernet order quote  --gpu l40s|rtx4090 --models m1[,m2] [--hours 1] [--start 2026-10-28T15:00:00Z]
+  infernet order quote  --gpu l40s|rtx4090|vast-h100|thunder-a100 --models m1[,m2] [--hours 1] [--start 2026-10-28T15:00:00Z]
   infernet order create --gpu l40s --models m1[,m2] [--hours 1] [--start ISO] [--email you@x]
         --checkout                 pay at CoinPay (any coin or PayPal): prints the checkout URL
         --x402                     pay now in USDC from X402_PRIVATE_KEY (or --key-file F)

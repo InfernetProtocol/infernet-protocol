@@ -123,3 +123,92 @@ holds.
   the order (`error`) and refunded by hand.
 - On sale only when `SALAD_API_KEY`, `SALAD_ORG` and `SALAD_PROJECT` are set; until then
   capacity lists the classes as `available: false` and orders get 503.
+
+## Rented GPU providers (2026-11-05)
+
+Salad was the first cloud we rent from, not the only one. Vast.ai and Thunder Compute now sell
+through the same `POST /api/v1/orders` flow, and the three sit behind one registry
+(`apps/web/lib/reservations/rental.js` for the pure half, `apps/web/lib/data/rental.js` for the
+calls), so the cron and the order routes no longer name a cloud. Adding the next one is a row in
+the registry plus an adapter pair.
+
+What is the same for all three: we sell our own inference service, never raw compute. The buyer
+gets an Infernet reservation and Infernet API keys, one model per order, and never sees a cloud
+credential, a cloud URL or a shell. The price is our cost times the order margin (default 100%).
+
+Class ids are namespaced per provider — `vast-rtx4090`, `thunder-a100` — except Salad's, which
+shipped on bare card names (`rtx4090`) and keeps them.
+
+### Vast.ai (`VAST_API_KEY`)
+
+Seven classes (`vast-rtx3090`, `vast-rtx4090`, `vast-rtx5090`, `vast-a6000`, `vast-l40s`,
+`vast-a100`, `vast-h100`), vLLM on the booked HF repo with an `--api-key` only Infernet holds.
+
+- Vast is a **marketplace**: hosts set their own rates and there is no rate card to snapshot. So
+  each class carries a **cost ceiling** — the most we will pay per GPU-hour — and the offer
+  search (`POST /api/v0/bundles`) demands `dph_total <= ceiling`, verified hosts only, at least
+  0.98 reliability, on-demand (never interruptible: a bid can be outbid mid-booking). The quote
+  comes from the ceiling, so it is deterministic and a cheaper offer widens our margin instead of
+  changing the buyer's bill. No offer under the ceiling means the class is not on sale.
+- Create is `PUT /api/v0/asks/{id}` and answers `new_contract`, not `id`. `gpu_ram` is MB in the
+  REST API and GB in the CLI. If `actual_status` reaches `exited`, `unknown` or `offline` the
+  instance never reaches `running`: destroy and retry rather than wait out the window.
+- **Transport is plain HTTP to a shared IP.** A Vast instance gets a share of a public IP with the
+  container port mapped to a random external one, so there is no hostname to serve TLS for. Only
+  Infernet calls it, server-side, and vLLM checks our bearer key — but the hop is unencrypted.
+  The tier is marked `encrypted_transport: false`; do not sell these classes for private work.
+
+### Thunder Compute (`THUNDER_API_TOKEN`)
+
+Four classes (`thunder-a6000`, `thunder-l40`, `thunder-a100`, `thunder-h100`) on Thunder's stock
+`ollama` template, which opens port 8000.
+
+- `GET /v2/pricing`, `/v2/specs` and `/v2/status` need **no key**, so the rate card, the specs and
+  live availability are readable before an account exists. Our snapshot is from 2026-11-05 and the
+  server re-reads the live card at provision time: a class whose price has risen above the
+  snapshot goes off sale rather than quietly eating the margin. Disk is billed per GB-hour on top
+  of the GPU, so the 100 GB minimum ($0.03/h) is part of our cost.
+- `POST /instances/create` takes only a template, GPU type, vCPUs and disk — there is no onstart
+  hook or image to pass, so vLLM cannot be handed a command line here. Everything after boot goes
+  over the forwarded port instead: `POST /api/pull` loads the model and `/v1` is OpenAI-compatible.
+  Models are therefore Ollama tags (quantized), not HF repos.
+- Ports are forwarded with `PATCH /instances/{id}/ports` on a **running** instance, and each one
+  is reachable at `https://<uuid>-<port>.thundercompute.com` — so this hop is TLS, unlike Vast.
+- **Ollama has no auth of its own.** Anyone who learns that hostname can spend our GPU hours. The
+  uuid is never shown to the buyer and the instance lives only for the window, which is mitigation
+  rather than authentication: the tier is marked `upstream_authenticated: false`. Keep the windows
+  short.
+
+### Lifecycle: rented boxes bill from the moment they exist
+
+A Salad group can be created stopped, so it is made when the order is paid. A Vast or Thunder
+instance starts billing immediately, and a booking can be 30 days out — so nothing is rented until
+warm-up. The cron (`/api/cron/reservations`, every minute) drives four verbs for every provider:
+
+| state | what happens |
+| --- | --- |
+| `pending` | paid, nothing rented. At `start_at - 1h` -> **rent** |
+| `created` | rented or stopped. **start** (Salad) or **serve** (resolve the address, pull the model, point the reservation at it) |
+| `started` | serving; nothing to do |
+| `deleted` | torn down at the end of the window |
+
+Because the address is not known until the box boots, a Vast or Thunder reservation is created
+pointing at `PENDING_ENDPOINT_URL` — `https://pending.rental.invalid/v1`, a hostname that can
+never resolve (RFC 2606), so a request that somehow goes out early fails closed instead of
+reaching a stranger. The cron patches in the real URL (and, for Vast, the vLLM key) once the box
+answers. A box that reaches a dead state is given back immediately rather than billing for the
+window.
+
+- Columns `rental_provider`, `rental_ref`, `rental_state` on `reservation_orders`
+  (migration `20261105140000_rental_providers.sql`). `salad_group` / `salad_state` are kept and
+  backfilled from, not dropped, so a rollback still tends live Salad orders; Salad rows keep both
+  in step.
+- `GET /api/v1/orders/capacity` now reports `providers[]` (which clouds are configured here and
+  what is missing) and `available` per class means *orderable this minute* — account plus, where
+  the provider has one, a live offer or free capacity.
+- Revenue: a rented order keeps its whole total (`platform_fee.rented_orders_usd`, renamed from
+  `salad_orders_usd`), because no operator is paid out of it. That figure is gross of what we pay
+  the cloud — the cloud's bill is not in this ledger.
+- **Neither account exists yet.** No Vast.ai or Thunder Compute credentials are in any vault, so
+  both read as `available: false` and orders get 503 until a funded account's key is set. Both are
+  prepaid, like Salad.

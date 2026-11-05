@@ -19,6 +19,8 @@
  * the end of the window. Nothing here touches the database or the network.
  */
 
+import { VLLM_MODELS, fitting, largestFitting } from "./rental-models.js";
+
 /** Effective 2026-11-01 00:00 UTC (salad.com/pricing), USD per GPU-hour. */
 export const SALAD_PRICES_EFFECTIVE = "2026-11-01T00:00:00Z";
 export const SALAD_PRIORITY = "high";
@@ -47,27 +49,21 @@ export const SALAD_PRICES = Object.freeze(Object.fromEntries(PRICE_ROWS.map(([id
 
 /**
  * Models we serve on Salad: open weights, ungated on Hugging Face (no token
- * needed to pull), with the VRAM they need under vLLM at a 8k context.
+ * needed to pull), with the VRAM they need under vLLM at a 8k context. The
+ * list is shared with the other vLLM-backed rented providers
+ * (rental-models.js), so a model added for one is offered on every card with
+ * the VRAM for it.
  */
-export const SALAD_MODELS = Object.freeze([
-    { id: "Qwen/Qwen2.5-1.5B-Instruct", params_b: 1.5, vram_gb: 8 },
-    { id: "Qwen/Qwen2.5-3B-Instruct", params_b: 3, vram_gb: 10 },
-    { id: "Qwen/Qwen2.5-7B-Instruct-AWQ", params_b: 7, vram_gb: 10 },
-    { id: "Qwen/Qwen2.5-14B-Instruct-AWQ", params_b: 14, vram_gb: 16 },
-    { id: "Qwen/Qwen2.5-Coder-14B-Instruct-AWQ", params_b: 14, vram_gb: 16 },
-    { id: "Qwen/Qwen2.5-7B-Instruct", params_b: 7, vram_gb: 24 },
-    { id: "Qwen/Qwen2.5-32B-Instruct-AWQ", params_b: 32, vram_gb: 24 },
-    { id: "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ", params_b: 32, vram_gb: 24 }
-]);
+export const SALAD_MODELS = VLLM_MODELS;
 
 export function modelsFitting(vramGb) {
-    return SALAD_MODELS.filter((m) => m.vram_gb <= vramGb).map((m) => m.id);
+    return fitting(SALAD_MODELS, vramGb);
 }
 
 /** Order tiers in the GPU_TIERS shape, cost = Salad High. */
 export const SALAD_TIERS = Object.freeze(Object.fromEntries(Object.entries(SALAD_PRICES).map(([id, p]) => [id, Object.freeze({
     label: `${p.card} ${p.vram_gb}GB`,
-    fits: `up to ${Math.max(...SALAD_MODELS.filter((m) => m.vram_gb <= p.vram_gb).map((m) => m.params_b))}B models, one per order`,
+    fits: `up to ${largestFitting(SALAD_MODELS, p.vram_gb)}B models, one per order`,
     cost_per_hour: p[SALAD_PRIORITY],
     // Admin list price: twice our cost, the same as the default order margin.
     price_per_hour: Math.ceil(p[SALAD_PRIORITY] * 2 * 100) / 100,

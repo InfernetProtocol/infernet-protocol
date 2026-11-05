@@ -6,6 +6,24 @@ import { useEffect, useState } from "react";
  * Self-serve order form: pick a GPU class and the models, see the price, pay
  * at CoinPay. Agents use POST /api/v1/orders with x402 instead.
  */
+
+/** How each rented provider is named to a buyer. Network classes name no cloud. */
+const RENTED = { salad: "SaladCloud", vast: "Vast.ai", thunder: "Thunder Compute" };
+
+/**
+ * One line under a class: where it runs and whether it can be booked.
+ *
+ * A rented class is never "none online" — it is on demand, and unavailable
+ * means the cloud has nothing to rent this minute (or we have no account
+ * there), which is a different thing from an empty network.
+ */
+function availabilityLine(c) {
+    const cloud = RENTED[c.source];
+    if (cloud) return c.available ? `on demand on ${cloud}, one model per order` : `${cloud}: no capacity right now`;
+    if (c.nodes_available) return `${c.nodes_available} node${c.nodes_available > 1 ? "s" : ""} free`;
+    return "none online right now";
+}
+
 export default function OrderView() {
     const [cap, setCap] = useState(null);
     const [error, setError] = useState(null);
@@ -77,14 +95,15 @@ export default function OrderView() {
                                 <div className="font-semibold text-white">{c.label}</div>
                                 <div className="text-xs text-[var(--muted)]">{c.fits}</div>
                                 <div className="mt-2 text-sm text-white">${c.price_per_hour.toFixed(2)}/h + ${c.setup_fee.toFixed(2)} setup</div>
-                                <div className="text-xs text-[var(--muted)]">{c.source === "salad" ? (c.available ? "on demand, one model per order" : "coming soon") : c.nodes_available ? `${c.nodes_available} node${c.nodes_available > 1 ? "s" : ""} free` : "none online right now"}</div>
+                                <div className="text-xs text-[var(--muted)]">{availabilityLine(c)}</div>
                             </button>
                         ))}
                     </div>
                     {cap.classes.every((c) => !c.available) ? (
                         <p className="mt-4 text-sm text-amber-100">
-                            No node with these GPUs is online right now, so nothing can be booked. Operators: run a node with
-                            one of these cards and it goes on sale here automatically.
+                            Nothing is available to book right now: no node with these GPUs is online, and the rented
+                            classes have no capacity this minute. Operators: run a node with one of these cards and it
+                            goes on sale here automatically.
                         </p>
                     ) : null}
                 </section>
