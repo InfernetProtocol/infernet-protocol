@@ -538,7 +538,7 @@ export async function getNetworkMoney() {
   try {
     const supabase = getSupabaseServerClient();
     const [earnings, payouts] = await Promise.all([
-      selectAll(supabase, "provider_earnings", "id, provider_id, kind, status, amount_usd"),
+      selectAll(supabase, "provider_earnings", "id, provider_id, kind, status, amount_usd, fee_usd, gross_usd"),
       selectAll(supabase, "payout_requests", "id, status, amount_usd")
     ]);
     return summariseNetworkMoney(earnings, payouts);
@@ -552,9 +552,11 @@ function moneyCards(money) {
   if (!money) {
     return [
       { label: "Earned by nodes", value: "—", note: "ledger unavailable" },
-      { label: "Spent by nodes", value: "—", note: "ledger unavailable" }
+      { label: "Spent by nodes", value: "—", note: "ledger unavailable" },
+      { label: "Platform fees", value: "—", note: "ledger unavailable" }
     ];
   }
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   return [
     {
       label: "Earned by nodes",
@@ -565,6 +567,16 @@ function moneyCards(money) {
       label: "Spent by nodes",
       value: fmtUsdPrecise(money.spent_usd),
       note: `${fmtUsdPrecise(money.spent_on_compute_usd)} on compute · ${fmtUsdPrecise(money.paid_out_usd)} paid out`
+    },
+    {
+      // The house's cut of paid work. Reported beside what the house paid out
+      // in subsidy, because a fee total on its own reads as profit when most
+      // of the traffic so far has been the house buying activity.
+      label: "Platform fees",
+      value: fmtUsdPrecise(money.fees_usd),
+      note: money.fee_jobs === 0
+        ? `no billed jobs yet · ${fmtUsdPrecise(money.subsidised_usd)} subsidised`
+        : `${plural(money.fee_jobs, "billed job")} on ${fmtUsdPrecise(money.fee_gross_usd)} · ${fmtUsdPrecise(money.subsidised_usd)} subsidised`
     }
   ];
 }

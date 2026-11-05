@@ -184,7 +184,14 @@ describe("summariseNetworkMoney", () => {
             spent_on_compute_usd: 2.75,
             paid_out_usd: 3,
             earning_nodes: 2,
-            credits: 3
+            credits: 3,
+            // Platform fees: none of these rows carries a fee_usd, so the
+            // house earned nothing on them. The confirmed subsidy total is
+            // zero too (the only subsidy row here is pending_approval).
+            fees_usd: 0,
+            fee_jobs: 0,
+            fee_gross_usd: 0,
+            subsidised_usd: 0
         });
     });
 
