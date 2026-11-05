@@ -84,7 +84,7 @@ describe("capacity with Salad classes", () => {
     it("lists them on demand, on sale only when Salad is configured", () => {
         const off = capacity([], [], NOW).find((c) => c.gpu_class === "rtx4090");
         expect(off).toMatchObject({ source: "salad", available: false, nodes_available: null, price_per_hour: 0.88, models_per_order: 1 });
-        const on = capacity([], [], NOW, 100, { salad: true }).find((c) => c.gpu_class === "rtx5090");
+        const on = capacity([], [], NOW, 100, { rented: { rtx5090: { available: true } } }).find((c) => c.gpu_class === "rtx5090");
         expect(on).toMatchObject({ available: true, price_per_hour: 1.2 });
         expect(capacity([], [], NOW).find((c) => c.gpu_class === "h100")).toMatchObject({ source: "network", available: false, nodes_available: 0 });
     });

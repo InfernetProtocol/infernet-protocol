@@ -8,8 +8,8 @@ import { orderBlockReason } from "@/lib/moderation/blocklists";
 import { publicReservation } from "@/lib/data/reservations";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { getOrderPricing } from "@/lib/data/order-pricing";
-import { isSaladClass } from "@/lib/reservations/salad";
-import { saladOnSale } from "@/lib/data/salad";
+import { rentalProviderOf, operatorNameFor } from "@/lib/reservations/rental";
+import { classAvailable } from "@/lib/data/rental";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,8 +37,10 @@ export const dynamic = "force-dynamic";
  *                                    GET /api/v1/orders/:id)
  *
  * 409 when nothing online fits: we never take money for capacity we cannot pin.
- * Consumer-card classes (rtx4090 ...) run on SaladCloud on demand instead of
- * on a network node (lib/reservations/salad.js); 503 until Salad is configured.
+ * Rented classes (rtx4090 ... on SaladCloud, vast-* on Vast.ai, thunder-* on
+ * Thunder Compute) run on a GPU we rent for the window instead of on a network
+ * node (lib/reservations/rental.js); 503 when that provider has no account
+ * here or nothing to rent this minute.
  */
 
 const limit = rateLimit({ windowMs: 60 * 60 * 1000, max: 60 });
@@ -72,16 +74,21 @@ export async function POST(request) {
 
         const [providers, booked, pricing] = await Promise.all([onlineProviders(), bookings(), getOrderPricing()]);
         const quote = quoteFor(value.gpu_class, value.hours, pricing.min_margin_pct);
-        const salad = isSaladClass(value.gpu_class);
-        if (salad && !saladOnSale()) return fail(503, `${value.gpu_class} is not on sale yet`, { hint: "GET /api/v1/orders/capacity shows which classes are available" });
-        const node = salad ? null : pickNode(providers, value, booked);
-        if (!salad && !node) {
+        const rental = rentalProviderOf(value.gpu_class);
+        // A rented class needs an account here AND capacity to rent this minute:
+        // Vast is a marketplace and Thunder publishes availability, so either
+        // can be sold out even with the keys in place.
+        if (rental && !(await classAvailable(value.gpu_class))) {
+            return fail(503, `${value.gpu_class} is not on sale right now`, { hint: "GET /api/v1/orders/capacity shows which classes are available" });
+        }
+        const node = rental ? null : pickNode(providers, value, booked);
+        if (!rental && !node) {
             return fail(409, "no online node fits this order right now", {
                 hint: "GET /api/v1/orders/capacity lists the GPU classes and models on sale",
                 order: { gpu_class: value.gpu_class, models: value.models, start_at: value.start_at, hours: value.hours }
             });
         }
-        const summary = { ...quote, start_at: value.start_at, models: value.models, provider_id: node?.id ?? null, operator_name: node ? node.name : "Infernet on SaladCloud", terms: ORDER_TERMS };
+        const summary = { ...quote, start_at: value.start_at, models: value.models, provider_id: node?.id ?? null, operator_name: operatorNameFor(value.gpu_class, node), terms: ORDER_TERMS };
 
         if (body?.pay === "checkout") {
             const c = checkoutLimit.check(getClientIp(request));

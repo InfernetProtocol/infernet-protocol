@@ -3,17 +3,18 @@
  * "Self-serve orders").
  *
  * A buyer names a GPU class, the exact models, a start hour and a number of
- * hours. Consumer-card classes (rtx4090 ...) run on SaladCloud instead of a
- * network node: see salad.js; they serve one model each. We sell only what is online: the order is matched to one node that
- * reports that GPU class and already serves every model, and has no other
- * booking in the window. The price is our cost for the class plus the house
+ * hours. Rented classes (rtx4090 on SaladCloud, vast-* on Vast.ai, thunder-* on
+ * Thunder Compute) run on a GPU we rent for the window instead of on a network
+ * node: see rental.js; they serve one model each. Network classes sell only
+ * what is online: the order is matched to one node that reports that GPU class
+ * and already serves every model, and has no other booking in the window. The price is our cost for the class plus the house
  * minimum profit margin (lib/reservations/margin.js, default 100%), prepaid:
  * hours * price_per_hour + the setup fee.
  *
  * Nothing here touches the database or the network.
  */
 import { GPU_TIERS, ALL_TIERS, tierOf, setupFeeFor } from "./pricing.js";
-import { SALAD_TIERS, isSaladClass, saladModelError, modelsFitting } from "./salad.js";
+import { RENTAL_TIERS, rentalProviderOf, rentalModelError, rentalModelsFor, PENDING_ENDPOINT_URL } from "./rental.js";
 import { priceFromCost, DEFAULT_MARGIN_PCT } from "./margin.js";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -55,8 +56,9 @@ export function validateOrderInput(body, now = Date.now()) {
 
     value.models = cleanModels(b.models).slice(0, 8);
     if (value.models.length === 0) errors.push("models[] is required (exact model ids, see GET /api/v1/orders/capacity)");
-    else if (isSaladClass(gpu)) {
-        const e = saladModelError(gpu, value.models);
+    else {
+        // A rented class serves one model, and only one that fits the card.
+        const e = rentalModelError(gpu, value.models);
         if (e) errors.push(e);
     }
 
@@ -156,14 +158,19 @@ export function pickNode(providers, order, bookings = [], now = Date.now()) {
 
 /**
  * What is on sale right now, per class: how many nodes and which models.
- * Salad classes are on demand (no node count) and on sale only when `salad`
- * is true, i.e. the Salad account is configured.
+ *
+ * Rented classes are on demand (no node count). `rented` says which of them
+ * can actually be bought this minute, keyed by class id — a configured account
+ * is not enough on a marketplace like Vast, and lib/data/rental.js is what
+ * knows the difference. An unlisted class reads as unavailable.
  */
-export function capacity(providers, bookings = [], now = Date.now(), marginPct = DEFAULT_MARGIN_PCT, { salad = false } = {}) {
+export function capacity(providers, bookings = [], now = Date.now(), marginPct = DEFAULT_MARGIN_PCT, { rented = {} } = {}) {
     const start = nextWholeHour(now).toISOString();
-    const onDemand = Object.entries(SALAD_TIERS).map(([gpu_class, t]) => ({
+    const onDemand = Object.keys(RENTAL_TIERS).map((gpu_class) => ({
         ...quoteFor(gpu_class, 1, marginPct), hours: undefined, total_usd: undefined,
-        source: "salad", available: salad, nodes_available: null, models: modelsFitting(t.vram_gb), models_per_order: 1
+        source: rentalProviderOf(gpu_class)?.id ?? "rented",
+        available: Boolean(rented?.[gpu_class]?.available ?? rented?.[gpu_class]),
+        nodes_available: null, models: rentalModelsFor(gpu_class), models_per_order: 1
     }));
     return [...Object.keys(GPU_TIERS).map((gpu_class) => {
         const nodes = (providers ?? []).filter((p) =>
@@ -176,17 +183,24 @@ export function capacity(providers, bookings = [], now = Date.now(), marginPct =
 
 /**
  * The reservation an order becomes once paid. Limits are the self-serve
- * defaults. A Salad order passes `endpoint` (its container group's base URL
- * and the vLLM key only Infernet holds) instead of pinning a node.
+ * defaults.
+ *
+ * A rented order targets an endpoint rather than pinning a node. Salad passes
+ * `endpoint` straight away (its container group publishes a gateway address at
+ * creation, with the vLLM key only Infernet holds). A Vast or Thunder box does
+ * not exist yet at this point — it bills from the moment it is rented, so it is
+ * rented during warm-up — and the reservation holds PENDING_ENDPOINT_URL, an
+ * unresolvable address, until the cron fills in the real one.
  */
 export function reservationFromOrder(order, endpoint = null) {
+    const rented = rentalProviderOf(order.gpu_class) !== null;
     return {
         name: order.name || `order ${order.id}`,
         buyer: order.email ?? null,
         operator_name: order.operator_name,
-        target_kind: endpoint ? "endpoint" : "node",
-        provider_id: endpoint ? null : order.provider_id,
-        endpoint_url: endpoint ? endpoint.url : null,
+        target_kind: endpoint || rented ? "endpoint" : "node",
+        provider_id: endpoint || rented ? null : order.provider_id,
+        endpoint_url: endpoint ? endpoint.url : rented ? PENDING_ENDPOINT_URL : null,
         endpoint_api_key: endpoint ? endpoint.apiKey : null,
         models: order.models,
         start_at: order.start_at,

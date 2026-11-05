@@ -40,5 +40,10 @@ export function priceFromCost(cost, marginPct = DEFAULT_MARGIN_PCT) {
     const m = pct(marginPct) ?? DEFAULT_MARGIN_PCT;
     // Round away float noise first (0.99 * 2 = 1.9800000000000002), then up to the cent.
     const raw = Math.round(Number(cost) * (1 + m / 100) * 1e6) / 1e6;
-    return Math.ceil(raw * 100) / 100;
+    // ...and again before the ceiling, because the cents multiply reintroduces
+    // it: 1.1 * 100 is 110.00000000000001, which used to ceiling to 111 and
+    // charge $1.11 for a $0.55 cost at a 100% margin. A real fraction of a cent
+    // still rounds up, so the margin is never shaved.
+    const cents = Math.round(raw * 100 * 1e6) / 1e6;
+    return Math.ceil(cents) / 100;
 }

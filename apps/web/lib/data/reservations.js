@@ -92,11 +92,33 @@ export async function getReservation(id) {
 }
 
 /** Fields that may change after creation. Window, target and models are fixed. */
-const MUTABLE = new Set(["name", "buyer", "notes", "price_per_hour", "setup_fee", "currency", "status"]);
+/**
+ * Patchable fields. endpoint_url and endpoint_api_key are here for rented
+ * orders: the box is rented during warm-up, so the reservation is created
+ * pointing at PENDING_ENDPOINT_URL and the cron fills in the real address and
+ * its key once the instance answers (lib/data/rental.js).
+ */
+const MUTABLE = new Set(["name", "buyer", "notes", "price_per_hour", "setup_fee", "currency", "status", "endpoint_url", "endpoint_api_key"]);
 
 export async function updateReservation(id, patch) {
     const row = {};
     for (const [k, v] of Object.entries(patch ?? {})) if (MUTABLE.has(k)) row[k] = v;
+    if ("endpoint_api_key" in row) {
+        // Stored encrypted, like it is at creation; never as the raw column.
+        const key = row.endpoint_api_key;
+        delete row.endpoint_api_key;
+        row.endpoint_secret = key ? encryptJSON({ apiKey: key }) : null;
+    }
+    if ("endpoint_url" in row && row.endpoint_url !== null) {
+        let u = null;
+        try { u = new URL(String(row.endpoint_url).trim()); } catch { /* reported below */ }
+        if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) {
+            const e = new Error("endpoint_url must be an http(s) URL");
+            e.status = 400;
+            throw e;
+        }
+        row.endpoint_url = u.toString().replace(/\/+$/, "");
+    }
     if (row.status && !["scheduled", "cancelled"].includes(row.status)) {
         const e = new Error("status must be scheduled or cancelled");
         e.status = 400;
