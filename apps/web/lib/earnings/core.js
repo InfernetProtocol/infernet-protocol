@@ -420,7 +420,37 @@ export function summariseNetworkMoney(earnings = [], payouts = []) {
         spent_on_compute_usd: spentOnCompute,
         paid_out_usd: paidOut,
         earning_nodes: earners.size,
-        credits: credits.length
+        credits: credits.length,
+        ...summariseFees(credits)
+    };
+}
+
+/**
+ * What the platform itself has earned, and what it paid to get there.
+ *
+ * Every earning row splits the customer's charge: the provider keeps
+ * amount_usd, the house keeps fee_usd, and the two sum to gross_usd. So the
+ * platform's revenue is just the sum of fee_usd, with no second ledger to
+ * reconcile against.
+ *
+ * Only CONFIRMED rows count. A pending fee is not money the house has. And a
+ * subsidised job carries fee_usd 0 by definition: there the house is paying
+ * for the traffic rather than taking a cut of it, which is why `subsidised_usd`
+ * is reported next to the fee. Showing fees without it would read as profit.
+ */
+export function summariseFees(credits = []) {
+    const confirmed = credits.filter((e) => e.status === "confirmed");
+    const fee = (r) => Number(r.fee_usd) || 0;
+    const feeBearing = confirmed.filter((r) => fee(r) > 0);
+    return {
+        fees_usd: roundUsd(confirmed.reduce((a, r) => a + fee(r), 0)),
+        fee_jobs: feeBearing.length,
+        fee_gross_usd: roundUsd(
+            feeBearing.reduce((a, r) => a + (Number(r.gross_usd) || Number(r.amount_usd) || 0), 0)
+        ),
+        subsidised_usd: roundUsd(
+            confirmed.filter((e) => e.kind === "subsidy").reduce((a, r) => a + (Number(r.amount_usd) || 0), 0)
+        )
     };
 }
 

@@ -2,6 +2,9 @@ import DashboardShell from "@/components/dashboard-shell";
 import OverviewGrid from "@/components/overview-grid";
 import ResourceTable from "@/components/resource-table";
 import RealtimeRefresh from "@/components/realtime-refresh";
+import { getCurrentUser } from "@/lib/supabase/auth-server";
+import { getAccountFees } from "@/lib/data/account-fees";
+import { fmtUsdPrecise } from "@/lib/earnings/core";
 import {
   getAggregators,
   getClients,
@@ -28,15 +31,33 @@ async function fetchLatestCliVersion() {
 }
 
 export default async function HomePage() {
-  const [overview, jobs, providers, models, clients, aggregators, latestCli] = await Promise.all([
+  // Signed in is optional here: /status is a public page, and the account
+  // panel is the only part that needs to know who is reading it.
+  const user = await getCurrentUser().catch(() => null);
+
+  const [overview, jobs, providers, models, clients, aggregators, latestCli, mine] = await Promise.all([
     getDashboardOverview(),
     getJobs({ limit: 6 }),
     getStatusProviders({ limit: 12 }),
     getServedModelsAcrossProviders(),
     getClients({ limit: 6 }),
     getAggregators({ limit: 6 }),
-    fetchLatestCliVersion()
+    fetchLatestCliVersion(),
+    user?.id ? getAccountFees(user.id) : Promise.resolve(null)
   ]);
+
+  // What this account has paid, next to the network totals. Only rendered for
+  // a signed-in reader, and only once they have actually been billed for
+  // something: a row of zeroes tells a new account nothing.
+  const myCards = mine && mine.billed_jobs > 0
+    ? [
+        {
+          label: "Fees you have paid",
+          value: fmtUsdPrecise(mine.fees_usd),
+          note: `of ${fmtUsdPrecise(mine.spent_usd)} spent on ${mine.billed_jobs} billed job${mine.billed_jobs === 1 ? "" : "s"}`
+        }
+      ]
+    : [];
 
   return (
     <>
@@ -53,7 +74,7 @@ export default async function HomePage() {
         )}
         <RealtimeRefresh tables={["providers", "aggregators", "jobs"]} />
       </div>
-      <OverviewGrid cards={overview.cards} />
+      <OverviewGrid cards={[...overview.cards, ...myCards]} />
       <div className="grid gap-6 xl:grid-cols-2">
         <ResourceTable
           title="Recent jobs"
