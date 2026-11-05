@@ -371,7 +371,6 @@ async function runRpcProxy({ supabase, job, safeEnqueue, sseFrame }) {
         });
         await emitRpcReceipts({ supabase, job, primary, chosenSlices, layerByPeer });
         await creditRpcJob({ supabase, job, primary, chosenSlices, layerByPeer, text: fullText });
-        await chargeInteractive(job, { type: "chat", text: fullText, source: "rpc" });
         return;
       } else if (evName === "error") {
         const persisted = await insertJobEvent(supabase, job.id, "error", evData);
@@ -442,6 +441,20 @@ async function creditRpcJob({ supabase, job, primary, chosenSlices, layerByPeer,
     const shares = splitRpcReceiptShares({ primary, slices: chosenSlices, daemonPeers: layerByPeer })
       .filter((s) => s.provider?.id)
       .map((s) => ({ provider_id: s.provider.id, share: s.share, role: s.role }));
+
+    // A balance-paid job pays every node in the fan-out its share of what the
+    // customer was actually charged. It must not also draw the free-tier
+    // subsidy, which is priced far above the per-model sale price.
+    if (job?.billed_user_id) {
+      const { settleInteractiveJob } = await import("@/lib/data/interactive-billing");
+      const billed = await settleInteractiveJob({
+        supabase,
+        job: { ...job, provider_id: job.provider_id ?? primary.id, completed_at: new Date().toISOString() },
+        result: { text },
+        shares
+      });
+      if (billed.billed) return;
+    }
     await creditCompletedJob({
       supabase,
       job: { ...job, max_tokens: job.input_spec?.max_tokens ?? null, provider_id: job.provider_id ?? primary.id, completed_at: new Date().toISOString() },

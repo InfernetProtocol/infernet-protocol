@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
     DEFAULT_INTERACTIVE_CONFIG,
+    DEFAULT_INTERACTIVE_HOUSE_FEE_PCT,
     resolveInteractiveConfig,
     interactiveModeFor,
     priceInteractive,
     spendableMicro,
     chargeIdemKey
 } from "../apps/web/lib/billing/interactive.js";
-import { DEFAULT_INFERENCE_PRICING, resolveInferencePricing, MICRO } from "../apps/web/lib/billing/core.js";
+import { DEFAULT_INFERENCE_PRICING, resolveInferencePricing, MICRO, providerSplitMicro } from "../apps/web/lib/billing/core.js";
 
 const pricing = resolveInferencePricing({ env: {} });
 const on = resolveInteractiveConfig({ env: {}, settings: { enabled: true } });
@@ -161,5 +162,54 @@ describe("chargeIdemKey", () => {
         expect(chargeIdemKey("abc")).toBe("job:abc:charge");
         expect(chargeIdemKey("abc")).toBe(chargeIdemKey("abc"));
         expect(chargeIdemKey("abc")).not.toBe(chargeIdemKey("abd"));
+    });
+});
+
+
+describe("house fee on an interactive charge", () => {
+    it("defaults to 20%, so the provider keeps 80% of what was collected", () => {
+        expect(DEFAULT_INTERACTIVE_HOUSE_FEE_PCT).toBe(20);
+        expect(resolveInteractiveConfig({ env: {} }).house_fee_pct).toBe(20);
+        const { feeMicro, providerMicro } = providerSplitMicro(1000, 20);
+        expect(feeMicro).toBe(200);
+        expect(providerMicro).toBe(800);
+    });
+
+    it("is overridable by env and settings, and rejects an out-of-range typo", () => {
+        expect(resolveInteractiveConfig({ env: { INFERNET_INTERACTIVE_HOUSE_FEE_PCT: "35" } }).house_fee_pct).toBe(35);
+        expect(resolveInteractiveConfig({ env: {}, settings: { house_fee_pct: 10 } }).house_fee_pct).toBe(10);
+        expect(resolveInteractiveConfig({ env: {}, settings: { house_fee_pct: 900 } }).house_fee_pct).toBe(20);
+        expect(resolveInteractiveConfig({ env: {}, settings: { house_fee_pct: -5 } }).house_fee_pct).toBe(20);
+    });
+
+    it("never pays a provider more than the customer paid, at any fee", () => {
+        for (const fee of [0, 1, 20, 50, 99.99, 100]) {
+            for (const charge of [1, 7, 999, 1_000_000]) {
+                const { feeMicro, providerMicro } = providerSplitMicro(charge, fee);
+                expect(feeMicro + providerMicro).toBe(charge);
+                expect(providerMicro).toBeLessThanOrEqual(charge);
+                expect(providerMicro).toBeGreaterThanOrEqual(0);
+            }
+        }
+    });
+
+    /**
+     * The bug this guards: a billed interactive job has payment_offer 0 and no
+     * batch item, so the ordinary completion path would credit it the FREE-TIER
+     * subsidy ($0.01 per 1k output = $10 per 1M) while the customer paid the
+     * table price ($0.20 per 1M output on qwen2.5:7b) - about fifty times the
+     * sale price, paid out on every chat.
+     */
+    it("would lose money if a billed job were paid at the subsidy rate", () => {
+        const outputTokens = 1_000_000;
+        const subsidyPer1k = 0.01; // the live 'earnings' setting
+        const subsidyUsd = (outputTokens / 1000) * subsidyPer1k;
+        const saleUsd = outputTokens * DEFAULT_INFERENCE_PRICING.models["qwen2.5:7b"].output_per_m_usd / 1_000_000;
+        expect(subsidyUsd).toBeGreaterThan(saleUsd * 10);
+
+        // Paid from the charge instead, the house is never underwater.
+        const chargeMicro = Math.round(saleUsd * MICRO);
+        const { providerMicro } = providerSplitMicro(chargeMicro, DEFAULT_INTERACTIVE_HOUSE_FEE_PCT);
+        expect(providerMicro).toBeLessThan(chargeMicro);
     });
 });

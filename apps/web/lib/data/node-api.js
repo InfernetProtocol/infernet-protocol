@@ -431,22 +431,33 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
         const { input_spec: spec, ...jobRow } = job;
         let maxTokens = null;
         try { maxTokens = decryptJSON(spec)?.max_tokens ?? null; } catch { /* clamp to the ceiling */ }
-        await creditCompletedJob({
-            supabase,
-            job: { ...jobRow, max_tokens: maxTokens, provider_id: provider.id, completed_at: completedAt },
-            result: body.result,
-            source: "node-api"
-        });
-        // Interactive pay-as-you-go: charge the buyer's compute balance for
-        // the request they just had served. Idempotent on the job, and never
-        // fails the completion - the work is done and the provider is paid.
+        // Interactive pay-as-you-go: charge the buyer's compute balance and pay
+        // the node out of that charge. A billed job must NOT also draw the
+        // free-tier subsidy: the subsidy rate is far above the per-model sale
+        // price, so paying both would lose money on every chat.
+        let billed = { billed: false };
         if (jobRow.billed_user_id) {
-            const { chargeInteractiveJob } = await import("@/lib/data/interactive-billing");
+            const { settleInteractiveJob } = await import("@/lib/data/interactive-billing");
             let decoded = null;
             try { decoded = decryptJSON(spec); } catch { /* price from the result alone */ }
-            await chargeInteractiveJob({
-                job: { ...jobRow, input_spec: decoded, model_name: job.model_name },
+            billed = await settleInteractiveJob({
+                supabase,
+                job: {
+                    ...jobRow,
+                    input_spec: decoded,
+                    model_name: job.model_name,
+                    provider_id: provider.id,
+                    completed_at: completedAt
+                },
                 result: body.result
+            });
+        }
+        if (!billed.billed) {
+            await creditCompletedJob({
+                supabase,
+                job: { ...jobRow, max_tokens: maxTokens, provider_id: provider.id, completed_at: completedAt },
+                result: body.result,
+                source: "node-api"
             });
         }
     }
