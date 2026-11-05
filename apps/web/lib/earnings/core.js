@@ -238,6 +238,13 @@ export function computeJobCredits({ job, result, shares, config, source = "compl
     const offer = num(job.payment_offer, 0);
     const paid = offer > 0;
     if (!paid && job.reservation_id) return [];
+    // The subsidy is off (rate 0): write nothing rather than a row worth
+    // $0.00. The network served 5,311 subsidised jobs before the rate was
+    // stopped on 2026-11-05, so leaving this on would accumulate thousands of
+    // zero-value rows that every balance query then has to read past, and
+    // would tell an operator they "earned" nothing on a job instead of being
+    // honest that free traffic is not paid for.
+    if (!paid && !(num(config.subsidy_per_1k_output_usd, 0) > 0)) return [];
     const feePct = paid ? config.house_fee_pct : 0;
     const rate = paid ? null : config.subsidy_per_1k_output_usd;
     const gross = paid ? offer : (tokens / 1000) * (rate ?? 0);
