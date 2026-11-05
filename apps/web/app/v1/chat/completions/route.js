@@ -6,6 +6,8 @@ import { streamJobEvents } from "@/lib/data/chat-stream";
 import { bearerFrom, isReservationKey } from "@/lib/reservations/core";
 import { serveChatCompletion } from "@/lib/reservations/serve";
 import { checkChatLimit, wantsP2pOnly } from "@/lib/trusted-clients";
+import { trustedClientFor, paidLimit } from "@/lib/trusted-clients";
+import { resolveBillingCaller, authorizeInteractive } from "@/lib/data/interactive-billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,10 +68,9 @@ export async function POST(request) {
     if (isReservationKey(presented)) return serveChatCompletion(request, presented);
 
     const ip = getClientIp(request);
-    // A trusted client key (lib/trusted-clients.js) spends its own budget.
-    const r = checkChatLimit({ bearer: presented, ip, publicLimit: limit });
-    if (!r.ok) return err(429, "Rate limit exceeded — try again later");
 
+    // Parsed before the limiters: which limiter applies depends on who pays,
+    // and that depends on the model being priced.
     let body;
     try {
         body = await request.json();
@@ -78,6 +79,28 @@ export async function POST(request) {
     }
 
     const { model, messages, stream, temperature, max_tokens } = body ?? {};
+
+    // Who pays. An API key, a CLI token or a session identifies an account;
+    // with a balance (topped up, or what its nodes earned) the call is billed
+    // per request and metered on the paid budget, not the stranger limit.
+    const trusted = trustedClientFor(presented);
+    const payer = await resolveBillingCaller(request, { trusted });
+    const billing = await authorizeInteractive({ userId: payer.userId, model });
+
+    if (billing.mode === "insufficient") {
+        return err(402, "out of compute balance", {
+            spendable_usd: billing.spendable_usd,
+            top_up: "POST /api/v1/billing/topup, or POST /api/v1/billing/fund-from-earnings"
+        });
+    }
+    if (billing.mode === "balance") {
+        const pr = paidLimit.check(`paid:${payer.userId}`);
+        if (!pr.ok) return err(429, "Rate limit exceeded — try again later");
+    } else {
+        // A trusted client key (lib/trusted-clients.js) spends its own budget.
+        const r = checkChatLimit({ bearer: presented, ip, publicLimit: limit });
+        if (!r.ok) return err(429, "Rate limit exceeded — try again later");
+    }
     if (!Array.isArray(messages) || messages.length === 0) {
         return err(400, "messages[] is required");
     }
@@ -103,6 +126,7 @@ export async function POST(request) {
             messages,
             modelName: typeof model === "string" ? model : undefined,
             maxTokens: Number.isFinite(max_tokens) ? max_tokens : undefined,
+            billedUserId: billing.mode === "balance" ? payer.userId : null,
             temperature: Number.isFinite(temperature) ? temperature : undefined,
             minTrustTier,
             noFallback: wantsP2pOnly(body)

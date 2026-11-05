@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { createChatJob, liveModelNames } from "@/lib/data/chat";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { bearerFrom } from "@/lib/reservations/core";
-import { checkChatLimit, wantsP2pOnly } from "@/lib/trusted-clients";
+import { checkChatLimit, wantsP2pOnly, trustedClientFor, paidLimit } from "@/lib/trusted-clients";
+import { resolveBillingCaller, authorizeInteractive } from "@/lib/data/interactive-billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,18 +20,11 @@ function err(status, error, detail) {
 
 export async function POST(request) {
   const ip = getClientIp(request);
-  // A trusted client key (lib/trusted-clients.js) spends its own budget.
-  const r = checkChatLimit({
-    bearer: bearerFrom(request.headers.get("authorization")),
-    ip,
-    publicLimit: limit
-  });
-  if (!r.ok) {
-    return err(429, "Rate limit exceeded — try again later", {
-      resetAt: new Date(r.resetAt).toISOString()
-    });
-  }
+  const bearer = bearerFrom(request.headers.get("authorization"));
+  const trusted = trustedClientFor(bearer);
 
+  // Parsed before the limiters because which limiter applies depends on who
+  // pays, and that depends on the model being priced.
   let payload;
   try {
     payload = await request.json();
@@ -39,6 +33,37 @@ export async function POST(request) {
   }
 
   const { messages, encryptedMessages, clientPubkey, modelPubkey, providerId, modelName, maxTokens, temperature, distributed } = payload ?? {};
+
+  // Who pays. An identified caller with something to spend (topped-up balance
+  // or what their nodes earned) is billed per request and metered on the paid
+  // budget instead of the stranger limit, which exists to stop one address
+  // burning the network for free.
+  const payer = await resolveBillingCaller(request, { trusted });
+  const billing = await authorizeInteractive({ userId: payer.userId, model: modelName });
+
+  if (billing.mode === "insufficient") {
+    return err(402, "Out of compute balance", {
+      spendable_usd: billing.spendable_usd,
+      topUp: "POST /api/v1/billing/topup, or move node earnings in with POST /api/v1/billing/fund-from-earnings"
+    });
+  }
+
+  if (billing.mode === "balance") {
+    const pr = paidLimit.check(`paid:${payer.userId}`);
+    if (!pr.ok) {
+      return err(429, "Rate limit exceeded — try again later", {
+        resetAt: new Date(pr.resetAt).toISOString()
+      });
+    }
+  } else {
+    // A trusted client key (lib/trusted-clients.js) spends its own budget.
+    const r = checkChatLimit({ bearer, ip, publicLimit: limit });
+    if (!r.ok) {
+      return err(429, "Rate limit exceeded — try again later", {
+        resetAt: new Date(r.resetAt).toISOString()
+      });
+    }
+  }
 
   // IPIP-0026 §2.2 — accept either camelCase or snake_case from clients.
   const minTrustTierRaw = payload?.minTrustTier ?? payload?.min_trust_tier;
@@ -87,7 +112,8 @@ export async function POST(request) {
       // job so the SSE handler picks the correct streaming path.
       distributed: distributed === true,
       minTrustTier,
-      noFallback: wantsP2pOnly(payload)
+      noFallback: wantsP2pOnly(payload),
+      billedUserId: billing.mode === "balance" ? payer.userId : null
     });
     if (source === "none") {
       const available = await liveModelNames();
@@ -103,6 +129,9 @@ export async function POST(request) {
       jobId: job.id,
       status: job.status,
       source,
+      billing: billing.mode === "balance"
+        ? { paid_from: "balance", spendable_usd: billing.spendable_usd }
+        : { paid_from: "free", reason: billing.reason },
       model: job.model_name ?? null,
       ...(requestedModel ? { requestedModel } : {}),
       provider: provider

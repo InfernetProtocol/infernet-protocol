@@ -6,6 +6,7 @@ import { matchServedModel } from "@/lib/model-names";
 import { getModelDenylist } from "@/lib/data/blocklists";
 import { deniedModel } from "@/lib/moderation/blocklists";
 import { smartPick, isOverloaded, countInflight } from "@/lib/routing/smart-pick";
+import { estimateInputTokens } from "@/lib/billing/core";
 
 /**
  * Pick a P2P provider to serve a chat job.
@@ -360,7 +361,12 @@ export async function createChatJob({
   batchItemId = null,
   // The caller asked for peer nodes only (p2p_only): never the hosted
   // fallback, which is billed. No node free answers 503 like any other miss.
-  noFallback = false
+  noFallback = false,
+  // Interactive pay-as-you-go: whose compute balance this job is charged to
+  // when it finishes (lib/data/interactive-billing.js). Null for the
+  // anonymous, IP-rate-limited free tier, which bills nobody. A batch item is
+  // billed from its own prepaid hold and never sets this.
+  billedUserId = null
 }) {
   const supabase = getSupabaseServerClient();
   const now = new Date().toISOString();
@@ -470,7 +476,12 @@ export async function createChatJob({
     ...(requestedModel ? { requested_model: requestedModel } : {}),
     ...(nimAvailable ? { fallback: "nvidia-nim" } : {}),
     ...(distributed ? { distributed: true } : {}),
-    ...(batchItemId ? { billing: "prepaid_batch" } : {})
+    ...(batchItemId ? { billing: "prepaid_batch" } : {}),
+    // Stored so the charge at completion prices the same input the caller
+    // sent, without decrypting an E2E payload it cannot read.
+    ...(billedUserId && !batchItemId
+      ? { billing: "interactive_balance", input_tokens: estimateInputTokens(messages ?? []) }
+      : {})
   };
 
   // Nothing can serve this request. Nothing ever picks up an unassigned
@@ -489,7 +500,8 @@ export async function createChatJob({
     input_spec: encryptJSON(inputSpec),
     payment_offer: 0,
     assigned_at: p2pProvider || nimAvailable ? now : null,
-    updated_at: now
+    updated_at: now,
+    ...(billedUserId && !batchItemId ? { billed_user_id: billedUserId } : {})
   };
   if (source === "none") {
     insertRow.error = noProviderError(modelName);

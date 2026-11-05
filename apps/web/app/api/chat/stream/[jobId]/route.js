@@ -371,6 +371,7 @@ async function runRpcProxy({ supabase, job, safeEnqueue, sseFrame }) {
         });
         await emitRpcReceipts({ supabase, job, primary, chosenSlices, layerByPeer });
         await creditRpcJob({ supabase, job, primary, chosenSlices, layerByPeer, text: fullText });
+        await chargeInteractive(job, { type: "chat", text: fullText, source: "rpc" });
         return;
       } else if (evName === "error") {
         const persisted = await insertJobEvent(supabase, job.id, "error", evData);
@@ -492,6 +493,7 @@ async function runNimFallback({ supabase, job, safeEnqueue, sseFrame }) {
       const persisted = await insertJobEvent(supabase, job.id, "done", data);
       safeEnqueue(sseFrame("done", data, persisted?.id));
       await finalizeJob(supabase, job.id, { status: "completed", result: { type: "chat", text: fullText, source: "nvidia-nim" } });
+      await chargeInteractive(job, { type: "chat", text: fullText, source: "nvidia-nim" });
       finalPersisted = true;
     } else if (ev.type === "error") {
       const persisted = await insertJobEvent(supabase, job.id, "error", ev.data);
@@ -505,6 +507,7 @@ async function runNimFallback({ supabase, job, safeEnqueue, sseFrame }) {
   // Defensive: if NIM closed without a 'done' frame, still mark the job completed.
   if (!finalPersisted) {
     await finalizeJob(supabase, job.id, { status: "completed", result: { type: "chat", text: fullText, source: "nvidia-nim", incomplete: true } });
+    await chargeInteractive(job, { type: "chat", text: fullText, source: "nvidia-nim" });
   }
 }
 
@@ -534,3 +537,18 @@ async function finalizeJob(supabase, jobId, { status, result, error }) {
     // best-effort
   }
 }
+/**
+ * Interactive pay-as-you-go: charge the buyer for a request served outside the
+ * node-api completion path (the RPC fan-out and the hosted fallback).
+ * Idempotent on the job, so whichever path finishes first owns the charge.
+ */
+async function chargeInteractive(job, result, outputText) {
+  if (!job?.billed_user_id) return;
+  try {
+    const { chargeInteractiveJob } = await import("@/lib/data/interactive-billing");
+    await chargeInteractiveJob({ job, result: result ?? { text: outputText ?? "" } });
+  } catch (err) {
+    console.warn(`interactive charge failed for job ${job?.id}: ${err?.message ?? err}`);
+  }
+}
+

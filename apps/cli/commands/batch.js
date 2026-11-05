@@ -37,6 +37,8 @@ Usage:
   infernet billing topup <usd>             CoinPay checkout URL (any coin or PayPal)
   infernet billing topup-status <id>       credited once CoinPay confirms payment
   infernet billing funding earned,prepaid,wallet    set your default funding order
+  infernet billing spend-earnings [usd|all]  move node earnings into the balance,
+                                           so they pay for chat and the API too
 
 Earned = your confirmed node earnings (c0mpute and Infernet nodes are one
 balance), spendable on compute with no fee; whatever you do not spend stays
@@ -164,6 +166,14 @@ export async function billing(args) {
             if (!a1) throw new Error('usage: infernet billing topup-status <id>');
             const t = await c.topupStatus(a1);
             out(args, t, `top-up ${t.id}: ${t.status} $${t.amount_usd}${t.credited ? ' (credited now)' : ''}`);
+            return 0;
+        }
+        case 'spend-earnings':
+        case 'fund-from-earnings': {
+            const r = await c.fundFromEarnings(a1 ?? 'all');
+            out(args, r, `moved $${r.moved_usd} of node earnings into the compute balance\n`
+                + `spendable now: $${r.balance.total_spendable_usd}\n`
+                + 'it pays for inference from here on, and can no longer be withdrawn');
             return 0;
         }
         case 'funding': {

@@ -68,3 +68,31 @@ export function wantsP2pOnly(body) {
     const v = body?.p2p_only ?? body?.p2pOnly ?? body?.metadata?.p2p_only;
     return v === true || v === "true";
 }
+
+/**
+ * A trusted client calling on behalf of one of its own signed-in people.
+ *
+ * c0mpute.com signs people in with CoinPay and sends their model calls here
+ * under its own `ifc_` key, so without this every c0mpute user looked like one
+ * anonymous caller and nobody's balance could be charged. The client names the
+ * person with their CoinPay subject; Infernet maps it to an account through
+ * coinpay_identities (the same binding "Sign in with CoinPay" uses) and bills
+ * that account.
+ *
+ * Only a trusted key may do this. Otherwise any caller could name a stranger
+ * and spend their balance.
+ */
+export function billedSubjectFrom(request, trusted) {
+    if (!trusted) return null;
+    const raw = request?.headers?.get?.("x-infernet-billed-subject") ?? null;
+    if (typeof raw !== "string") return null;
+    const sub = raw.trim();
+    // CoinPay subjects are opaque ids; bound so a header cannot carry a payload.
+    return sub.length > 0 && sub.length <= 200 ? sub : null;
+}
+
+/** Hourly budget for a caller paying from a balance: not the stranger limit. */
+export const paidLimit = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: Number(process.env.INFERNET_PAID_RPH) > 0 ? Number(process.env.INFERNET_PAID_RPH) : 2000
+});
