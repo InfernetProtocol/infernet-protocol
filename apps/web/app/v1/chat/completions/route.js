@@ -8,6 +8,8 @@ import { serveChatCompletion } from "@/lib/reservations/serve";
 import { checkChatLimit, wantsP2pOnly } from "@/lib/trusted-clients";
 import { trustedClientFor, paidLimit } from "@/lib/trusted-clients";
 import { resolveBillingCaller, authorizeInteractive } from "@/lib/data/interactive-billing";
+import { consumeFreeQuery } from "@/lib/data/free-tier";
+import { freeLimitMessage } from "@/lib/billing/free-tier";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,7 +99,17 @@ export async function POST(request) {
         const pr = paidLimit.check(`paid:${payer.userId}`);
         if (!pr.ok) return err(429, "Rate limit exceeded — try again later");
     } else {
-        // A trusted client key (lib/trusted-clients.js) spends its own budget.
+        // Free: the daily allowance, counted in the database so it survives a
+        // deploy (lib/data/free-tier.js).
+        const free = await consumeFreeQuery({ userId: payer.userId ?? null, clientSubject: payer.subject ?? null, ip });
+        if (!free.ok) {
+            return err(429, freeLimitMessage(free.limit), {
+                free_limit_per_day: free.limit,
+                used_today: free.used,
+                retry_after_seconds: free.retryAfter,
+                top_up: "POST /api/v1/billing/topup"
+            });
+        }
         const r = checkChatLimit({ bearer: presented, ip, publicLimit: limit });
         if (!r.ok) return err(429, "Rate limit exceeded — try again later");
     }
