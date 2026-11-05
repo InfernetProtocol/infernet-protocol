@@ -34,8 +34,7 @@ export async function GET(request) {
         const models = wanted ? [wanted] : [...new Set([...live, ...Object.keys(pricing.models ?? {})])].sort();
         const rows = await Promise.all(
             models.map(async (model) => {
-                const priced = Boolean(pricing?.models?.[model]);
-                const market = priced ? null : await marketPriceFor({ model, defaults });
+                const market = await marketPriceFor({ model, defaults });
                 const d = describePrice({ model, pricing, defaults, dynamic: market });
                 return {
                     model,

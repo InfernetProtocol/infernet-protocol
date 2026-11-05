@@ -11,6 +11,7 @@ import {
     describePrice
 } from "../apps/web/lib/billing/operator-prices.js";
 import { resolveInferencePricing, usdToMicro } from "../apps/web/lib/billing/core.js";
+import { resolveDynamicConfig, scaleByMarket } from "../apps/web/lib/billing/dynamic-price.js";
 
 const pricing = resolveInferencePricing({ env: {} });
 const defaults = resolvePriceDefaults({ env: {} });
@@ -202,5 +203,67 @@ describe("the settings row round-trips the default and the band", () => {
         const d = resolvePriceDefaults({ env: {}, settings: { operator_pricing_enabled: false } });
         expect(d.operator_pricing_enabled).toBe(false);
         expect(checkOperatorPrice({ input_per_m_usd: 0.05, output_per_m_usd: 0.2 }, d).ok).toBe(false);
+    });
+});
+
+
+/**
+ * How the market interacts with the three layers.
+ *
+ * The first cut applied the market only to models nobody had priced. That made
+ * it dead code the moment every live model was in the rate card (which is
+ * exactly what happened: all 12 served models read source "house"), and
+ * pricing everything off a single base would have thrown away the per-model
+ * size differences the card exists to express. So the market SCALES whichever
+ * base applies - but never an operator's own price.
+ */
+describe("the market scales the base, it does not replace it", () => {
+    const dynConfig = resolveDynamicConfig({ env: {} });
+    // A saturated single-node fleet: a clearly above-1 multiplier.
+    const hot = { providers: 4, capacity: 16, busy: 16, utilization: 1 };
+    const market = (bounds) => ({ scale: scaleByMarket({ signal: hot, config: dynConfig, bounds }) });
+
+    it("scales the house rate card, so size differences survive", () => {
+        const dyn = market(defaults);
+        const small = effectivePrice({ model: "qwen2.5:0.5b", pricing, defaults, dynamic: dyn });
+        const large = effectivePrice({ model: "qwen2.5:7b", pricing, defaults, dynamic: dyn });
+
+        // Both moved off the card...
+        expect(small.source).toBe("dynamic");
+        expect(small.output_per_m_usd).toBeGreaterThan(0.04);
+        expect(large.output_per_m_usd).toBeGreaterThan(0.2);
+        // ...and the 7b is still dearer than the 0.5b.
+        expect(large.output_per_m_usd).toBeGreaterThan(small.output_per_m_usd);
+        // The card it scaled is recorded, so the quote is explainable.
+        expect(small.base).toEqual({ input_per_m_usd: 0.01, output_per_m_usd: 0.04 });
+        expect(small.base_source).toBe("house");
+    });
+
+    it("scales the default for a model with no card", () => {
+        const p = effectivePrice({ model: "brand-new:1b", pricing, defaults, dynamic: market(defaults) });
+        expect(p.source).toBe("dynamic");
+        expect(p.base_source).toBe("default");
+        expect(p.output_per_m_usd).toBeGreaterThan(DEFAULT_MODEL_PRICE.output_per_m_usd);
+    });
+
+    it("never scales an operator's own price", () => {
+        const own = { input_per_m_usd: 0.06, output_per_m_usd: 0.24 };
+        const p = effectivePrice({ model: "qwen2.5:7b", pricing, defaults, operatorPrice: own, dynamic: market(defaults) });
+        expect(p.source).toBe("operator");
+        // Exactly what they set, untouched by the market.
+        expect(p.output_per_m_usd).toBe(0.24);
+    });
+
+    it("still clamps the scaled price into the house band", () => {
+        const narrow = resolvePriceDefaults({ env: {}, settings: { operator_price_max_per_m_usd: 0.1 } });
+        const p = effectivePrice({ model: "qwen2.5:7b", pricing, defaults: narrow, dynamic: market(narrow) });
+        expect(p.output_per_m_usd).toBeLessThanOrEqual(0.1);
+    });
+
+    it("leaves the card alone when there is no market to read", () => {
+        const noSignal = { scale: scaleByMarket({ signal: { providers: 0, capacity: 0, utilization: null }, config: dynConfig, bounds: defaults }) };
+        const p = effectivePrice({ model: "qwen2.5:7b", pricing, defaults, dynamic: noSignal });
+        expect(p.output_per_m_usd).toBe(0.2);
+        expect(p.dynamic.reason).toBe("no_signal");
     });
 });

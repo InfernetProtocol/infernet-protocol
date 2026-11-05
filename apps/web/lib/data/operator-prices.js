@@ -92,11 +92,11 @@ export async function priceForJob({ providerId, model, pricing, supabase }) {
             /* house price */
         }
     }
-    // Only the default layer is dynamic, so the market snapshot is only worth
-    // reading when neither the operator nor the house has priced this model.
+    // The market scales whichever base applies - the house rate card or the
+    // house default - so the snapshot is worth reading whenever the operator
+    // has not set their own price. An operator price is never scaled.
     let dynamic = null;
-    const priced = Boolean(operatorPrice) || Boolean(pricing?.models?.[model]);
-    if (!priced && model) {
+    if (!operatorPrice && model) {
         dynamic = await marketPriceFor({ model, defaults, supabase });
     }
     return effectivePrice({ model, pricing, defaults, operatorPrice, dynamic });
@@ -118,10 +118,8 @@ export async function marketPriceFor({ model, defaults, supabase, now = Date.now
     if (hit && now - hit.at < MARKET_TTL_MS) return hit.value;
 
     try {
-        const { getDynamicConfig } = await import("@/lib/data/dynamic-pricing");
-        const { marketSnapshot } = await import("@/lib/data/dynamic-pricing");
-        const { dynamicDefaultPrice } = await import("@/lib/billing/dynamic-price");
-        const { cleanPricePair: pair, DEFAULT_MODEL_PRICE } = await import("@/lib/billing/operator-prices");
+        const { getDynamicConfig, marketSnapshot } = await import("@/lib/data/dynamic-pricing");
+        const { scaleByMarket } = await import("@/lib/billing/dynamic-price");
 
         const config = await getDynamicConfig(supabase);
         if (!config.dynamic_pricing_enabled) {
@@ -129,13 +127,9 @@ export async function marketPriceFor({ model, defaults, supabase, now = Date.now
             return null;
         }
         const signal = await marketSnapshot({ model, supabase });
-        const price = dynamicDefaultPrice({
-            base: pair(defaults.default_model_price) ?? DEFAULT_MODEL_PRICE,
-            signal,
-            config,
-            bounds: defaults
-        });
-        const value = { price, signal, config };
+        // A scaler, not a price: the caller supplies the base (the model's
+        // house rate card, or the default), so per-model differences survive.
+        const value = { scale: scaleByMarket({ signal, config, bounds: defaults }), signal, config };
         marketCache.set(model, { at: now, value });
         return value;
     } catch (err) {
@@ -212,8 +206,7 @@ export async function listProviderPricing({ providerId, servedModels = [] }) {
         default_model_price: defaults.default_model_price,
         models: await Promise.all(
             models.map(async (model) => {
-                const priced = Boolean(mine[model]) || Boolean(pricing?.models?.[model]);
-                const dynamic = priced ? null : await marketPriceFor({ model, defaults, supabase });
+                const dynamic = mine[model] ? null : await marketPriceFor({ model, defaults, supabase });
                 return describePrice({ model, pricing, defaults, operatorPrice: mine[model] ?? null, dynamic });
             })
         )
