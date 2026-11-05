@@ -110,6 +110,30 @@ const EXAMPLE_PROMPTS = [
  *   streaming: true while an assistant message is being assembled
  *   currentEventSource: the open EventSource, closed on unmount / done / error
  */
+
+/**
+ * The device fingerprint for the free-tier allowance, as a header.
+ *
+ * Loaded lazily and only once: it is a few hundred lines of canvas/WebGL/audio
+ * probing that nobody signing in needs, and it must never delay or break
+ * sending a message. Every failure path returns no header, which the server
+ * reads as "fall back to the address".
+ */
+let fingerprintOnce;
+async function fingerprintHeader() {
+  try {
+    fingerprintOnce ??= (async () => {
+      const { getFingerprint } = await import("@profullstack/browser-fingerprint/client");
+      return await getFingerprint({ challengeUrl: "/api/fp/challenge" });
+    })();
+    const fp = await fingerprintOnce;
+    return fp ? { "x-fingerprint": fp } : {};
+  } catch {
+    // No challenge route, collection blocked, an old browser: all fine.
+    return {};
+  }
+}
+
 export default function ChatView({ initialModels = [] }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -591,7 +615,14 @@ export default function ChatView({ initialModels = [] }) {
     try {
       res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // The free allowance is per browser rather than per address
+          // (@profullstack/browser-fingerprint). Best effort: if collection
+          // fails the request still goes, and the server falls back to the
+          // hashed address prefix.
+          ...(await fingerprintHeader())
+        },
         body: JSON.stringify(postBody)
       });
     } catch (e) {

@@ -205,6 +205,9 @@ importers:
       '@profullstack/affiliates':
         specifier: 0.3.0
         version: 0.3.0(react@19.3.1)
+      '@profullstack/browser-fingerprint':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@profullstack/coinpay-onboard':
         specifier: 0.3.1
         version: 0.3.1
@@ -1627,6 +1630,10 @@ packages:
     resolution: {integrity: sha512-bp0iREciWetDWrQYOsa6SJRTzviekKwgJQuATT7vql+4equu7pN76q8tb3SP1oBMczydsv6rYUMvPpS6+QT7yQ==}
     engines: {node: '>=22.13'}
     hasBin: true
+
+  '@profullstack/browser-fingerprint@0.1.0':
+    resolution: {integrity: sha512-gTOPS+Gm9fJ99EvvppXq6hS3FU/N9V5lPC5z81z+8lhCDahfekKwd0OdRN4WU61FNjgQWPb4wdzrYSWp4jCsjQ==}
+    engines: {node: '>=20'}
 
   '@profullstack/cli@0.2.0':
     resolution: {integrity: sha512-98Ei8yt1hBhoBFGfqDUM6QBKmzP7mad90uybp9BUw2zvilHOIRv5bTn8byR7+MjiiNN0FQ/DvOlGT9o3KcNCyg==}
@@ -8356,6 +8363,8 @@ snapshots:
       '@profullstack/referrals': 0.1.0(react@19.3.1)
     transitivePeerDependencies:
       - react
+
+  '@profullstack/browser-fingerprint@0.1.0': {}
 
   '@profullstack/cli@0.2.0': {}
 
