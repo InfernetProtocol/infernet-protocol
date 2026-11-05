@@ -156,3 +156,51 @@ describe("describePrice", () => {
         expect(d.bounds.max_per_m_usd).toBe(defaults.operator_price_max_per_m_usd);
     });
 });
+
+
+/**
+ * The settings row carries keys resolveInferencePricing does not model
+ * (default_model_price, the operator band). updateInferencePricing used to
+ * rebuild the row from that resolver alone, which silently DROPPED them: the
+ * first time the band was set in production it vanished, and the house could
+ * not change its own cap. These pin the read side of that contract - a row
+ * that still holds the keys must resolve to them, and a malformed one must
+ * fall back instead of being trusted.
+ */
+describe("the settings row round-trips the default and the band", () => {
+    it("reads back what the house stored", () => {
+        const stored = {
+            enabled: true,
+            models: {},
+            default_model_price: { input_per_m_usd: 0.04, output_per_m_usd: 0.16 },
+            operator_pricing_enabled: true,
+            operator_price_min_per_m_usd: 0.01,
+            operator_price_max_per_m_usd: 0.75
+        };
+        const d = resolvePriceDefaults({ env: {}, settings: stored });
+        expect(d.default_model_price).toEqual({ input_per_m_usd: 0.04, output_per_m_usd: 0.16 });
+        expect(d.operator_price_min_per_m_usd).toBe(0.01);
+        expect(d.operator_price_max_per_m_usd).toBe(0.75);
+        expect(d.operator_pricing_enabled).toBe(true);
+
+        // And the band it read is the band it enforces.
+        expect(checkOperatorPrice({ input_per_m_usd: 0.5, output_per_m_usd: 0.9 }, d).ok).toBe(false);
+        expect(checkOperatorPrice({ input_per_m_usd: 0.02, output_per_m_usd: 0.7 }, d).ok).toBe(true);
+    });
+
+    it("falls back to the code default when the row lost those keys", () => {
+        // Exactly the shape production had after the keys were stripped.
+        const stripped = { enabled: true, models: {}, min_topup_usd: 5, max_in_flight: 8 };
+        const d = resolvePriceDefaults({ env: {}, settings: stripped });
+        expect(d.default_model_price).toEqual(DEFAULT_MODEL_PRICE);
+        expect(d.operator_price_max_per_m_usd).toBe(DEFAULT_OPERATOR_PRICE_BOUNDS.operator_price_max_per_m_usd);
+        // Still never free.
+        expect(effectivePrice({ model: "whatever", pricing: { models: {} }, defaults: d }).output_micro_per_m).toBeGreaterThan(0);
+    });
+
+    it("honours operator pricing being switched off in the row", () => {
+        const d = resolvePriceDefaults({ env: {}, settings: { operator_pricing_enabled: false } });
+        expect(d.operator_pricing_enabled).toBe(false);
+        expect(checkOperatorPrice({ input_per_m_usd: 0.05, output_per_m_usd: 0.2 }, d).ok).toBe(false);
+    });
+});

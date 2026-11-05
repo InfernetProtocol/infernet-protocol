@@ -1,5 +1,6 @@
 import "server-only";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { cleanPricePair } from "@/lib/billing/operator-prices";
 import { resolveInferencePricing, validatePricingPatch, microToUsd, parseTopupAmount, cleanFundingOrder, FUNDING_SOURCES, DEFAULT_FUNDING_ORDER } from "@/lib/billing/core";
 import { verifyOrderAtCoinpayDetail } from "@/lib/data/reservation-orders";
 import { createCheckout } from "@infernetprotocol/payments";
@@ -42,12 +43,70 @@ export async function updateInferencePricing(patch, { actor } = {}) {
     const current = await getInferencePricing();
     const v = validatePricingPatch(patch, current);
     if (!v.ok) throw withStatus(`invalid pricing: ${v.errors.join("; ")}`, 400);
+
+    // resolveInferencePricing only returns the keys IT knows, so writing
+    // v.value alone silently dropped everything else on the row - which is how
+    // default_model_price and the operator price band disappeared the first
+    // time they were set. Merge over the row as it is stored, so a key this
+    // function does not model survives being edited.
+    //
+    // Those extra keys are still validated: on the way in by
+    // validateExtraPricing below, and again on every read by
+    // resolvePriceDefaults, which falls back rather than trusting a bad value.
+    let stored = {};
+    try {
+        const { data } = await db().from("settings").select("value").eq("key", SETTINGS_KEY).maybeSingle();
+        stored = data?.value && typeof data.value === "object" && !Array.isArray(data.value) ? data.value : {};
+    } catch {
+        /* first write */
+    }
+
+    const extra = validateExtraPricing(patch);
+    if (!extra.ok) throw withStatus(`invalid pricing: ${extra.errors.join("; ")}`, 400);
+
+    const value = { ...stored, ...v.value, ...extra.value, updated_by: actor ?? null };
     const { error } = await db().from("settings").upsert(
-        { key: SETTINGS_KEY, value: { ...v.value, updated_by: actor ?? null }, updated_at: new Date().toISOString() },
+        { key: SETTINGS_KEY, value, updated_at: new Date().toISOString() },
         { onConflict: "key" }
     );
     if (error) throw withStatus(error.message, 500);
-    return v.value;
+    return value;
+}
+
+/**
+ * The pricing keys resolveInferencePricing does not model: the default price
+ * for an unpriced model, and the band an operator's own price must sit in
+ * (lib/billing/operator-prices.js). Only keys actually present in the patch
+ * are returned, so a partial update never clears the others.
+ */
+function validateExtraPricing(patch) {
+    const p = patch && typeof patch === "object" && !Array.isArray(patch) ? patch : {};
+    const errors = [];
+    const out = {};
+
+    if ("default_model_price" in p) {
+        const pair = cleanPricePair(p.default_model_price);
+        if (!pair) errors.push("default_model_price must be { input_per_m_usd, output_per_m_usd }, each 0-1000 with at most 6 decimals");
+        else out.default_model_price = pair;
+    }
+    if ("operator_pricing_enabled" in p) {
+        if (typeof p.operator_pricing_enabled !== "boolean") errors.push("operator_pricing_enabled must be true or false");
+        else out.operator_pricing_enabled = p.operator_pricing_enabled;
+    }
+    for (const key of ["operator_price_min_per_m_usd", "operator_price_max_per_m_usd"]) {
+        if (!(key in p)) continue;
+        const n = typeof p[key] === "string" ? Number.parseFloat(p[key]) : p[key];
+        if (!Number.isFinite(n) || n < 0 || n > 1000) errors.push(`${key} must be a number between 0 and 1000`);
+        else out[key] = Math.round(n * 1e6) / 1e6;
+    }
+    const min = out.operator_price_min_per_m_usd;
+    const max = out.operator_price_max_per_m_usd;
+    if (min !== undefined && max !== undefined && max < min) {
+        errors.push("operator_price_max_per_m_usd cannot be below operator_price_min_per_m_usd");
+    }
+
+    if (errors.length) return { ok: false, errors };
+    return { ok: true, value: out };
 }
 
 export function publicTopup(t) {
