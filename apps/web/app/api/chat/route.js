@@ -4,6 +4,8 @@ import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { bearerFrom } from "@/lib/reservations/core";
 import { checkChatLimit, wantsP2pOnly, trustedClientFor, paidLimit } from "@/lib/trusted-clients";
 import { resolveBillingCaller, authorizeInteractive } from "@/lib/data/interactive-billing";
+import { consumeFreeQuery } from "@/lib/data/free-tier";
+import { freeLimitMessage } from "@/lib/billing/free-tier";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +50,7 @@ export async function POST(request) {
     });
   }
 
+  let freeLeft;
   if (billing.mode === "balance") {
     const pr = paidLimit.check(`paid:${payer.userId}`);
     if (!pr.ok) {
@@ -56,7 +59,20 @@ export async function POST(request) {
       });
     }
   } else {
-    // A trusted client key (lib/trusted-clients.js) spends its own budget.
+    // Free. The daily allowance is spent per consumer and counted in the
+    // database, so it survives a deploy: see lib/data/free-tier.js. A trusted
+    // client of ours still has its own burst budget on top, because its
+    // BILLED traffic must not be held to a stranger's allowance.
+    const free = await consumeFreeQuery({ userId: payer.userId ?? null, clientSubject: payer.subject ?? null, ip });
+    freeLeft = free.remaining;
+    if (!free.ok) {
+      return err(429, freeLimitMessage(free.limit), {
+        free_limit_per_day: free.limit,
+        used_today: free.used,
+        resetAt: new Date(Date.now() + free.retryAfter * 1000).toISOString(),
+        topUp: "POST /api/v1/billing/topup, or move node earnings in with POST /api/v1/billing/fund-from-earnings"
+      });
+    }
     const r = checkChatLimit({ bearer, ip, publicLimit: limit });
     if (!r.ok) {
       return err(429, "Rate limit exceeded — try again later", {
@@ -131,7 +147,7 @@ export async function POST(request) {
       source,
       billing: billing.mode === "balance"
         ? { paid_from: "balance", spendable_usd: billing.spendable_usd }
-        : { paid_from: "free", reason: billing.reason },
+        : { paid_from: "free", reason: billing.reason, free_remaining_today: freeLeft },
       model: job.model_name ?? null,
       ...(requestedModel ? { requestedModel } : {}),
       provider: provider
