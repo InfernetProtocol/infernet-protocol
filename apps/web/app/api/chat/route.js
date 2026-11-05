@@ -63,7 +63,14 @@ export async function POST(request) {
     // database, so it survives a deploy: see lib/data/free-tier.js. A trusted
     // client of ours still has its own burst budget on top, because its
     // BILLED traffic must not be held to a stranger's allowance.
-    const free = await consumeFreeQuery({ userId: payer.userId ?? null, clientSubject: payer.subject ?? null, ip });
+    const free = await consumeFreeQuery({
+      userId: payer.userId ?? null,
+      clientSubject: payer.subject ?? null,
+      ip,
+      // Collected by the page against /api/fp/challenge.
+      fingerprint: request.headers.get("x-fingerprint"),
+      userAgent: request.headers.get("user-agent")
+    });
     freeLeft = free.remaining;
     if (!free.ok) {
       return err(429, freeLimitMessage(free.limit), {

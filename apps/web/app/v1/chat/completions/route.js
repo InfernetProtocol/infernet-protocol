@@ -101,7 +101,14 @@ export async function POST(request) {
     } else {
         // Free: the daily allowance, counted in the database so it survives a
         // deploy (lib/data/free-tier.js).
-        const free = await consumeFreeQuery({ userId: payer.userId ?? null, clientSubject: payer.subject ?? null, ip });
+        const free = await consumeFreeQuery({
+      userId: payer.userId ?? null,
+      clientSubject: payer.subject ?? null,
+      ip,
+      // Collected by the page against /api/fp/challenge.
+      fingerprint: request.headers.get("x-fingerprint"),
+      userAgent: request.headers.get("user-agent")
+    });
         if (!free.ok) {
             return err(429, freeLimitMessage(free.limit), {
                 free_limit_per_day: free.limit,

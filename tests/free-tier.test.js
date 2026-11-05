@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
     DEFAULT_FREE_QUERIES_PER_DAY,
+    DEFAULT_BOT_THRESHOLD,
     resolveFreeAllowance,
     freeSubject,
+    looksLikeBot,
     freeLimitMessage,
     secondsUntilReset
 } from "../apps/web/lib/billing/free-tier.js";
@@ -40,56 +42,71 @@ describe("the allowance", () => {
 });
 
 describe("whose allowance is being spent", () => {
-    const salt = "test-salt";
-
-    it("keys a signed-in caller on their account, not their address", () => {
-        expect(freeSubject({ userId: "u1", ip: "1.2.3.4", salt })).toBe("user:u1");
-        // Same person from a different network spends the same allowance.
-        expect(freeSubject({ userId: "u1", ip: "9.9.9.9", salt })).toBe("user:u1");
+    // visitorKey / ipKey are keyed hashes handed over by
+    // @profullstack/browser-fingerprint; nothing is hashed in this module now.
+    it("keys a signed-in caller on their account, above everything else", () => {
+        expect(freeSubject({ userId: "u1", visitorKey: "vk", ipKey: "ik" })).toBe("user:u1");
+        // The same person from another device or network spends one allowance.
+        expect(freeSubject({ userId: "u1", visitorKey: "other", ipKey: "other" })).toBe("user:u1");
     });
 
     it("gives two people behind one address their own allowance", () => {
-        const a = freeSubject({ userId: "u1", ip: "1.2.3.4", salt });
-        const b = freeSubject({ userId: "u2", ip: "1.2.3.4", salt });
-        expect(a).not.toBe(b);
+        expect(freeSubject({ userId: "u1", ipKey: "same" })).not.toBe(freeSubject({ userId: "u2", ipKey: "same" }));
     });
 
     it("keys an unlinked trusted-client person on the subject, not the client's IP", () => {
         // Otherwise every c0mpute.com user without an account here would share
         // ONE allowance, because they all arrive from the same server.
-        const a = freeSubject({ clientSubject: "cp-sub-a", ip: "10.0.0.1", salt });
-        const b = freeSubject({ clientSubject: "cp-sub-b", ip: "10.0.0.1", salt });
+        const a = freeSubject({ clientSubject: "hash-a", ipKey: "client-server" });
+        const b = freeSubject({ clientSubject: "hash-b", ipKey: "client-server" });
         expect(a).not.toBe(b);
         expect(a.startsWith("sub:")).toBe(true);
     });
 
     it("prefers a real account over the client's claim", () => {
-        expect(freeSubject({ userId: "u1", clientSubject: "cp-sub-a", salt })).toBe("user:u1");
+        expect(freeSubject({ userId: "u1", clientSubject: "hash-a" })).toBe("user:u1");
     });
 
-    it("falls back to the address for a true stranger", () => {
-        const k = freeSubject({ ip: "1.2.3.4", salt });
-        expect(k.startsWith("ip:")).toBe(true);
-        expect(freeSubject({ ip: "1.2.3.5", salt })).not.toBe(k);
+    it("keys an anonymous BROWSER on the device, not the address", () => {
+        // The whole reason for the module: two browsers behind one address get
+        // one allowance each, and one browser that changes address keeps one.
+        const a = freeSubject({ visitorKey: "device-a", ipKey: "shared" });
+        const b = freeSubject({ visitorKey: "device-b", ipKey: "shared" });
+        expect(a).toBe("visitor:device-a");
+        expect(a).not.toBe(b);
+        expect(freeSubject({ visitorKey: "device-a", ipKey: "elsewhere" })).toBe(a);
     });
 
-    it("never puts a raw address in the key", () => {
-        const k = freeSubject({ ip: "203.0.113.47", salt });
-        expect(k).not.toContain("203.0.113.47");
-        expect(k).toMatch(/^ip:[0-9a-f]{64}$/);
+    it("prefers the device over the address when it has both", () => {
+        expect(freeSubject({ visitorKey: "vk", ipKey: "ik" })).toBe("visitor:vk");
     });
 
-    it("salts the hash, so the table cannot be walked back with a plain digest", () => {
-        expect(freeSubject({ ip: "1.2.3.4", salt: "a" })).not.toBe(freeSubject({ ip: "1.2.3.4", salt: "b" }));
-    });
-
-    it("is stable for the same inputs", () => {
-        expect(freeSubject({ ip: "1.2.3.4", salt })).toBe(freeSubject({ ip: "1.2.3.4", salt }));
+    it("falls back to the address key for a caller with no browser (CLI, curl)", () => {
+        expect(freeSubject({ ipKey: "prefix-hash" })).toBe("ip:prefix-hash");
     });
 
     it("is null when there is nothing to key on", () => {
         expect(freeSubject({})).toBeNull();
-        expect(freeSubject({ userId: "", ip: "", clientSubject: "" })).toBeNull();
+        expect(freeSubject({ userId: "", clientSubject: "", visitorKey: "", ipKey: "" })).toBeNull();
+    });
+});
+
+describe("the bot gate", () => {
+    it("only refuses a confident signal", () => {
+        expect(DEFAULT_BOT_THRESHOLD).toBe(0.9);
+        expect(looksLikeBot({ score: 0.95 })).toBe(true);
+        expect(looksLikeBot({ score: 0.9 })).toBe(true);
+        expect(looksLikeBot({ score: 0.89 })).toBe(false);
+        expect(looksLikeBot({ score: 0.5 })).toBe(false);
+    });
+
+    it("never refuses when there is no score", () => {
+        // A false positive costs a real person their free tier, which is worse
+        // than serving a bot ten queries.
+        expect(looksLikeBot(null)).toBe(false);
+        expect(looksLikeBot(undefined)).toBe(false);
+        expect(looksLikeBot({})).toBe(false);
+        expect(looksLikeBot({ score: "high" })).toBe(false);
     });
 });
 

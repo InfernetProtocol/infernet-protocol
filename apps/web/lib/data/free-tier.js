@@ -4,9 +4,11 @@ import { rateLimit } from "@/lib/rate-limit";
 import {
     resolveFreeAllowance,
     freeSubject,
+    looksLikeBot,
     secondsUntilReset,
     DEFAULT_FREE_QUERIES_PER_DAY
 } from "@/lib/billing/free-tier";
+import { identifyVisitor } from "@/lib/data/fingerprint";
 
 /**
  * Spend one free query, or refuse.
@@ -46,15 +48,44 @@ const fallback = rateLimit({ windowMs: 60 * 60 * 1000, max: DEFAULT_FREE_QUERIES
  * @returns {Promise<{ok: boolean, used?: number, remaining?: number, limit: number,
  *                     retryAfter: number, subject: string|null, degraded?: boolean}>}
  */
-export async function consumeFreeQuery({ userId = null, clientSubject = null, ip = null, supabase } = {}) {
+export async function consumeFreeQuery({
+    userId = null,
+    clientSubject = null,
+    ip = null,
+    fingerprint = null,
+    userAgent = null,
+    supabase
+} = {}) {
     const limit = await getFreeAllowance(supabase);
-    const salt = process.env.INFERNET_FREE_TIER_SALT || process.env.INFERNET_DB_ENCRYPTION_KEY || "";
-    const subject = freeSubject({ userId, clientSubject, ip, salt });
     const retryAfter = secondsUntilReset();
 
-    // Nothing to key on (no account, no address). Refuse rather than serve an
-    // uncountable free request.
+    // Identify the device, not the address (@profullstack/browser-fingerprint).
+    // Only needed for an anonymous caller: a signed-in account is already a
+    // better key than any fingerprint.
+    let visitorKey = null;
+    let ipKey = null;
+    let bot = null;
+    if (!userId && !clientSubject) {
+        const v = await identifyVisitor({ payload: fingerprint, ip, userAgent });
+        // visitorKey is set for any well-formed payload, but only a payload
+        // that actually verified may spend an allowance: otherwise a replayed
+        // or made-up one would mint identities at will.
+        visitorKey = v.ok ? v.visitorKey : null;
+        ipKey = v.ipKey ?? null;
+        bot = v.bot ?? null;
+    }
+
+    const subject = freeSubject({ userId, clientSubject, visitorKey, ipKey });
+
+    // Nothing to key on (no account, no address, nothing collected). Refuse
+    // rather than serve an uncountable free request.
     if (!subject) return { ok: false, limit, retryAfter, subject: null, reason: "no_subject" };
+
+    // A confident bot signal costs the free tier, not the paid one: anything
+    // automated is welcome to top up and keep going.
+    if (looksLikeBot(bot)) {
+        return { ok: false, limit, retryAfter, subject, reason: "bot", bot };
+    }
 
     try {
         const { data, error } = await db(supabase).rpc("free_query_consume", {
@@ -86,10 +117,9 @@ export async function consumeFreeQuery({ userId = null, clientSubject = null, ip
 }
 
 /** How much of today's allowance is left, without spending any of it. */
-export async function peekFreeQuery({ userId = null, ip = null, supabase } = {}) {
+export async function peekFreeQuery({ userId = null, clientSubject = null, visitorKey = null, ipKey = null, supabase } = {}) {
     const limit = await getFreeAllowance(supabase);
-    const salt = process.env.INFERNET_FREE_TIER_SALT || process.env.INFERNET_DB_ENCRYPTION_KEY || "";
-    const subject = freeSubject({ userId, ip, salt });
+    const subject = freeSubject({ userId, clientSubject, visitorKey, ipKey });
     if (!subject) return { limit, used: 0, remaining: 0, subject: null };
     try {
         const { data } = await db(supabase)
