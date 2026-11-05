@@ -184,6 +184,7 @@ async function* runNimFallback({ supabase, job }) {
                     status: "completed",
                     result: { type: "chat", text: fullText, source: "nvidia-nim" }
                 });
+                await chargeInteractive(job, { type: "chat", text: fullText, source: "nvidia-nim" });
                 finalized = true;
                 yield { type: "done", data, id: persisted?.id };
                 return;
@@ -204,6 +205,7 @@ async function* runNimFallback({ supabase, job }) {
                 status: "completed",
                 result: { type: "chat", text: fullText, source: "nvidia-nim", incomplete: true }
             });
+            await chargeInteractive(job, { type: "chat", text: fullText, source: "nvidia-nim" });
         }
     }
 }
@@ -219,6 +221,21 @@ async function insertJobEvent(supabase, jobId, eventType, data) {
         return row ? { ...row, data: decryptJSON(row.data) } : null;
     } catch {
         return null;
+    }
+}
+
+/**
+ * Interactive pay-as-you-go: charge the buyer for a hosted-fallback request.
+ * The fallback has no provider to credit, but the house paid a vendor for the
+ * tokens, so it is still billed. Idempotent on the job; never throws.
+ */
+async function chargeInteractive(job, result) {
+    if (!job?.billed_user_id) return;
+    try {
+        const { chargeInteractiveJob } = await import("@/lib/data/interactive-billing");
+        await chargeInteractiveJob({ job, result });
+    } catch (err) {
+        console.warn(`interactive charge failed for job ${job?.id}: ${err?.message ?? err}`);
     }
 }
 

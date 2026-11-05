@@ -366,15 +366,18 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
     if (provErr) throw withStatus(provErr.message, 500);
     if (!provider) throw withStatus("no provider row for this pubkey", 404);
 
-    const JOB_COLUMNS = "id, provider_id, payment_offer, payment_coin, payment_status, model_name, status, input_spec, reservation_id";
+    const JOB_COLUMNS = "id, provider_id, payment_offer, payment_coin, payment_status, model_name, status, input_spec, reservation_id, billed_user_id";
     let { data: job, error: jobErr } = await supabase
         .from("jobs")
         .select(`${JOB_COLUMNS}, batch_item_id`)
         .eq("id", jobId)
         .maybeSingle();
-    // Before the paid-batch migration there is no batch_item_id column.
-    if (jobErr && /batch_item_id/.test(jobErr.message ?? "")) {
-        ({ data: job, error: jobErr } = await supabase.from("jobs").select(JOB_COLUMNS).eq("id", jobId).maybeSingle());
+    // Before the paid-batch migration there is no batch_item_id column, and
+    // before the interactive-billing one there is no billed_user_id: fall back
+    // to the columns that have always existed rather than failing completion.
+    if (jobErr && /batch_item_id|billed_user_id/.test(jobErr.message ?? "")) {
+        const BASE_COLUMNS = JOB_COLUMNS.replace(", billed_user_id", "");
+        ({ data: job, error: jobErr } = await supabase.from("jobs").select(BASE_COLUMNS).eq("id", jobId).maybeSingle());
     }
     if (jobErr) throw withStatus(jobErr.message, 500);
     if (!job) throw withStatus("job not found", 404);
@@ -434,6 +437,18 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
             result: body.result,
             source: "node-api"
         });
+        // Interactive pay-as-you-go: charge the buyer's compute balance for
+        // the request they just had served. Idempotent on the job, and never
+        // fails the completion - the work is done and the provider is paid.
+        if (jobRow.billed_user_id) {
+            const { chargeInteractiveJob } = await import("@/lib/data/interactive-billing");
+            let decoded = null;
+            try { decoded = decryptJSON(spec); } catch { /* price from the result alone */ }
+            await chargeInteractiveJob({
+                job: { ...jobRow, input_spec: decoded, model_name: job.model_name },
+                result: body.result
+            });
+        }
     }
 
     // IPIP-0007 phase 2: emit a CPR Receipt for this job. Non-blocking

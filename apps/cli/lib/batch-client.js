@@ -76,6 +76,9 @@ export function createBatchClient({ baseUrl, apiKey, userToken, fetchImpl = fetc
         topup: (amountUsd) => call('POST', '/api/v1/billing/topup', { body: { amount_usd: amountUsd } }),
         topupStatus: (id) => call('GET', `/api/v1/billing/topup/${enc(id)}`),
         setFunding: (order) => call('PUT', '/api/v1/billing/funding', { body: { funding_order: order } }),
+        fundFromEarnings: (amountUsd) => call('POST', '/api/v1/billing/fund-from-earnings', {
+            body: amountUsd == null || amountUsd === 'all' ? {} : { amount_usd: amountUsd }
+        }),
         createKey: (name) => call('POST', '/api/v1/keys', { body: { name: name ?? null }, signedIn: true }),
         listKeys: () => call('GET', '/api/v1/keys', { signedIn: true }),
         revokeKey: (id) => call('DELETE', `/api/v1/keys/${enc(id)}`, { signedIn: true })
