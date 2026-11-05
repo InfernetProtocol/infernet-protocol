@@ -92,7 +92,62 @@ export async function priceForJob({ providerId, model, pricing, supabase }) {
             /* house price */
         }
     }
-    return effectivePrice({ model, pricing, defaults, operatorPrice });
+    // Only the default layer is dynamic, so the market snapshot is only worth
+    // reading when neither the operator nor the house has priced this model.
+    let dynamic = null;
+    const priced = Boolean(operatorPrice) || Boolean(pricing?.models?.[model]);
+    if (!priced && model) {
+        dynamic = await marketPriceFor({ model, defaults, supabase });
+    }
+    return effectivePrice({ model, pricing, defaults, operatorPrice, dynamic });
+}
+
+/**
+ * The dynamic default for one model: read the live fleet serving it, turn that
+ * into a multiplier, and scale the base.
+ *
+ * Cached for a short window so a burst of requests sees one price rather than
+ * a slightly different one each time, and so pricing never becomes the reason
+ * the database is busy. Never throws: no snapshot means the plain base.
+ */
+const marketCache = new Map(); // model -> { at, value }
+const MARKET_TTL_MS = 30_000;
+
+export async function marketPriceFor({ model, defaults, supabase, now = Date.now() }) {
+    const hit = marketCache.get(model);
+    if (hit && now - hit.at < MARKET_TTL_MS) return hit.value;
+
+    try {
+        const { getDynamicConfig } = await import("@/lib/data/dynamic-pricing");
+        const { marketSnapshot } = await import("@/lib/data/dynamic-pricing");
+        const { dynamicDefaultPrice } = await import("@/lib/billing/dynamic-price");
+        const { cleanPricePair: pair, DEFAULT_MODEL_PRICE } = await import("@/lib/billing/operator-prices");
+
+        const config = await getDynamicConfig(supabase);
+        if (!config.dynamic_pricing_enabled) {
+            marketCache.set(model, { at: now, value: null });
+            return null;
+        }
+        const signal = await marketSnapshot({ model, supabase });
+        const price = dynamicDefaultPrice({
+            base: pair(defaults.default_model_price) ?? DEFAULT_MODEL_PRICE,
+            signal,
+            config,
+            bounds: defaults
+        });
+        const value = { price, signal, config };
+        marketCache.set(model, { at: now, value });
+        return value;
+    } catch (err) {
+        console.warn(`[operator-prices] market snapshot failed for ${model}: ${err?.message ?? err}`);
+        marketCache.set(model, { at: now, value: null });
+        return null;
+    }
+}
+
+/** Test hook: drop the market cache. */
+export function clearMarketCache() {
+    marketCache.clear();
 }
 
 /** Set one model's price on a node the caller owns. Refused outside the band. */
@@ -155,8 +210,12 @@ export async function listProviderPricing({ providerId, servedModels = [] }) {
             max_per_m_usd: defaults.operator_price_max_per_m_usd
         },
         default_model_price: defaults.default_model_price,
-        models: models.map((model) =>
-            describePrice({ model, pricing, defaults, operatorPrice: mine[model] ?? null })
+        models: await Promise.all(
+            models.map(async (model) => {
+                const priced = Boolean(mine[model]) || Boolean(pricing?.models?.[model]);
+                const dynamic = priced ? null : await marketPriceFor({ model, defaults, supabase });
+                return describePrice({ model, pricing, defaults, operatorPrice: mine[model] ?? null, dynamic });
+            })
         )
     };
 }
