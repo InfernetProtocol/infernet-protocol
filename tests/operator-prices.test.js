@@ -260,6 +260,15 @@ describe("the market scales the base, it does not replace it", () => {
         expect(p.output_per_m_usd).toBeLessThanOrEqual(0.1);
     });
 
+    it("publishes the base alongside the multiplier, so the price checks out", () => {
+        const d = describePrice({ model: "qwen2.5:7b", pricing, defaults, dynamic: market(defaults) });
+        expect(d.dynamic.base).toEqual({ input_per_m_usd: 0.05, output_per_m_usd: 0.2 });
+        expect(d.dynamic.base_source).toBe("house");
+        // base x multiplier == the published price, which is the check a
+        // caller should be able to do for themselves.
+        expect(d.output_per_m_usd).toBeCloseTo(d.dynamic.base.output_per_m_usd * d.dynamic.multiplier, 6);
+    });
+
     it("leaves the card alone when there is no market to read", () => {
         const noSignal = { scale: scaleByMarket({ signal: { providers: 0, capacity: 0, utilization: null }, config: dynConfig, bounds: defaults }) };
         const p = effectivePrice({ model: "qwen2.5:7b", pricing, defaults, dynamic: noSignal });

@@ -191,6 +191,17 @@ export function describePrice({ model, pricing, defaults, operatorPrice = null, 
             max_per_m_usd: defaults.operator_price_max_per_m_usd
         },
         per_1k_output_usd: microToUsd(Math.round(eff.output_micro_per_m / 1000)),
-        ...(eff.dynamic ? { dynamic: eff.dynamic } : {})
+        // The market move AND the base it was applied to. Without the base, a
+        // caller can see a multiplier and a final price but cannot check one
+        // against the other, which is most of the point of publishing it.
+        ...(eff.dynamic
+            ? {
+                dynamic: {
+                    ...eff.dynamic,
+                    base: eff.base ?? null,
+                    base_source: eff.base_source ?? null
+                }
+            }
+            : {})
     };
 }
