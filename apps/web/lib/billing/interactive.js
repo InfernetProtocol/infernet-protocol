@@ -119,12 +119,17 @@ export function spendableMicro({ funding, config }) {
  *   balance      charge it when it finishes
  *   insufficient empty balance with the free tier switched off → 402
  */
-export function interactiveModeFor({ model, pricing, config, funding, signedIn = true }) {
+export function interactiveModeFor({ model, pricing, config, funding, defaults = null, signedIn = true }) {
     if (!config?.enabled) return { mode: "free", reason: "metering_off" };
     if (!signedIn) return { mode: "free", reason: "anonymous" };
     if (pricing?.enabled === false) return { mode: "free", reason: "pricing_disabled" };
 
-    const price = modelPriceMicro(pricing, model);
+    // Pre-flight does not know which node will serve this yet, so it cannot
+    // apply an operator price. It only needs to know a price EXISTS, and with
+    // a house default one always does: `defaults` is passed once operator
+    // pricing is live, and `free_when_unpriced` is the pre-default behaviour
+    // kept for a network that has deliberately cleared its default.
+    const price = modelPriceMicro(pricing, model) ?? (defaults?.default_model_price ? { default: true } : null);
     if (!price) {
         return config.free_when_unpriced
             ? { mode: "free", reason: "unpriced_model" }
@@ -143,17 +148,27 @@ export function interactiveModeFor({ model, pricing, config, funding, signedIn =
  * server-side token estimate paid batches use. The provider's own token count
  * is deliberately ignored: a node must not be able to inflate a bill.
  */
-export function priceInteractive({ model, pricing, messages, inputTokens = null, result, maxTokens = null }) {
-    const price = modelPriceMicro(pricing, model);
-    if (!price) return { priced: false, cost_micro: 0, input_tokens: 0, output_tokens: 0 };
+export function priceInteractive({ model, pricing, price = null, messages, inputTokens = null, result, maxTokens = null }) {
+    // `price` is the resolved operator/house/default price for the node that
+    // served this job (lib/billing/operator-prices.js). Falling back to the
+    // house table alone is for callers that have no provider in hand.
+    const resolved = price ?? modelPriceMicro(pricing, model);
+    if (!resolved) return { priced: false, cost_micro: 0, input_tokens: 0, output_tokens: 0 };
     const input = inputTokens == null ? estimateInputTokens(messages) : Math.max(0, Math.floor(inputTokens));
     const output = estimateOutputTokens(result, Number.isInteger(maxTokens) ? maxTokens : null);
     return {
         priced: true,
         input_tokens: input,
         output_tokens: output,
-        cost_micro: costMicro({ inputTokens: input, outputTokens: output, ...price }),
-        ...price
+        cost_micro: costMicro({
+            inputTokens: input,
+            outputTokens: output,
+            input_micro_per_m: resolved.input_micro_per_m,
+            output_micro_per_m: resolved.output_micro_per_m
+        }),
+        input_micro_per_m: resolved.input_micro_per_m,
+        output_micro_per_m: resolved.output_micro_per_m,
+        price: resolved.source ? resolved : null
     };
 }
 

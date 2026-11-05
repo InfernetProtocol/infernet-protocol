@@ -73,7 +73,9 @@ export async function authorizeInteractive({ userId, model, signedIn = Boolean(u
 
         const { getInferencePricing, fundingPreview } = await import("@/lib/data/billing");
         const [pricing, funding] = await Promise.all([getInferencePricing(), fundingPreview(userId)]);
-        const decision = interactiveModeFor({ model, pricing, config, funding, signedIn });
+        const { getPriceDefaults } = await import("@/lib/data/operator-prices");
+        const defaults = await getPriceDefaults();
+        const decision = interactiveModeFor({ model, pricing, config, funding, defaults, signedIn });
         const spendable = spendableMicro({ funding, config });
         return {
             ...decision,
@@ -107,9 +109,15 @@ export async function chargeInteractiveJob({ job, result, messages = null, input
         const pricing = await getInferencePricing();
         const model = job.model_name ?? null;
         const spec = job.input_spec ?? {};
+        // The price of the node that actually served it: operator price if it
+        // has one (clamped to the house band), else the house table, else the
+        // house default. Never free - that is what the default is for.
+        const { priceForJob } = await import("@/lib/data/operator-prices");
+        const effective = await priceForJob({ providerId: job.provider_id ?? null, model, pricing });
         const quote = priceInteractive({
             model,
             pricing,
+            price: effective,
             messages: messages ?? spec.messages ?? [],
             inputTokens: inputTokens ?? spec.input_tokens ?? null,
             result: outputTokens == null ? result : { text: "" },
@@ -179,6 +187,7 @@ export async function creditProvidersFromCharge({
     outputTokens,
     shares = null,
     feePct,
+    price = null,
     source = "interactive"
 }) {
     try {
@@ -213,7 +222,14 @@ export async function creditProvidersFromCharge({
                     source,
                     house_fee_pct: Number(feePct) || 0,
                     charge_micro: shareMicro,
-                    billed_user_id: job.billed_user_id ?? null
+                    billed_user_id: job.billed_user_id ?? null,
+                    ...(price
+                        ? {
+                            price_source: price.source,
+                            input_per_m_usd: price.input_per_m_usd,
+                            output_per_m_usd: price.output_per_m_usd
+                        }
+                        : {})
                 }
             };
         });
@@ -257,7 +273,8 @@ export async function settleInteractiveJob({ supabase, job, result, shares = nul
             chargeMicro: charge.charged_micro,
             outputTokens: charge.quote?.output_tokens ?? outputTokens ?? 0,
             shares,
-            feePct: config.house_fee_pct
+            feePct: config.house_fee_pct,
+            price: charge.quote?.price ?? null
         });
     }
     return { billed: true, charge };
