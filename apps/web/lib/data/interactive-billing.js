@@ -158,6 +158,112 @@ export async function chargeInteractiveJob({ job, result, messages = null, input
 }
 
 /**
+ * Pay the serving node(s) out of what the customer was actually charged.
+ *
+ * This is the half that keeps interactive billing solvent. A billed
+ * interactive job has payment_offer 0 and no batch item, so the ordinary
+ * completion path would credit it the FREE-TIER SUBSIDY rate
+ * (subsidy_per_1k_output_usd, $0.01 per 1k output tokens = $10 per 1M) while
+ * the customer paid the per-model table price ($0.20 per 1M output on
+ * qwen2.5:7b). The house would lose roughly fifty times the sale price on
+ * every chat. So a billed job is credited like a paid batch item instead: the
+ * provider takes its share of the charge and the house keeps house_fee_pct.
+ *
+ * Idempotent on (job_id, provider_id), the same constraint the rest of the
+ * ledger relies on, so a retried completion cannot pay twice. Never throws.
+ */
+export async function creditProvidersFromCharge({
+    supabase,
+    job,
+    chargeMicro,
+    outputTokens,
+    shares = null,
+    feePct,
+    source = "interactive"
+}) {
+    try {
+        const { providerSplitMicro, microToUsd: toUsd } = await import("@/lib/billing/core");
+        const parts = (shares ?? [{ provider_id: job.provider_id, share: 1, role: "single" }])
+            .filter((x) => x?.provider_id);
+        if (parts.length === 0 || !(chargeMicro > 0)) return { credited: 0 };
+
+        const now = new Date().toISOString();
+        const rows = parts.map((part) => {
+            const shareMicro = Math.floor(chargeMicro * (Number(part.share) || 0));
+            const { feeMicro, providerMicro } = providerSplitMicro(shareMicro, feePct);
+            return {
+                job_id: job.id,
+                provider_id: part.provider_id,
+                kind: "paid",
+                role: part.role ?? "single",
+                share: Number(part.share) || 0,
+                output_tokens: Math.round((Number(outputTokens) || 0) * (Number(part.share) || 0)),
+                tokens_estimated: true,
+                held_reason: null,
+                rate_per_1k_usd: null,
+                gross_usd: toUsd(shareMicro),
+                fee_usd: toUsd(feeMicro),
+                amount_usd: toUsd(providerMicro),
+                coin: null,
+                status: "confirmed",
+                model_name: job.model_name ?? null,
+                confirmed_at: now,
+                earned_at: now,
+                metadata: {
+                    source,
+                    house_fee_pct: Number(feePct) || 0,
+                    charge_micro: shareMicro,
+                    billed_user_id: job.billed_user_id ?? null
+                }
+            };
+        });
+
+        const client = supabase ?? db();
+        const { error } = await client
+            .from("provider_earnings")
+            .upsert(rows, { onConflict: "job_id,provider_id", ignoreDuplicates: true });
+        if (error) {
+            console.warn(`[interactive-billing] provider credit for job ${job.id} failed: ${error.message}`);
+            return { credited: 0, error: error.message };
+        }
+        return { credited: rows.length };
+    } catch (err) {
+        console.warn(`[interactive-billing] provider credit failed: ${err?.message ?? err}`);
+        return { credited: 0, error: String(err?.message ?? err) };
+    }
+}
+
+/**
+ * Charge the buyer and pay the provider(s) from that charge, in one step.
+ *
+ * Returns { billed: true } when the job was paid for from a balance, so the
+ * caller must NOT also credit the free-tier subsidy. { billed: false } means
+ * nothing was charged (metering off, free tier, unpriced model, empty
+ * balance) and the ordinary subsidy path still applies.
+ */
+export async function settleInteractiveJob({ supabase, job, result, shares = null, outputTokens = null }) {
+    if (!job?.billed_user_id) return { billed: false, reason: "no_buyer" };
+    const charge = await chargeInteractiveJob({ job, result, outputTokens });
+    // A retry finds the charge already recorded; the job was still balance-paid,
+    // so the subsidy must stay skipped.
+    const billed = charge.charged || charge.reason === "already_charged";
+    if (!billed) return { billed: false, reason: charge.reason, charge };
+
+    if (charge.charged_micro > 0) {
+        const config = await getInteractiveConfig();
+        await creditProvidersFromCharge({
+            supabase,
+            job,
+            chargeMicro: charge.charged_micro,
+            outputTokens: charge.quote?.output_tokens ?? outputTokens ?? 0,
+            shares,
+            feePct: config.house_fee_pct
+        });
+    }
+    return { billed: true, charge };
+}
+
+/**
  * Move confirmed node earnings into the compute balance, on their own.
  *
  * Before this, earnings could only reach the balance as part of submitting a

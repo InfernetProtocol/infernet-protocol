@@ -30,7 +30,21 @@ import {
 /** Settings row that switches interactive metering on and shapes the free tier. */
 export const INTERACTIVE_SETTINGS_KEY = "interactive_billing";
 
+/**
+ * The house's cut of an interactive charge, in percent. The provider keeps the
+ * rest, exactly as on a paid batch.
+ *
+ * 20% (Anthony, 2026-11-05: "no 20% margin" - 20, not the 100 I had proposed).
+ * It is a fee on the charge rather than a markup over a cost basis because
+ * that is how this ledger already pays providers: the customer price is the
+ * per-model table, and provider_earnings takes its share of what was actually
+ * collected. A markup on the free-tier subsidy rate instead would pay a
+ * provider many times the sale price on these models.
+ */
+export const DEFAULT_INTERACTIVE_HOUSE_FEE_PCT = 20;
+
 export const DEFAULT_INTERACTIVE_CONFIG = Object.freeze({
+    house_fee_pct: DEFAULT_INTERACTIVE_HOUSE_FEE_PCT,
     /**
      * Off by default so deploying this charges nobody until it is switched on
      * deliberately, per environment.
@@ -56,6 +70,11 @@ export const DEFAULT_INTERACTIVE_CONFIG = Object.freeze({
     free_when_unpriced: true
 });
 
+function pct(v, fallback) {
+    const n = typeof v === "string" ? Number.parseFloat(v) : v;
+    return Number.isFinite(n) && n >= 0 && n <= 100 ? n : fallback;
+}
+
 function bool(v, fallback) {
     if (v === true || v === "true" || v === "1" || v === 1) return true;
     if (v === false || v === "false" || v === "0" || v === 0) return false;
@@ -67,12 +86,14 @@ export function resolveInteractiveConfig({ env = {}, settings = null } = {}) {
     const d = DEFAULT_INTERACTIVE_CONFIG;
     const s = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
     const fromEnv = {
+        house_fee_pct: pct(env.INFERNET_INTERACTIVE_HOUSE_FEE_PCT, d.house_fee_pct),
         enabled: bool(env.INFERNET_INTERACTIVE_BILLING, d.enabled),
         free_tier_when_empty: bool(env.INFERNET_INTERACTIVE_FREE_TIER, d.free_tier_when_empty),
         spend_earned: bool(env.INFERNET_INTERACTIVE_SPEND_EARNED, d.spend_earned),
         free_when_unpriced: bool(env.INFERNET_INTERACTIVE_FREE_UNPRICED, d.free_when_unpriced)
     };
     return {
+        house_fee_pct: pct(s.house_fee_pct, fromEnv.house_fee_pct),
         enabled: bool(s.enabled, fromEnv.enabled),
         free_tier_when_empty: bool(s.free_tier_when_empty, fromEnv.free_tier_when_empty),
         spend_earned: bool(s.spend_earned, fromEnv.spend_earned),
