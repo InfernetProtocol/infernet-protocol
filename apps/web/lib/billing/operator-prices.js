@@ -138,7 +138,7 @@ export function clampToBounds(pair, defaults) {
  * Returns { input_micro_per_m, output_micro_per_m, source, clamped }, source
  * being "operator" | "house" | "default".
  */
-export function effectivePrice({ model, pricing, defaults, operatorPrice = null }) {
+export function effectivePrice({ model, pricing, defaults, operatorPrice = null, dynamic = null }) {
     const toMicro = (pair, source, clamped = false) => ({
         input_micro_per_m: usdToMicro(pair.input_per_m_usd),
         output_micro_per_m: usdToMicro(pair.output_per_m_usd),
@@ -159,12 +159,17 @@ export function effectivePrice({ model, pricing, defaults, operatorPrice = null 
     const house = cleanPricePair(pricing?.models?.[model]);
     if (house) return toMicro(house, "house");
 
-    return toMicro(cleanPricePair(defaults.default_model_price) ?? DEFAULT_MODEL_PRICE, "default");
+    // Nobody priced this model. The default follows the market when a snapshot
+    // is available (lib/billing/dynamic-price.js); otherwise it is the plain
+    // base. Either way it is never free.
+    const base = cleanPricePair(defaults.default_model_price) ?? DEFAULT_MODEL_PRICE;
+    if (dynamic?.price) return dynamic.price;
+    return toMicro(base, "default");
 }
 
 /** Display helper: the three layers for one model, for the API and the CLI. */
-export function describePrice({ model, pricing, defaults, operatorPrice = null }) {
-    const eff = effectivePrice({ model, pricing, defaults, operatorPrice });
+export function describePrice({ model, pricing, defaults, operatorPrice = null, dynamic = null }) {
+    const eff = effectivePrice({ model, pricing, defaults, operatorPrice, dynamic });
     return {
         model,
         input_per_m_usd: eff.input_per_m_usd,
@@ -177,6 +182,7 @@ export function describePrice({ model, pricing, defaults, operatorPrice = null }
             min_per_m_usd: defaults.operator_price_min_per_m_usd,
             max_per_m_usd: defaults.operator_price_max_per_m_usd
         },
-        per_1k_output_usd: microToUsd(Math.round(eff.output_micro_per_m / 1000))
+        per_1k_output_usd: microToUsd(Math.round(eff.output_micro_per_m / 1000)),
+        ...(eff.dynamic ? { dynamic: eff.dynamic } : {})
     };
 }
