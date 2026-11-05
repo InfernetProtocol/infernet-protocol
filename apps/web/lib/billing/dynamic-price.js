@@ -6,11 +6,16 @@
  * nodes should get cheaper; a model whose nodes are all saturated should get
  * dearer, because that is the signal that brings more supply online.
  *
- * It only ever replaces the DEFAULT layer. An explicit price still wins:
+ * It SCALES whichever base applies, so per-model differences survive:
  *
- *   1. operator  the serving node's own price          (explicit, unchanged)
- *   2. house     the per-model table                    (explicit, unchanged)
- *   3. dynamic   base default x multiplier(supply, demand)   <- this file
+ *   1. operator  the serving node's own price   - never scaled, they set it
+ *   2. house     the per-model rate card        - scaled by the market
+ *   3. default   the house default              - scaled by the market
+ *
+ * Scaling the house card matters: applying the market only to unpriced models
+ * made it dead code the moment every live model was priced, and pricing
+ * everything off one base would have thrown away the size differences the rate
+ * card exists to express (a 9b should stay dearer than a 0.5b).
  *
  * Four properties this has to have, or it is not fit to charge people with:
  *
@@ -172,22 +177,39 @@ export function dynamicMultiplier({ signal, config }) {
  * price the house would refuse from an operator.
  */
 export function dynamicDefaultPrice({ base, signal, config, bounds }) {
+    return scaleByMarket({ signal, config, bounds })(base);
+}
+
+/**
+ * A scaler for whatever base applies: the house rate card for a model, or the
+ * house default when there is no card. Returns null for an unusable base.
+ *
+ * The market multiplies the base rather than replacing it, so a 9b model stays
+ * dearer than a 0.5b one while both still move with supply and demand. The
+ * result is clamped into the same band an operator price must sit in.
+ */
+export function scaleByMarket({ signal, config, bounds }) {
     const m = dynamicMultiplier({ signal, config });
     const minB = bounds?.operator_price_min_per_m_usd ?? 0;
     const maxB = bounds?.operator_price_max_per_m_usd ?? Infinity;
-    const scale = (v) => {
+    const one = (v) => {
         const scaled = Math.round(v * m.multiplier * 1e6) / 1e6;
         return Math.min(Math.max(scaled, minB), maxB);
     };
-    const input = scale(base.input_per_m_usd);
-    const output = scale(base.output_per_m_usd);
-    return {
-        input_per_m_usd: input,
-        output_per_m_usd: output,
-        input_micro_per_m: usdToMicro(input),
-        output_micro_per_m: usdToMicro(output),
-        source: "dynamic",
-        dynamic: m,
-        base
+    return (base) => {
+        const i = Number(base?.input_per_m_usd);
+        const o = Number(base?.output_per_m_usd);
+        if (!Number.isFinite(i) || !Number.isFinite(o)) return null;
+        const input = one(i);
+        const output = one(o);
+        return {
+            input_per_m_usd: input,
+            output_per_m_usd: output,
+            input_micro_per_m: usdToMicro(input),
+            output_micro_per_m: usdToMicro(output),
+            source: "dynamic",
+            dynamic: m,
+            base: { input_per_m_usd: i, output_per_m_usd: o }
+        };
     };
 }

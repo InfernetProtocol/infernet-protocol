@@ -156,15 +156,23 @@ export function effectivePrice({ model, pricing, defaults, operatorPrice = null,
         }
     }
 
+    // No operator price: the house rate card for this model, else the house
+    // default. Whichever it is becomes the BASE, and the market scales it.
     const house = cleanPricePair(pricing?.models?.[model]);
-    if (house) return toMicro(house, "house");
+    const base = house ?? cleanPricePair(defaults.default_model_price) ?? DEFAULT_MODEL_PRICE;
+    const baseSource = house ? "house" : "default";
 
-    // Nobody priced this model. The default follows the market when a snapshot
-    // is available (lib/billing/dynamic-price.js); otherwise it is the plain
-    // base. Either way it is never free.
-    const base = cleanPricePair(defaults.default_model_price) ?? DEFAULT_MODEL_PRICE;
-    if (dynamic?.price) return dynamic.price;
-    return toMicro(base, "default");
+    // Dynamic pricing applies to the house rate card as well as the default,
+    // not only to unpriced models. Applying it to the default alone made it
+    // dead code the moment every live model was priced, and pricing off a
+    // single base would have thrown away the per-model-size differences the
+    // rate card exists to express. An OPERATOR's own price is never scaled:
+    // they set that number deliberately.
+    if (dynamic?.scale) {
+        const scaled = dynamic.scale(base);
+        if (scaled) return { ...scaled, base_source: baseSource };
+    }
+    return toMicro(base, baseSource);
 }
 
 /** Display helper: the three layers for one model, for the API and the CLI. */
