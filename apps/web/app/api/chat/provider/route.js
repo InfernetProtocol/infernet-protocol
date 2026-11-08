@@ -13,7 +13,7 @@ function err(status, error) {
 }
 
 /**
- * GET /api/chat/provider?modelName=qwen2.5:7b&minTrustTier=public
+ * GET /api/chat/provider?modelName=qwen2.5:7b&exclude=<provider id>
  *
  * Pre-select a provider and return its public key so the client can
  * derive the NIP-44 shared secret before encrypting the prompt (IPIP-0027).
@@ -27,10 +27,11 @@ export async function GET(request) {
 
     const { searchParams } = new URL(request.url);
     const modelName = searchParams.get("modelName") ?? undefined;
+    const excludeProviderIds = searchParams.getAll("exclude").slice(0, 8);
 
     let provider;
     try {
-        provider = await pickChatProvider({ modelName, requireE2E: true });
+        provider = await pickChatProvider({ modelName, requireE2E: true, excludeProviderIds });
     } catch (e) {
         return err(500, e?.message ?? String(e));
     }

@@ -39,7 +39,7 @@ export function meetsTrustTier(provider, minTier) {
   return have >= need;
 }
 
-export async function pickChatProvider({ modelName, minTrustTier, requireE2E = false } = {}) {
+export async function pickChatProvider({ modelName, minTrustTier, requireE2E = false, excludeProviderIds = [] } = {}) {
   const supabase = getSupabaseServerClient();
   const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
 
@@ -59,12 +59,12 @@ export async function pickChatProvider({ modelName, minTrustTier, requireE2E = f
         .eq("status", "available")
         .gte("last_seen", twoMinAgo);
       if (fallback.error) throw fallback.error;
-      return finishPick(fallback.data ?? [], { modelName, minTrustTier, requireE2E }, await inflightByProvider(supabase, fallback.data ?? []));
+      return finishPick(fallback.data ?? [], { modelName, minTrustTier, requireE2E, excludeProviderIds }, await inflightByProvider(supabase, fallback.data ?? []));
     }
     throw error;
   }
 
-  return finishPick(data ?? [], { modelName, minTrustTier, requireE2E }, await inflightByProvider(supabase, data ?? []));
+  return finishPick(data ?? [], { modelName, minTrustTier, requireE2E, excludeProviderIds }, await inflightByProvider(supabase, data ?? []));
 }
 
 /**
@@ -93,8 +93,10 @@ async function inflightByProvider(supabase, rows) {
   }
 }
 
-function finishPick(rows, { modelName, minTrustTier, requireE2E = false }, inflight = {}) {
+export function finishPick(rows, { modelName, minTrustTier, requireE2E = false, excludeProviderIds = [] } = {}, inflight = {}) {
   let candidates = rows;
+  const excluded = new Set(Array.isArray(excludeProviderIds) ? excludeProviderIds : []);
+  if (excluded.size > 0) candidates = candidates.filter((provider) => !excluded.has(provider?.id));
 
   if (requireE2E) {
     candidates = candidates.filter((provider) => {
@@ -615,28 +617,9 @@ export async function listChatModels() {
  * aligned with pickChatProvider({ requireE2E: true }) and avoids offering
  * plaintext-only or stale model listings to browser chat.
  */
-export async function listE2EChatModels() {
-  const supabase = getSupabaseServerClient();
-  const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-  let query = await supabase
-    .from("providers")
-    .select("specs, public_key, trust_tier")
-    .eq("status", "available")
-    .gte("last_seen", twoMinAgo);
-
-  // Older deployments may not have trust_tier yet. They behave as public in
-  // pickChatProvider, so retry with the same default here.
-  if (query.error && /trust_tier/.test(query.error.message ?? "")) {
-    query = await supabase
-      .from("providers")
-      .select("specs, public_key")
-      .eq("status", "available")
-      .gte("last_seen", twoMinAgo);
-  }
-  if (query.error) throw query.error;
-
+export function e2EChatModelNames(providers, inflight = {}) {
   const models = new Set();
-  for (const provider of query.data ?? []) {
+  for (const provider of providers) {
     const specs = provider?.specs ?? {};
     if (
       specs.e2e_capable !== true
@@ -651,6 +634,7 @@ export async function listE2EChatModels() {
         typeof name === "string"
         && name.length > 0
         && /^(?:[0-9a-f]{64}|[0-9a-f]{66})$/i.test(keys[name] ?? "")
+        && finishPick(providers, { modelName: name, requireE2E: true }, inflight)
       ) models.add(name);
     }
   }
@@ -664,7 +648,34 @@ export async function listE2EChatModels() {
         return (aRank < 0 ? lightFirst.length : aRank) - (bRank < 0 ? lightFirst.length : bRank);
       }
       return a.localeCompare(b);
-    })
+    });
+}
+
+export async function listE2EChatModels() {
+  const supabase = getSupabaseServerClient();
+  const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  let query = await supabase
+    .from("providers")
+    .select("id, reputation, specs, public_key, trust_tier")
+    .eq("status", "available")
+    .is("disabled_at", null)
+    .gte("last_seen", twoMinAgo);
+
+  // Older deployments may not have trust_tier yet. They behave as public in
+  // pickChatProvider, so retry with the same default here.
+  if (query.error && /trust_tier/.test(query.error.message ?? "")) {
+    query = await supabase
+      .from("providers")
+      .select("id, reputation, specs, public_key")
+      .eq("status", "available")
+      .is("disabled_at", null)
+      .gte("last_seen", twoMinAgo);
+  }
+  if (query.error) throw query.error;
+
+  const providers = query.data ?? [];
+  const inflight = await inflightByProvider(supabase, providers);
+  return e2EChatModelNames(providers, inflight)
     .map((name) => ({ id: name, name, family: null, context_length: null }));
 }
 

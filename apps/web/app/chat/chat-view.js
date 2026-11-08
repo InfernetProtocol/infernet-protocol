@@ -214,6 +214,13 @@ export default function ChatView({ initialModels = [] }) {
   }, [modelName]);
 
   const esRef = useRef(null);
+  const sendControllerRef = useRef(null);
+  const firstTokenTimerRef = useRef(null);
+  const activeJobIdRef = useRef(null);
+  const submittedTextRef = useRef("");
+  const streamStartedAtRef = useRef(0);
+  const estimatedTokensRef = useRef(0);
+  const lastProgressUpdateRef = useRef(0);
   const scrollRef = useRef(null);
   const composerRef = useRef(null);
   // Ephemeral secp256k1 keypair generated once per component mount (per session).
@@ -497,6 +504,9 @@ export default function ChatView({ initialModels = [] }) {
 
   async function generateImage(text, prompt) {
     const started = Date.now();
+    const controller = new AbortController();
+    sendControllerRef.current = controller;
+    const signal = controller.signal;
     setMessages((prev) => [
       ...prev,
       { role: "user", content: text, imageTurn: true },
@@ -513,7 +523,8 @@ export default function ChatView({ initialModels = [] }) {
       const res = await fetch("/api/chat/image", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(await fingerprintHeader()) },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt }),
+        signal
       });
       const started202 = await res.json().catch(() => null);
       if (res.status !== 202 || !started202?.poll) {
@@ -523,9 +534,10 @@ export default function ChatView({ initialModels = [] }) {
       let done = null;
       const deadline = Date.now() + 15 * 60 * 1000;
       while (!done) {
+        if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
         if (Date.now() > deadline) throw new Error("Image generation timed out");
         await new Promise((r) => setTimeout(r, 4000));
-        const poll = await fetch(started202.poll, { cache: "no-store" });
+        const poll = await fetch(started202.poll, { cache: "no-store", signal });
         if (poll.status === 202) {
           const p = await poll.json().catch(() => null);
           const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
@@ -552,11 +564,17 @@ export default function ChatView({ initialModels = [] }) {
         image: { url, prompt, seconds, worker: res2.headers.get("x-c0mpute-worker-peer-id") ?? null },
         provider: { name: "c0mpute", model: res2.headers.get("x-image-model") ?? "z-image-turbo" }
       })));
+      submittedTextRef.current = "";
     } catch (err) {
+      if (err?.name === "AbortError") return;
       const message = err?.message ?? "Image generation failed";
+      const submittedText = submittedTextRef.current;
+      if (submittedText) setInput((previous) => previous || submittedText);
+      submittedTextRef.current = "";
       setError(message);
       setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, pending: false, status: null, failed: true, content: message })));
     } finally {
+      if (sendControllerRef.current === controller) sendControllerRef.current = null;
       setStreaming(false);
     }
   }
@@ -566,6 +584,7 @@ export default function ChatView({ initialModels = [] }) {
     if (!text || streaming) return;
 
     setError(null);
+    submittedTextRef.current = text;
     setInput("");
     setRoutingPeers(null);
     setRoutingProxy(null);
@@ -580,9 +599,12 @@ export default function ChatView({ initialModels = [] }) {
       await generateImage(text, imagePrompt);
       return;
     }
+    const controller = new AbortController();
+    sendControllerRef.current = controller;
+    const signal = controller.signal;
     const nextUser = { role: "user", content: text };
     // Assistant placeholder we'll append tokens into.
-    const pendingAssistant = { role: "assistant", content: "", provider: null, pending: true };
+    const pendingAssistant = { role: "assistant", content: "", provider: null, pending: true, status: "Finding provider…" };
     setMessages((prev) => [...prev, nextUser, pendingAssistant]);
     setStreaming(true);
 
@@ -593,7 +615,8 @@ export default function ChatView({ initialModels = [] }) {
         const wr = await fetch("/api/chat/web", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: text })
+          body: JSON.stringify({ query: text }),
+          signal
         });
         const wd = await wr.json().catch(() => null);
         if (wr.ok && wd?.context) {
@@ -603,8 +626,10 @@ export default function ChatView({ initialModels = [] }) {
           setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, webNote: wd?.error ?? "Web search failed; answering without it." })));
         }
       } catch {
+        if (signal.aborted) return;
         setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, webNote: "Web search failed; answering without it." })));
       }
+      if (signal.aborted) return;
     }
 
     // A linked document (a PDF, a page) is read before answering, through readm3.
@@ -619,7 +644,8 @@ export default function ChatView({ initialModels = [] }) {
         const dr = await fetch("/api/chat/read", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: docUrl })
+          body: JSON.stringify({ url: docUrl }),
+          signal
         });
         const dd = await dr.json().catch(() => null);
         if (dr.ok && dd?.context) {
@@ -631,8 +657,10 @@ export default function ChatView({ initialModels = [] }) {
           setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, webNote: m.webNote ? `${m.webNote} ${note}` : note })));
         }
       } catch {
+        if (signal.aborted) return;
         setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: null, webNote: `Could not read ${host}.` })));
       }
+      if (signal.aborted) return;
     }
 
     // Image turns are not conversation the model can read: leave them out.
@@ -655,13 +683,18 @@ export default function ChatView({ initialModels = [] }) {
       history[history.length - 1]
     ];
 
-    // Attempt E2E encryption: pre-select a provider and get their pubkey.
-    let postBody;
-    let currentJobConvKey = null;
-    try {
-      const provRes = await fetch(`/api/chat/provider${modelName ? `?modelName=${encodeURIComponent(modelName)}` : ""}`);
+    const seenProviderIds = new Set();
+    let automaticRetries = 0;
+
+    async function prepareAttempt(excludedProviderIds = []) {
+      const params = new URLSearchParams();
+      if (modelName) params.set("modelName", modelName);
+      for (const id of excludedProviderIds) params.append("exclude", id);
+      const query = params.toString();
+      const provRes = await fetch(`/api/chat/provider${query ? `?${query}` : ""}`, { signal });
       const provData = await provRes.json().catch(() => ({}));
       if (!provRes.ok) throw new Error(provData.error ?? "No E2E-capable provider is available");
+
       const pubkeyToUse = provData.modelPubkey ?? provData.providerPubkey ?? null;
       const e2eAvailable = provData.e2eCapable === true
         && provData.e2eVersion === "nip44-v2"
@@ -669,175 +702,244 @@ export default function ChatView({ initialModels = [] }) {
         && typeof pubkeyToUse === "string"
         && /^(?:[0-9a-f]{64}|[0-9a-f]{66})$/i.test(pubkeyToUse);
       setProviderE2eCapable(e2eAvailable);
-      if (!e2eAvailable) {
-        throw new Error("No NIP-44 provider key was returned. Your prompt was not sent.");
-      }
+      if (!e2eAvailable) throw new Error("No NIP-44 provider key was returned. Your prompt was not sent.");
+
       const { privateKey, publicKey } = await getOrCreateEphemeralKey();
       const convKey = getConversationKey(privateKey, pubkeyToUse);
-      currentJobConvKey = convKey;
-      postBody = {
-        encryptedMessages: encrypt(convKey, JSON.stringify(outgoingMessages)),
-        clientPubkey: publicKey,
+      return {
+        providerData: provData,
         providerId: provData.providerId,
-        ...(provData.modelPubkey ? { modelPubkey: provData.modelPubkey } : {}),
-        modelName,
-        maxTokens: 2048,
-        temperature: 0.7
+        convKey,
+        postBody: {
+          encryptedMessages: encrypt(convKey, JSON.stringify(outgoingMessages)),
+          clientPubkey: publicKey,
+          providerId: provData.providerId,
+          ...(provData.modelPubkey ? { modelPubkey: provData.modelPubkey } : {}),
+          modelName,
+          maxTokens: 2048,
+          temperature: 0.7
+        }
       };
-    } catch (err) {
-      failPending(`Secure chat unavailable: ${err?.message ?? "E2E setup failed"}. Your prompt was not sent.`);
-      return;
     }
 
-    let res;
-    try {
-      res = await fetch("/api/chat", {
+    async function submitAttempt(prepared, retryToken = null) {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // The free allowance is per browser rather than per address
-          // (@profullstack/browser-fingerprint). Best effort: if collection
-          // fails the request still goes, and the server falls back to the
-          // hashed address prefix.
+          // Best effort: without a fingerprint, the server falls back to the
+          // hashed address prefix. Retry grants bind to this same header.
           ...(await fingerprintHeader())
         },
-        body: JSON.stringify(postBody)
+        body: JSON.stringify({ ...prepared.postBody, ...(retryToken ? { retryToken } : {}) }),
+        signal
       });
-    } catch (e) {
-      failPending(`Network error: ${e?.message ?? e}`);
-      return;
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? `Server returned ${res.status}`);
+      return { ...prepared, ...body };
     }
 
-    if (!res.ok) {
-      let detail = "";
-      try { detail = (await res.json())?.error ?? ""; } catch { /* ignore */ }
-      failPending(`Server returned ${res.status}${detail ? `: ${detail}` : ""}`);
-      return;
+    function setPendingStatus(status) {
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status })));
     }
 
-    const { jobId, streamUrl, provider: pickedProvider } = await res.json();
-    setProvider(pickedProvider);
+    async function rerouteAfterFirstTokenTimeout(original, es) {
+      if (automaticRetries > 0 || signal.aborted || streamedTextRef.current) return;
+      automaticRetries += 1;
+      setPendingStatus("No token after 15 seconds. Trying another live provider…");
+      let originalFailed = false;
+      try {
+        const prepared = await prepareAttempt([...seenProviderIds]);
+        if (signal.aborted || streamedTextRef.current) return;
 
-    // Store conversation key for this job so the SSE handlers can decrypt.
-    if (currentJobConvKey) {
-      convKeysRef.current.set(jobId, currentJobConvKey);
+        const failoverRes = await fetch(`/api/chat/${encodeURIComponent(original.jobId)}/failover`, {
+          method: "POST",
+          headers: { ...(await fingerprintHeader()) },
+          signal
+        });
+        const failover = await failoverRes.json().catch(() => ({}));
+        if (failoverRes.status === 409) {
+          setPendingStatus("The original provider started responding during reroute. Waiting for its first token…");
+          void fetchPersistedFailure(original.jobId, "The original provider stopped responding.");
+          return;
+        }
+        if (!failoverRes.ok || typeof failover.retryToken !== "string") {
+          throw new Error(failover.error ?? `Failover returned ${failoverRes.status}`);
+        }
+
+        originalFailed = true;
+        finishedJobsRef.current.add(original.jobId);
+        convKeysRef.current.delete(original.jobId);
+        if (activeJobIdRef.current === original.jobId) activeJobIdRef.current = null;
+        try { es.close(); } catch { /* ignore */ }
+        if (esRef.current === es) esRef.current = null;
+
+        streamedTextRef.current = "";
+        estimatedTokensRef.current = 0;
+        lastProgressUpdateRef.current = 0;
+        setPendingStatus(`Loading model on ${prepared.providerData.providerName ?? prepared.providerId}…`);
+        const attempt = await submitAttempt(prepared, failover.retryToken);
+        seenProviderIds.add(attempt.providerId);
+        attachAttempt(attempt);
+      } catch (err) {
+        if (signal.aborted) return;
+        if (originalFailed) {
+          failPending(`The first provider timed out and the retry could not start: ${err?.message ?? err}`);
+          return;
+        }
+        setPendingStatus(`No alternate E2E provider is available yet. Still waiting on ${original.providerData.providerName ?? original.providerId}…`);
+        void fetchPersistedFailure(original.jobId, "No E2E provider response was received.");
+      }
+    }
+
+    function attachAttempt(attempt) {
+      const { jobId, streamUrl, provider: pickedProvider, convKey } = attempt;
+      activeJobIdRef.current = jobId;
+      setProvider(pickedProvider);
+      convKeysRef.current.set(jobId, convKey);
       setE2eActive(true);
-    } else {
-      setE2eActive(false);
-    }
+      streamStartedAtRef.current = Date.now();
+      estimatedTokensRef.current = 0;
 
-    const es = new EventSource(streamUrl);
-    esRef.current = es;
-
-    es.addEventListener("meta", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        setMessages((prev) => updateLastAssistant(prev, (m) => ({
-          ...m,
-          provider: {
-            nodeId: data.provider_node_id,
-            name: data.provider_name,
-            model: data.model
-          }
-        })));
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener("routing", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (Array.isArray(data?.peers)) setRoutingPeers(data.peers);
-        if (data?.proxy) setRoutingProxy(data.proxy);
-        setRoutingPending(Boolean(data?.pending));
-        setRoutingNote(typeof data?.note === "string" ? data.note : null);
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener("log", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        const line = formatDaemonLogLine(data);
-        if (line) setDaemonLogs((prev) => prev.concat([{ at: Date.now(), text: line }]).slice(-50));
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener("token", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        const conversationKey = convKeysRef.current.get(jobId);
-        if (conversationKey && typeof data.encrypted_text !== "string") {
-          throw new Error("Provider sent an unencrypted response chunk; the response was blocked.");
+      const es = new EventSource(streamUrl);
+      esRef.current = es;
+      if (firstTokenTimerRef.current) clearTimeout(firstTokenTimerRef.current);
+      firstTokenTimerRef.current = setTimeout(() => {
+        firstTokenTimerRef.current = null;
+        if (activeJobIdRef.current !== jobId || streamedTextRef.current || signal.aborted) return;
+        if (automaticRetries < 1) {
+          void rerouteAfterFirstTokenTimeout(attempt, es);
+        } else {
+          setPendingStatus("No first token after automatic reroute. Still waiting; use Stop to end this wait.");
+          void fetchPersistedFailure(jobId, "No first token after automatic reroute.");
         }
-        if (!conversationKey && typeof data.encrypted_text === "string") {
-          throw new Error("Encrypted response arrived without a conversation key.");
-        }
-        const text = conversationKey
-          ? decrypt(conversationKey, data.encrypted_text)
-          : data.text ?? "";
-        if (text) {
-          streamedTextRef.current += text;
+      }, 15_000);
+
+      es.addEventListener("meta", (e) => {
+        if (activeJobIdRef.current !== jobId) return;
+        try {
+          const data = JSON.parse(e.data);
+          const name = data.provider_name ?? data.provider_node_id ?? pickedProvider?.name ?? pickedProvider?.nodeId ?? "provider";
+          setPendingStatus(`Loading model on ${name}…`);
           setMessages((prev) => updateLastAssistant(prev, (m) => ({
             ...m,
-            content: (m.content ?? "") + text
+            provider: { nodeId: data.provider_node_id, name: data.provider_name, model: data.model }
           })));
-        }
-      } catch (err) {
-        failPending(err?.message ?? "Could not verify the encrypted response.");
-      }
-    });
+        } catch { /* ignore */ }
+      });
 
-    es.addEventListener("done", (e) => {
-      let finalText = streamedTextRef.current;
-      let finishReason = null;
-      try {
-        const data = JSON.parse(e.data);
-        const conversationKey = convKeysRef.current.get(jobId);
-        if (conversationKey && typeof data.encrypted_text !== "string") {
-          throw new Error("Provider did not send an encrypted final response; the response was blocked.");
-        }
-        if (!conversationKey && typeof data.encrypted_text === "string") {
-          throw new Error("Encrypted final response arrived without a conversation key.");
-        }
-        if (conversationKey) finalText = decrypt(conversationKey, data.encrypted_text);
-        if (data.reason === "length" || data.reason === "cancel") finishReason = data.reason;
-      } catch (err) {
-        failPending(err?.message ?? "Could not verify the encrypted final response.");
-        return;
-      }
-      streamedTextRef.current = finalText;
-      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, content: finalText, pending: false, done: true, finishReason })));
-      setStreaming(false);
-      if (voiceMode) void speakAssistant(finalText.trim());
-      convKeysRef.current.delete(jobId);
-      finishedJobsRef.current.add(jobId);
-      try { es.close(); } catch { /* ignore */ }
-      esRef.current = null;
-    });
+      es.addEventListener("routing", (e) => {
+        if (activeJobIdRef.current !== jobId) return;
+        try {
+          const data = JSON.parse(e.data);
+          if (Array.isArray(data?.peers)) setRoutingPeers(data.peers);
+          if (data?.proxy) setRoutingProxy(data.proxy);
+          setRoutingPending(Boolean(data?.pending));
+          setRoutingNote(typeof data?.note === "string" ? data.note : null);
+        } catch { /* ignore */ }
+      });
 
-    es.addEventListener("error", (e) => {
-      let msg = null;
-      try {
-        const data = JSON.parse(e.data);
-        msg = data?.message ?? null;
-      } catch { /* native EventSource error has no .data — we'll fetch */ }
-      if (msg) {
-        failPending(msg);
-      } else {
-        // Typed "error" event with no payload — pull persisted reason.
-        fetchPersistedFailure(jobId, "Stream error");
-      }
-    });
+      es.addEventListener("log", (e) => {
+        if (activeJobIdRef.current !== jobId) return;
+        try {
+          const data = JSON.parse(e.data);
+          const line = formatDaemonLogLine(data);
+          if (line) setDaemonLogs((prev) => prev.concat([{ at: Date.now(), text: line }]).slice(-50));
+        } catch { /* ignore */ }
+      });
 
-    // If the browser closes the EventSource on network loss, surface
-    // whatever the daemon recorded server-side. Without this fetch,
-    // the playground used to show "Connection to the provider was
-    // lost" even when the daemon had already written a specific
-    // error to job_events.
-    es.onerror = () => {
-      if (streaming && esRef.current === es) {
-        fetchPersistedFailure(jobId, "Connection to the provider was lost.");
-      }
-    };
+      es.addEventListener("token", (e) => {
+        if (activeJobIdRef.current !== jobId) return;
+        try {
+          const data = JSON.parse(e.data);
+          const conversationKey = convKeysRef.current.get(jobId);
+          if (conversationKey && typeof data.encrypted_text !== "string") {
+            throw new Error("Provider sent an unencrypted response chunk; the response was blocked.");
+          }
+          if (!conversationKey && typeof data.encrypted_text === "string") {
+            throw new Error("Encrypted response arrived without a conversation key.");
+          }
+          const text = conversationKey ? decrypt(conversationKey, data.encrypted_text) : data.text ?? "";
+          if (text) {
+            if (firstTokenTimerRef.current) clearTimeout(firstTokenTimerRef.current);
+            firstTokenTimerRef.current = null;
+            streamedTextRef.current += text;
+            estimatedTokensRef.current += Math.max(1, Math.ceil(text.length / 4));
+            const now = Date.now();
+            if (now - lastProgressUpdateRef.current >= 1000 || estimatedTokensRef.current <= 4) {
+              const elapsed = Math.max(0.25, (now - streamStartedAtRef.current) / 1000);
+              const rate = Math.max(1, Math.round(estimatedTokensRef.current / elapsed));
+              lastProgressUpdateRef.current = now;
+              setPendingStatus(`Generating, ${rate} tok/s`);
+            }
+            setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, content: (m.content ?? "") + text })));
+          }
+        } catch (err) {
+          failPending(err?.message ?? "Could not verify the encrypted response.");
+        }
+      });
+
+      es.addEventListener("done", (e) => {
+        if (activeJobIdRef.current !== jobId) return;
+        let finalText = streamedTextRef.current;
+        let finishReason = null;
+        try {
+          const data = JSON.parse(e.data);
+          const conversationKey = convKeysRef.current.get(jobId);
+          if (conversationKey && typeof data.encrypted_text !== "string") {
+            throw new Error("Provider did not send an encrypted final response; the response was blocked.");
+          }
+          if (!conversationKey && typeof data.encrypted_text === "string") {
+            throw new Error("Encrypted final response arrived without a conversation key.");
+          }
+          if (conversationKey) finalText = decrypt(conversationKey, data.encrypted_text);
+          if (data.reason === "length" || data.reason === "cancel") finishReason = data.reason;
+        } catch (err) {
+          failPending(err?.message ?? "Could not verify the encrypted final response.");
+          return;
+        }
+        if (firstTokenTimerRef.current) clearTimeout(firstTokenTimerRef.current);
+        firstTokenTimerRef.current = null;
+        streamedTextRef.current = finalText;
+        setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, content: finalText, pending: false, done: true, status: null, finishReason })));
+        setStreaming(false);
+        submittedTextRef.current = "";
+        if (sendControllerRef.current === controller) sendControllerRef.current = null;
+        if (voiceMode) void speakAssistant(finalText.trim());
+        convKeysRef.current.delete(jobId);
+        finishedJobsRef.current.add(jobId);
+        activeJobIdRef.current = null;
+        try { es.close(); } catch { /* ignore */ }
+        if (esRef.current === es) esRef.current = null;
+      });
+
+      es.addEventListener("error", (e) => {
+        if (activeJobIdRef.current !== jobId) return;
+        let msg = null;
+        try { msg = JSON.parse(e.data)?.message ?? null; } catch { /* native event */ }
+        if (msg) failPending(msg);
+        else fetchPersistedFailure(jobId, "Stream error");
+      });
+
+      es.onerror = () => {
+        if (activeJobIdRef.current === jobId && esRef.current === es) {
+          fetchPersistedFailure(jobId, "Connection to the provider was lost.");
+        }
+      };
+    }
+
+    try {
+      setPendingStatus("Finding provider…");
+      const prepared = await prepareAttempt();
+      if (signal.aborted) return;
+      seenProviderIds.add(prepared.providerId);
+      setPendingStatus(`Loading model on ${prepared.providerData.providerName ?? prepared.providerId}…`);
+      const attempt = await submitAttempt(prepared);
+      attachAttempt(attempt);
+    } catch (err) {
+      if (signal.aborted) return;
+      failPending(`Secure chat unavailable: ${err?.message ?? "E2E setup failed"}. Your prompt was not sent.`);
+    }
   }
 
   // A dropped event stream is not a failed job. A long prompt (a linked PDF, say)
@@ -884,9 +986,12 @@ export default function ChatView({ initialModels = [] }) {
             ? body.latest_done_reason
             : null;
           setStreaming(false);
+          submittedTextRef.current = "";
+          if (sendControllerRef.current) sendControllerRef.current = null;
           setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, content: completedText, pending: false, done: true, finishReason })));
           convKeysRef.current.delete(jobId);
           finishedJobsRef.current.add(jobId);
+          if (activeJobIdRef.current === jobId) activeJobIdRef.current = null;
           if (voiceMode) void speakAssistant(completedText.trim());
           if (esRef.current) {
             try { esRef.current.close(); } catch { /* ignore */ }
@@ -913,18 +1018,61 @@ export default function ChatView({ initialModels = [] }) {
   }
 
   function failPending(message) {
+    if (firstTokenTimerRef.current) clearTimeout(firstTokenTimerRef.current);
+    firstTokenTimerRef.current = null;
+    if (sendControllerRef.current) sendControllerRef.current.abort();
+    sendControllerRef.current = null;
+    if (activeJobIdRef.current) {
+      finishedJobsRef.current.add(activeJobIdRef.current);
+      convKeysRef.current.delete(activeJobIdRef.current);
+    }
+    activeJobIdRef.current = null;
+    const submittedText = submittedTextRef.current;
+    if (submittedText) setInput((previous) => previous || submittedText);
+    submittedTextRef.current = "";
     setError(message);
     setStreaming(false);
     setMessages((prev) => updateLastAssistant(prev, (m) => ({
       ...m,
       pending: false,
       failed: true,
+      status: null,
       content: m.content || `⚠️ ${message}`
     })));
     if (esRef.current) {
       try { esRef.current.close(); } catch { /* ignore */ }
       esRef.current = null;
     }
+  }
+
+  function stopChat() {
+    if (firstTokenTimerRef.current) clearTimeout(firstTokenTimerRef.current);
+    firstTokenTimerRef.current = null;
+    if (sendControllerRef.current) sendControllerRef.current.abort();
+    sendControllerRef.current = null;
+    const jobId = activeJobIdRef.current;
+    if (jobId) {
+      finishedJobsRef.current.add(jobId);
+      convKeysRef.current.delete(jobId);
+    }
+    activeJobIdRef.current = null;
+    if (esRef.current) {
+      try { esRef.current.close(); } catch { /* ignore */ }
+      esRef.current = null;
+    }
+    const submittedText = submittedTextRef.current;
+    if (submittedText) setInput((previous) => previous || submittedText);
+    submittedTextRef.current = "";
+    setError(null);
+    setMessages((prev) => updateLastAssistant(prev, (m) => ({
+      ...m,
+      pending: false,
+      failed: true,
+      status: null,
+      finishReason: "cancel",
+      content: m.content || "Stopped waiting in this browser before the model replied. Your prompt is back in the composer; the provider may continue computing."
+    })));
+    setStreaming(false);
   }
 
   function onComposerKey(e) {
@@ -1220,14 +1368,25 @@ export default function ChatView({ initialModels = [] }) {
               >
                 Clear
               </button>
-              <button
-                type="button"
-                onClick={sendMessage}
-                disabled={streaming || voiceListening || input.trim() === "" || initialModels.length === 0}
-                className="rounded-full bg-[var(--accent-strong)] px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black transition hover:brightness-110 disabled:opacity-40"
-              >
-                {streaming ? "…" : "Send"}
-              </button>
+              {streaming ? (
+                <button
+                  type="button"
+                  onClick={stopChat}
+                  title="Stops the response stream in this browser; the provider may continue computing."
+                  className="rounded-full border border-[var(--warn)]/50 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--warn)] transition hover:bg-[var(--warn)]/10"
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={sendMessage}
+                  disabled={voiceListening || input.trim() === "" || initialModels.length === 0}
+                  className="rounded-full bg-[var(--accent-strong)] px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black transition hover:brightness-110 disabled:opacity-40"
+                >
+                  Send
+                </button>
+              )}
             </div>
           </div>
         </div>

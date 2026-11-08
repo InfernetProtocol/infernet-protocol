@@ -34,6 +34,36 @@ export const QUERY_MAX_LEN = 300;
 
 export const TRON_MCP_URL = process.env.TRON_MCP_URL || "https://tronbrowser.dev/mcp/tron";
 
+const QUERY_STOP_WORDS = new Set([
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "i", "in", "is", "it",
+    "latest", "me", "of", "on", "or", "please", "show", "the", "to", "version", "was", "what", "when",
+    "where", "which", "who", "why", "with", "find", "search", "web", "about", "current"
+]);
+
+function queryTerms(query) {
+    const matches = String(query ?? "").match(/[\p{L}\p{N}]+(?:[._/-][\p{L}\p{N}]+)*/gu) ?? [];
+    return [...new Set(matches.map((term) => term.toLowerCase()).filter((term) => term.length >= 2 && !QUERY_STOP_WORDS.has(term)))];
+}
+
+/** Preserve the user's wording while asking Google to keep distinctive terms exact. */
+export function buildSearchQuery(query) {
+    const text = String(query ?? "").replace(/\s+/g, " ").trim();
+    const lower = text.toLowerCase();
+    const exact = queryTerms(text).filter((term) => !lower.includes(`"${term}"`));
+    return exact.length ? `${text} ${exact.map((term) => `"${term}"`).join(" ")}` : text;
+}
+
+/** Keep results that mention enough of the request in their title, URL, or snippet. */
+export function isRelevantSearchResult(query, result) {
+    const terms = queryTerms(query);
+    if (terms.length === 0) return true;
+    const text = `${result?.title ?? ""} ${result?.link ?? result?.url ?? ""} ${result?.snippet ?? ""}`.toLowerCase();
+    const words = new Set(text.match(/[\p{L}\p{N}]+(?:[._/-][\p{L}\p{N}]+)*/gu) ?? []);
+    const matches = terms.filter((term) => words.has(term));
+    const required = terms.length <= 2 ? terms.length : Math.ceil(terms.length * 0.6);
+    return matches.length >= required;
+}
+
 function clip(text, max) {
     const t = String(text ?? "").replace(/\s+/g, " ").trim();
     if (t.length <= max) return t;
@@ -140,11 +170,11 @@ export async function searchWeb(query, {
 } = {}) {
     if (!apiKey) throw new Error("web search is not configured (VALUESERP_API_KEY)");
     // English results and dates; unset, dev2 got Google Japan ("2026年8月3日").
-    const params = new URLSearchParams({ api_key: apiKey, q: query, num: String(RESULTS + 1), hl: "en", gl: "us", google_domain: "google.com" });
+    const params = new URLSearchParams({ api_key: apiKey, q: buildSearchQuery(query), num: String(RESULTS + 5), hl: "en", gl: "us", google_domain: "google.com" });
     const res = await hedgedFetch(`https://api.valueserp.com/search?${params}`, { fetchImpl, timeoutMs, hedgeMs });
     const body = await res.json();
     return (body?.organic_results ?? [])
-        .filter((r) => typeof r?.link === "string" && /^https?:\/\//.test(r.link))
+        .filter((r) => typeof r?.link === "string" && /^https?:\/\//.test(r.link) && isRelevantSearchResult(query, r))
         .slice(0, RESULTS)
         .map((r) => ({ title: String(r.title ?? r.link), url: r.link, snippet: String(r.snippet ?? "") }));
 }

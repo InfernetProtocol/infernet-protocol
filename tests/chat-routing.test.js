@@ -3,9 +3,53 @@ import { filterFittingModels } from "../apps/cli/commands/register.js";
 
 // Don't import server-only modules in vitest's node env. Re-export
 // reputationWeightedPick from the same file.
-import { reputationWeightedPick, headroomScore, notSaturated, meetsTrustTier } from "../apps/web/lib/data/chat.js";
+import { reputationWeightedPick, headroomScore, notSaturated, meetsTrustTier, finishPick, e2EChatModelNames } from "../apps/web/lib/data/chat.js";
 
 const GB = 1024 ** 3;
+const PUBKEY = "a".repeat(64);
+
+function e2eProvider(id, specs = {}) {
+    return {
+        id,
+        public_key: PUBKEY,
+        reputation: 50,
+        trust_tier: "public",
+        specs: {
+            e2e_capable: true,
+            e2e_version: "nip44-v2",
+            served_models: ["qwen2.5:7b"],
+            model_keys: { "qwen2.5:7b": "b".repeat(64) },
+            ...specs
+        }
+    };
+}
+
+describe("E2E chat model availability", () => {
+    it("lists only a model that a live, unsaturated E2E provider can take", () => {
+        const saturated = e2eProvider("busy", { load: { active_jobs: 4, concurrency_cap: 4 } });
+        const ready = e2eProvider("ready");
+        const plaintext = { ...e2eProvider("plaintext"), specs: { served_models: ["qwen2.5:7b"] } };
+        const missingModelKey = e2eProvider("no-model-key", { model_keys: {} });
+
+        expect(e2EChatModelNames([saturated, ready, plaintext, missingModelKey])).toEqual(["qwen2.5:7b"]);
+        expect(e2EChatModelNames([saturated])).toEqual([]);
+    });
+
+    it("can exclude a slow provider and pick another E2E node for the same model", () => {
+        const slow = e2eProvider("slow");
+        const backup = e2eProvider("backup");
+        expect(finishPick([slow, backup], {
+            modelName: "qwen2.5:7b",
+            requireE2E: true,
+            excludeProviderIds: ["slow"]
+        })).toBe(backup);
+        expect(finishPick([slow], {
+            modelName: "qwen2.5:7b",
+            requireE2E: true,
+            excludeProviderIds: ["slow"]
+        })).toBeNull();
+    });
+});
 
 describe("filterFittingModels", () => {
     it("accepts every model on a generous GPU box", () => {

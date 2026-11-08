@@ -6,6 +6,7 @@ import { checkChatLimit, wantsP2pOnly, trustedClientFor, paidLimit } from "@/lib
 import { resolveBillingCaller, authorizeInteractive } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
+import { consumeChatRetryToken } from "@/lib/chat/retry-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,17 @@ export async function POST(request) {
     payload = await request.json();
   } catch {
     return err(400, "Invalid JSON body");
+  }
+
+  let retryGrant = null;
+  if (typeof payload?.retryToken === "string" && payload.retryToken) {
+    const retry = await consumeChatRetryToken({
+      token: payload.retryToken,
+      ip,
+      fingerprint: request.headers.get("x-fingerprint")
+    });
+    if (!retry.ok) return err(retry.status, retry.error);
+    retryGrant = retry;
   }
 
   const { messages, encryptedMessages, clientPubkey, modelPubkey, providerId, modelName, maxTokens, temperature, distributed } = payload ?? {};
@@ -63,22 +75,24 @@ export async function POST(request) {
     // database, so it survives a deploy: see lib/data/free-tier.js. A trusted
     // client of ours still has its own burst budget on top, because its
     // BILLED traffic must not be held to a stranger's allowance.
-    const free = await consumeFreeQuery({
-      userId: payer.userId ?? null,
-      clientSubject: payer.subject ?? null,
-      ip,
-      // Collected by the page against /api/fp/challenge.
-      fingerprint: request.headers.get("x-fingerprint"),
-      userAgent: request.headers.get("user-agent")
-    });
-    freeLeft = free.remaining;
-    if (!free.ok) {
-      return err(429, freeLimitMessage(free.limit), {
-        free_limit_per_day: free.limit,
-        used_today: free.used,
-        resetAt: new Date(Date.now() + free.retryAfter * 1000).toISOString(),
-        topUp: "POST /api/v1/billing/topup, or move node earnings in with POST /api/v1/billing/fund-from-earnings"
+    if (!retryGrant) {
+      const free = await consumeFreeQuery({
+        userId: payer.userId ?? null,
+        clientSubject: payer.subject ?? null,
+        ip,
+        // Collected by the page against /api/fp/challenge.
+        fingerprint: request.headers.get("x-fingerprint"),
+        userAgent: request.headers.get("user-agent")
       });
+      freeLeft = free.remaining;
+      if (!free.ok) {
+        return err(429, freeLimitMessage(free.limit), {
+          free_limit_per_day: free.limit,
+          used_today: free.used,
+          resetAt: new Date(Date.now() + free.retryAfter * 1000).toISOString(),
+          topUp: "POST /api/v1/billing/topup, or move node earnings in with POST /api/v1/billing/fund-from-earnings"
+        });
+      }
     }
     const r = checkChatLimit({ bearer, ip, publicLimit: limit });
     if (!r.ok) {

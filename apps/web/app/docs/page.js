@@ -23,6 +23,7 @@ const TOC = [
     { id: "auth",          label: "Sign up / sign in / reset" },
     { id: "dashboard",     label: "Dashboard" },
     { id: "interconnects", label: "Interconnects (NVLink / xGMI / IB / EFA)" },
+    { id: "api-keys",      label: "API keys" },
     { id: "api",           label: "Public API endpoints" },
     { id: "self-host",     label: "Self-host the control plane" },
     { id: "architecture",  label: "Architecture" },
@@ -708,6 +709,27 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
                     </Link>
                     .
                 </Aside>
+            </Section>
+
+            <Section id="api-keys" title="API keys">
+                <p>
+                    Sign in and create a key in{" "}
+                    <Link href="/dashboard/billing" className="text-[var(--accent)] hover:underline">
+                        Dashboard → Billing
+                    </Link>{" "}
+                    or run <code>infernet keys create --name quickstart</code>. Copy the <code>ik_live_</code> key when
+                    it is shown; the full value is displayed once. Set it in <code>INFERNET_API_KEY</code> before using
+                    this request:
+                </p>
+                <CodeBlock>{"curl -sS https://infernetprotocol.com/v1/chat/completions \\\n  -H \"Authorization: Bearer $INFERNET_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"model\":\"auto\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK.\"}]}'"}</CodeBlock>
+                <p>
+                    The key identifies your account; it does not add funds. An eligible account can use its remaining
+                    free daily requests. Paid requests use your node earnings or prepaid balance; add funds from{" "}
+                    <Link href="/dashboard/billing" className="text-[var(--accent)] hover:underline">
+                        Billing
+                    </Link>
+                    . The <code>auto</code> model alias chooses a model a live provider serves.
+                </p>
             </Section>
 
             {/* API */}
