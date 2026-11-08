@@ -62,7 +62,7 @@ payment = (input_tokens × input_rate) + (output_tokens × output_rate)
 
 Where rates are set by the network based on model tier. Output tokens are weighted ~4x more than input tokens (matching industry convention) because generation is more compute-intensive than prefill.
 
-Operators see the full payment minus the house fee (currently 2%).
+Operators see the full payment minus the house fee (currently 5%).
 
 ## Multi-Chain Support
 
@@ -150,12 +150,12 @@ curl https://infernetprotocol.com/api/v1/cprs/cpr_7x2a1b3c \
 
 ## Platform Fee
 
-The current house fee is **2%** of each job's payment. Infernet and the c0mpute market are separate products: c0mpute's 5% market fee applies only to jobs bought through c0mpute.com/market and is never added to an Infernet job. The house fee funds:
+The current house fee is **5%** of each job's payment; the operator keeps 95%. It is the same 5% as the c0mpute market fee (c0mpute.com/market), and the two are never stacked on one job. (It was 2% until 2026-11-08; earnings credited before then keep the fee they were recorded at.) The house fee funds:
 
 - Control plane infrastructure
 - Protocol development
 - The security audit program
 
-The fee is deducted at the escrow level. When you redeem a CPR for $0.00156, the node receives $0.0015288 and the platform retains $0.0000312.
+The fee is deducted at the escrow level. When you redeem a CPR for $0.00156, the node receives $0.001482 and the platform retains $0.000078.
 
 The fee is governed on-chain and changes require a governance vote.

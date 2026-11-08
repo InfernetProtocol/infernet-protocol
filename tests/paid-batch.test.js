@@ -357,7 +357,7 @@ describe("quote and submit", () => {
         const r = await batches.commitSubmit(USER, p, { walletMicro: 0 });
         expect(r.ok).toBe(true);
         const call = rpc.inference_submit_batch.mock.calls[0][0];
-        expect(call.p_batch).toMatchObject({ funding: ["prepaid"], wallet_micro: 0, house_fee_pct: 2, max_in_flight: 8 });
+        expect(call.p_batch).toMatchObject({ funding: ["prepaid"], wallet_micro: 0, house_fee_pct: 5, max_in_flight: 8 });
         expect(chat.createChatJob).toHaveBeenCalledTimes(1);
         expect(chat.createChatJob.mock.calls[0][0]).toMatchObject({ providerId: "prov-1", pinned: true, batchItemId: "it-0", modelName: "qwen2.5:7b", maxTokens: 100 });
         expect(fake.db.tables.inference_batch_items[0].job_id).toBe("job-1");

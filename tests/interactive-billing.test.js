@@ -167,19 +167,19 @@ describe("chargeIdemKey", () => {
 
 
 describe("house fee on an interactive charge", () => {
-    it("defaults to 20%, so the provider keeps 80% of what was collected", () => {
-        expect(DEFAULT_INTERACTIVE_HOUSE_FEE_PCT).toBe(20);
-        expect(resolveInteractiveConfig({ env: {} }).house_fee_pct).toBe(20);
-        const { feeMicro, providerMicro } = providerSplitMicro(1000, 20);
-        expect(feeMicro).toBe(200);
-        expect(providerMicro).toBe(800);
+    it("defaults to 5%, so the provider keeps 95% of what was collected", () => {
+        expect(DEFAULT_INTERACTIVE_HOUSE_FEE_PCT).toBe(5);
+        expect(resolveInteractiveConfig({ env: {} }).house_fee_pct).toBe(5);
+        const { feeMicro, providerMicro } = providerSplitMicro(1000, 5);
+        expect(feeMicro).toBe(50);
+        expect(providerMicro).toBe(950);
     });
 
     it("is overridable by env and settings, and rejects an out-of-range typo", () => {
         expect(resolveInteractiveConfig({ env: { INFERNET_INTERACTIVE_HOUSE_FEE_PCT: "35" } }).house_fee_pct).toBe(35);
         expect(resolveInteractiveConfig({ env: {}, settings: { house_fee_pct: 10 } }).house_fee_pct).toBe(10);
-        expect(resolveInteractiveConfig({ env: {}, settings: { house_fee_pct: 900 } }).house_fee_pct).toBe(20);
-        expect(resolveInteractiveConfig({ env: {}, settings: { house_fee_pct: -5 } }).house_fee_pct).toBe(20);
+        expect(resolveInteractiveConfig({ env: {}, settings: { house_fee_pct: 900 } }).house_fee_pct).toBe(5);
+        expect(resolveInteractiveConfig({ env: {}, settings: { house_fee_pct: -5 } }).house_fee_pct).toBe(5);
     });
 
     it("never pays a provider more than the customer paid, at any fee", () => {

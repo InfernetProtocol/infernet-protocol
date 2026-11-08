@@ -151,7 +151,7 @@ describe("earnings ledger", () => {
 
     it("a paid job's credit is confirmed when the client's payment confirms", async () => {
         await credit("j9", { payment_offer: 4 });
-        expect(table("provider_earnings")[0]).toMatchObject({ kind: "paid", status: "pending", amount_usd: 3.92, fee_usd: 0.08 });
+        expect(table("provider_earnings")[0]).toMatchObject({ kind: "paid", status: "pending", amount_usd: 3.8, fee_usd: 0.2 });
         expect(await earnings.confirmPaidJobCredits("j9")).toBe(1);
         expect(table("provider_earnings")[0].status).toBe("confirmed");
     });
@@ -204,16 +204,16 @@ describe("reservation earnings", () => {
         expect(again).toMatchObject({ credited: 0, already: true });
         const rows = table("provider_earnings");
         expect(rows).toHaveLength(1);
-        // (12.92 - 6.98) = 5.94 of hours, less the 2% house fee.
-        expect(rows[0]).toMatchObject({ kind: "reservation", job_id: null, reservation_id: "r1", status: "pending_approval", gross_usd: 5.94, amount_usd: 5.8212 });
+        // (12.92 - 6.98) = 5.94 of hours, less the 5% house fee.
+        expect(rows[0]).toMatchObject({ kind: "reservation", job_id: null, reservation_id: "r1", status: "pending_approval", gross_usd: 5.94, amount_usd: 5.643 });
         const before = await earnings.getEarningsForNode({ pubkey: "pk1" });
-        expect(before.balance).toMatchObject({ available_usd: 0, pending_approval_usd: 5.8212 });
+        expect(before.balance).toMatchObject({ available_usd: 0, pending_approval_usd: 5.643 });
         // Approving the subsidy does not touch it.
         await earnings.updateEarningsConfig({ subsidy_approved: true });
         expect(rows[0].status).toBe("pending_approval");
         await earnings.reviewEarning(rows[0].id, { action: "approve", actor: "admin" });
         const after = await earnings.getEarningsForNode({ pubkey: "pk1" });
-        expect(after.balance.available_usd).toBe(5.8212);
+        expect(after.balance.available_usd).toBe(5.643);
     });
 
     it("a Salad order (no provider) earns nothing", async () => {

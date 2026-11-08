@@ -4,6 +4,8 @@
 
 Infernet is the protocol layer — matchmaking, escrow, reputation (CPR), and payment routing. Operators authenticate with a Nostr keypair (never a database credential). Peer discovery and workload auctions live in the c0mpute network (libp2p Kad-DHT + gossipsub), so the control plane is convenience, not dependency: it can go dark and the network keeps working. The focus is workloads a peer network is genuinely best at — single-GPU and CPU inference, embarrassingly parallel batch, LoRA fine-tunes — not tight-sync frontier-scale training that needs NVLink.
 
+Fees: a 5% house fee on paid jobs, paid batch inference and metered API usage; the node operator keeps 95%. It is the same 5% as the c0mpute market fee (c0mpute.com/market), and the two never stack on one job.
+
 ## Docs
 
 - [Getting started](https://infernetprotocol.com/getting-started): Install and run a node in two commands.

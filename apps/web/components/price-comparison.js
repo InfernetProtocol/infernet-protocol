@@ -72,7 +72,7 @@ export default async function PriceComparison() {
                     </p>
                     <p>
                         Frontier prices are the vendors&apos; published standard rates, checked {checked}; follow the links for
-                        current rates. Infernet prices are the live rates the batch API charges; node operators keep 98%.
+                        current rates. Infernet prices are the live rates the batch API charges; node operators keep 95%.
                     </p>
                 </div>
 
