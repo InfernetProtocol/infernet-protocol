@@ -62,6 +62,10 @@
     img {
       max-width: 100%;
     }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
     h1, h2, h3, h4, h5, h6 {
       margin-top: 1.4em;
     }
@@ -116,8 +120,8 @@
      overflow: visible;
     }
     hr {
-      background-color: #1a1a1a;
       border: none;
+      border-top: 1px solid #1a1a1a;
       height: 1px;
       margin: 1em 0;
     }
@@ -176,8 +180,9 @@
     }
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
     /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
     .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -435,24 +440,24 @@ operator’s verified email.</p>
 <col style="width: 26%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Backend</th>
 <th>Best for</th>
 <th>Notes</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><strong>Ollama</strong></td>
 <td>General-purpose LLMs up to ~70B</td>
 <td>Easiest setup; GGUF quantized</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>vLLM</strong></td>
 <td>High-throughput, full-precision HuggingFace models</td>
 <td>Requires CUDA; PagedAttention</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><strong>SGLang</strong></td>
 <td>Structured generation, long-context models</td>
 <td>Supports Llama, Mistral, Qwen</td>
@@ -480,39 +485,39 @@ uses <code>nvidia-smi</code>, <code>rocm-smi</code>, and
 <p>VRAM is bucketed into tiers for routing:</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Tier</th>
 <th>VRAM</th>
 <th>Typical hardware</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>nano</code></td>
 <td>&lt; 4 GB</td>
 <td>Integrated / low-end mobile GPUs</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>small</code></td>
 <td>4–8 GB</td>
 <td>RTX 3060, RTX 4060</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>medium</code></td>
 <td>8–16 GB</td>
 <td>RTX 3080, RTX 4080</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>large</code></td>
 <td>16–32 GB</td>
 <td>RTX 3090, RTX 4090, A100 40 GB</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>xl</code></td>
 <td>32–80 GB</td>
 <td>A100 80 GB, H100 80 GB</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>xxl</code></td>
 <td>80 GB+</td>
 <td>Multi-GPU, H100 NVLink clusters</td>
@@ -582,21 +587,21 @@ only deduction.</p>
 <h2 id="fee-structure">5.3 Fee Structure</h2>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Party</th>
 <th>Amount</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Consumer</td>
 <td>Pays per 1 000 tokens (prompt + completion)</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Operator</td>
 <td>Receives ~95% of consumer payment</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Platform</td>
 <td>Retains ~5% as protocol fee</td>
 </tr>
@@ -654,44 +659,44 @@ registry live on a centralized control plane. The phased roadmap moves
 progressively toward full decentralization:</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Phase</th>
 <th>Description</th>
 <th>Status</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>0</td>
 <td>Centralized control plane (Supabase + Next.js)</td>
 <td><strong>Shipped</strong></td>
 </tr>
-<tr class="even">
+<tr>
 <td>1</td>
 <td>Nostr-signed node identity; no password database</td>
 <td><strong>Shipped</strong></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>2</td>
 <td>Multi-coin payments via CoinPayPortal</td>
 <td><strong>In progress</strong></td>
 </tr>
-<tr class="even">
+<tr>
 <td>3</td>
 <td>Reputation protocol (CPR receipts per job)</td>
 <td><strong>Planned</strong></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>4</td>
 <td>Decentralized job queue (Nostr relay or DHT)</td>
 <td><strong>Planned</strong></td>
 </tr>
-<tr class="even">
+<tr>
 <td>5</td>
 <td>ZK proof of inference execution</td>
 <td><strong>Research</strong></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>6</td>
 <td>Fully P2P — no required central coordinator</td>
 <td><strong>Research</strong></td>
@@ -729,7 +734,7 @@ pay per GPU-hour, operators earn per gradient step contributed.</p>
 <col style="width: 36%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th></th>
 <th>Infernet Protocol</th>
 <th>Centralized API (OpenAI et al.)</th>
@@ -737,43 +742,43 @@ pay per GPU-hour, operators earn per gradient step contributed.</p>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Native token required</td>
 <td>No</td>
 <td>No</td>
 <td>Often yes</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Operator self-custody</td>
 <td>Yes</td>
 <td>No</td>
 <td>Varies</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>OpenAI-compatible API</td>
 <td>Yes</td>
 <td>Yes</td>
 <td>Rarely</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Multi-coin payments</td>
 <td>Yes</td>
 <td>No (card / credits)</td>
 <td>Single chain</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Open source</td>
 <td>MIT</td>
 <td>No</td>
 <td>Varies</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Setup time</td>
 <td>&lt; 5 min</td>
 <td>Account + billing</td>
 <td>Hours–days</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>GPU hardware agnostic</td>
 <td>Yes</td>
 <td>N/A</td>
