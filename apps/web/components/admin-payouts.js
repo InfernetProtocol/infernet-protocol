@@ -21,6 +21,41 @@ function usd(n) {
     return Math.abs(v) >= 0.01 ? `$${v.toFixed(2)}` : `$${v.toFixed(6).replace(/0+$/, "")}`;
 }
 
+/** 0x1234…abcd: a long address or tx hash that fits a table cell (full value in the title). */
+function short(v, head = 6, tail = 4) {
+    const t = String(v ?? "");
+    return t.length > head + tail + 1 ? `${t.slice(0, head)}…${t.slice(-tail)}` : t;
+}
+
+const TX_EXPLORERS = {
+    polygon: "https://polygonscan.com/tx/",
+    base: "https://basescan.org/tx/",
+    ethereum: "https://etherscan.io/tx/",
+    eth: "https://etherscan.io/tx/",
+    arbitrum: "https://arbiscan.io/tx/",
+    optimism: "https://optimistic.etherscan.io/tx/",
+    bsc: "https://bscscan.com/tx/",
+    solana: "https://solscan.io/tx/",
+    sol: "https://solscan.io/tx/"
+};
+
+function txUrl(network, coin, hash) {
+    const base = TX_EXPLORERS[String(network || coin || "").toLowerCase()];
+    return base && hash ? base + hash : null;
+}
+
+/** A shortened value with a copy-on-click and the full text on hover. */
+function Mono({ value, href }) {
+    if (!value) return null;
+    const label = short(value);
+    const copy = () => { try { navigator.clipboard?.writeText(String(value)); } catch { /* insecure context */ } };
+    return href ? (
+        <a href={href} target="_blank" rel="noreferrer" title={value} className="font-mono hover:underline">{label}</a>
+    ) : (
+        <button type="button" title={`${value} (click to copy)`} onClick={copy} className="font-mono hover:text-white">{label}</button>
+    );
+}
+
 /**
  * /admin/payouts client: lists pending withdrawal requests with one Approve
  * action each, the ledger totals, and the earnings settings (subsidy rate,
@@ -191,13 +226,13 @@ export default function AdminPayouts({ session = false }) {
                                         <td className="py-2 pr-3 text-white">
                                             <a href={`/nodes/${r.provider_id}`} className="hover:underline">{r.provider_name ?? r.provider_node_id ?? r.provider_id}</a>
                                         </td>
-                                        <td className="py-2 pr-3 text-white">{usd(r.amount_usd)}</td>
-                                        <td className="py-2 pr-3 font-mono text-xs text-[var(--muted)] break-all">{r.coin}{r.network ? ` (${r.network})` : ""}<br />{r.address}</td>
-                                        <td className="py-2 pr-3 text-xs text-[var(--muted)]">
+                                        <td className="py-2 pr-3 text-white whitespace-nowrap">{usd(r.amount_usd)}</td>
+                                        <td className="py-2 pr-3 text-xs text-[var(--muted)] whitespace-nowrap">{r.coin}{r.network ? ` (${r.network})` : ""}<br /><Mono value={r.address} /></td>
+                                        <td className="py-2 pr-3 text-xs text-[var(--muted)] whitespace-nowrap">
                                             confirmed {usd(r.balance?.confirmed_usd)}<br />paid {usd(r.balance?.paid_usd)}
                                         </td>
-                                        <td className="py-2 pr-3 text-xs text-[var(--muted)]">{r.status}{r.error ? <><br />{r.error}</> : null}{r.tx_hash ? <><br />tx {r.tx_hash}</> : null}</td>
-                                        <td className="py-2 pr-3 text-xs text-[var(--muted)]">{new Date(r.created_at).toISOString().slice(0, 16).replace("T", " ")}</td>
+                                        <td className="py-2 pr-3 text-xs text-[var(--muted)] min-w-[10rem] max-w-[20rem]">{r.status}{r.error ? <><br /><span className="break-words">{r.error}</span></> : null}{r.tx_hash ? <><br /><span className="whitespace-nowrap">tx <Mono value={r.tx_hash} href={txUrl(r.network, r.coin, r.tx_hash)} /></span></> : null}</td>
+                                        <td className="py-2 pr-3 text-xs text-[var(--muted)] whitespace-nowrap">{new Date(r.created_at).toISOString().slice(0, 16).replace("T", " ")}</td>
                                         <td className="py-2 pr-3">
                                             {r.status === "requested" ? (
                                                 <div className="flex gap-2">
