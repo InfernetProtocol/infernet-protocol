@@ -20,7 +20,11 @@ import "server-only";
 // on slow queries. nginx allows 300 s, so 45 s + the page reads fit.
 export const SEARCH_TIMEOUT_MS = 45_000;
 export const SEARCH_HEDGE_MS = 12_000;
-const PAGE_TIMEOUT_MS = 20_000;
+// The relay renders a page for at most 30 s (fleet browser rule: Obscura, then
+// Chromium, one budget), so the call gets that plus 5 s for the hop and the read.
+// A page the relay has flagged as broken answers at once with "FLAGGED until".
+export const RELAY_RENDER_S = 30;
+export const PAGE_TIMEOUT_MS = 35_000;
 const RESULTS = 5;
 const PAGES = 3;
 const PAGE_CHARS = 900;
@@ -145,18 +149,40 @@ export async function searchWeb(query, {
         .map((r) => ({ title: String(r.title ?? r.link), url: r.link, snippet: String(r.snippet ?? "") }));
 }
 
+/**
+ * The relay will not fetch this page (or its host) again before `until`: it
+ * timed out, returned 5xx, or could not be reached. Skip it, do not retry.
+ */
+export class PageFlaggedError extends Error {
+    constructor(url, until, detail) {
+        super(`page flagged as broken until ${until}: ${url}`);
+        this.name = "PageFlaggedError";
+        this.url = url;
+        this.until = until;
+        this.detail = detail;
+    }
+}
+
+const FLAGGED = /FLAGGED until (\d{4}-\d\d-\d\dT[\d:.]+Z)/;
+
 /** Page text through the TronBrowser automate relay (MCP tools/call fetch_page). */
 export async function fetchPageText(url, { fetchImpl = fetch, mcpUrl = TRON_MCP_URL } = {}) {
     const res = await fetchImpl(mcpUrl, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "fetch_page", arguments: { url } } }),
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "fetch_page", arguments: { url, timeout_s: RELAY_RENDER_S } } }),
         signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
         cache: "no-store"
     });
     if (!res.ok) throw new Error(`tron relay returned ${res.status}`);
     const body = await res.json();
-    if (body?.error || body?.result?.isError) throw new Error(body?.error?.message ?? "fetch_page failed");
+    if (body?.result?.isError) {
+        const message = (body.result.content ?? []).filter((c) => c?.type === "text").map((c) => c.text).join("\n");
+        const flagged = FLAGGED.exec(message);
+        if (flagged) throw new PageFlaggedError(url, flagged[1], message);
+        throw new Error(message || "fetch_page failed");
+    }
+    if (body?.error) throw new Error(body.error.message ?? "fetch_page failed");
     return (body?.result?.content ?? []).filter((c) => c?.type === "text").map((c) => c.text).join("\n");
 }
 

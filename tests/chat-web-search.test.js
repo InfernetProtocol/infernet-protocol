@@ -95,3 +95,33 @@ describe("web search for chat", () => {
         expect([url.searchParams.get("hl"), url.searchParams.get("gl")]).toEqual(["en", "us"]);
     });
 });
+
+describe("tron relay budget and flagged pages", async () => {
+    const { fetchPageText, PageFlaggedError, PAGE_TIMEOUT_MS, RELAY_RENDER_S } = await import("@/lib/web-search");
+
+    it("gives the relay its 30 s render plus overhead", () => {
+        expect(RELAY_RENDER_S).toBe(30);
+        expect(PAGE_TIMEOUT_MS).toBe(35_000);
+        expect(PAGE_TIMEOUT_MS).toBeGreaterThan(RELAY_RENDER_S * 1000);
+    });
+
+    it("asks for the 30 s budget and turns a FLAGGED answer into PageFlaggedError at once", async () => {
+        const sent = [];
+        const impl = async (_url, init) => {
+            sent.push(JSON.parse(init.body));
+            return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { isError: true, content: [{ type: "text", text: "Error: FLAGGED until 2026-12-08T00:00:00.000Z: host dead.example failed (connection: net::ERR_NAME_NOT_RESOLVED) at 2026-11-08T00:00:00.000Z; not fetched again before then" }] } }), { status: 200 });
+        };
+        const err = await fetchPageText("https://dead.example/", { fetchImpl: impl }).catch((e) => e);
+        expect(err).toBeInstanceOf(PageFlaggedError);
+        expect(err.until).toBe("2026-12-08T00:00:00.000Z");
+        expect(sent).toHaveLength(1);
+        expect(sent[0].params.arguments).toMatchObject({ url: "https://dead.example/", timeout_s: 30 });
+    });
+
+    it("other tool errors stay plain errors with the relay's text", async () => {
+        const impl = async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { isError: true, content: [{ type: "text", text: "Error: Busy: 3 pages are rendering." }] } }), { status: 200 });
+        const err = await fetchPageText("https://x.example/", { fetchImpl: impl }).catch((e) => e);
+        expect(err).not.toBeInstanceOf(PageFlaggedError);
+        expect(err.message).toMatch(/Busy/);
+    });
+});
