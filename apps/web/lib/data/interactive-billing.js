@@ -257,6 +257,40 @@ export async function creditProvidersFromCharge({
  * nothing was charged (metering off, free tier, unpriced model, empty
  * balance) and the ordinary subsidy path still applies.
  */
+/**
+ * Charge one generated image (a c0mpute diffusion.txt2img job) a flat price.
+ *
+ * Same ledger and the same idempotency as chat: job:<c0mpute job id>:charge.
+ * The job id is the UUID the c0mpute gateway returns. Never throws: the image
+ * has already been made and sent.
+ */
+export async function chargeImageJob({ userId, jobId, costMicro }) {
+    if (!userId || !jobId) return { charged: false, reason: "no_buyer" };
+    if (!(costMicro > 0)) return { charged: false, reason: "nothing_to_charge" };
+    try {
+        const config = await getInteractiveConfig();
+        if (!config.enabled) return { charged: false, reason: "metering_off" };
+        const { data, error } = await db().rpc("billing_charge_interactive", {
+            p_user_id: userId,
+            p_idem: chargeIdemKey(jobId),
+            p_cost_micro: Math.floor(costMicro),
+            p_allow_earned: config.spend_earned,
+            p_job_id: jobId
+        });
+        if (error) throw error;
+        const out = data ?? {};
+        return {
+            charged: Boolean(out.charged),
+            reason: out.reason ?? null,
+            charged_micro: Number(out.charged_micro ?? 0),
+            charged_usd: microToUsd(out.charged_micro ?? 0)
+        };
+    } catch (err) {
+        console.warn(`[interactive-billing] image charge failed for job ${jobId}: ${err?.message ?? err}`);
+        return { charged: false, reason: String(err?.message ?? err) };
+    }
+}
+
 export async function settleInteractiveJob({ supabase, job, result, shares = null, outputTokens = null }) {
     if (!job?.billed_user_id) return { billed: false, reason: "no_buyer" };
     const charge = await chargeInteractiveJob({ job, result, outputTokens });

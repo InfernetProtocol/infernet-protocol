@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { parseImageCommand } from "@/lib/billing/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -150,6 +151,9 @@ export default function ChatView({ initialModels = [] }) {
     setWebSearch(on);
     try { localStorage.setItem("infernet.chat.web", on ? "1" : "0"); } catch { /* storage blocked */ }
   }
+  // Image mode: every message is a prompt for a c0mpute CPU image worker.
+  // `/image <prompt>` does the same for one message without the toggle.
+  const [imageMode, setImageMode] = useState(false);
   const [error, setError] = useState(null);
   const [voiceMode, setVoiceMode] = useState(false);
   const [voiceCatalog, setVoiceCatalog] = useState(null);
@@ -491,6 +495,72 @@ export default function ChatView({ initialModels = [] }) {
     }
   }
 
+  async function generateImage(text, prompt) {
+    const started = Date.now();
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: text, imageTurn: true },
+      {
+        role: "assistant",
+        content: "",
+        pending: true,
+        imageTurn: true,
+        status: "Drawing on a c0mpute CPU worker… this takes about 2 minutes."
+      }
+    ]);
+    setStreaming(true);
+    try {
+      const res = await fetch("/api/chat/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await fingerprintHeader()) },
+        body: JSON.stringify({ prompt })
+      });
+      const started202 = await res.json().catch(() => null);
+      if (res.status !== 202 || !started202?.poll) {
+        throw new Error(started202?.error ?? `Image generation failed (${res.status})`);
+      }
+      // Drawing takes minutes on a CPU worker; poll rather than hold a request open.
+      let done = null;
+      const deadline = Date.now() + 15 * 60 * 1000;
+      while (!done) {
+        if (Date.now() > deadline) throw new Error("Image generation timed out");
+        await new Promise((r) => setTimeout(r, 4000));
+        const poll = await fetch(started202.poll, { cache: "no-store" });
+        if (poll.status === 202) {
+          const p = await poll.json().catch(() => null);
+          const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({
+            ...m,
+            status: `Drawing on a c0mpute CPU worker… ${secs}s (usually about 2 minutes)`
+          })));
+          continue;
+        }
+        if (!poll.ok) {
+          const data = await poll.json().catch(() => null);
+          throw new Error(data?.error ?? `Image generation failed (${poll.status})`);
+        }
+        done = poll;
+      }
+      const res2 = done;
+      const blob = await res2.blob();
+      const url = URL.createObjectURL(blob);
+      const seconds = Math.round((Date.now() - started) / 1000);
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({
+        ...m,
+        pending: false,
+        status: null,
+        image: { url, prompt, seconds, worker: res2.headers.get("x-c0mpute-worker-peer-id") ?? null },
+        provider: { name: "c0mpute", model: res2.headers.get("x-image-model") ?? "z-image-turbo" }
+      })));
+    } catch (err) {
+      const message = err?.message ?? "Image generation failed";
+      setError(message);
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, pending: false, status: null, failed: true, content: message })));
+    } finally {
+      setStreaming(false);
+    }
+  }
+
   async function sendMessage() {
     const text = input.trim();
     if (!text || streaming) return;
@@ -505,6 +575,11 @@ export default function ChatView({ initialModels = [] }) {
     streamedTextRef.current = "";
     setVoiceError(null);
     setVoiceStatus("");
+    const imagePrompt = parseImageCommand(text) ?? (imageMode ? text : null);
+    if (imagePrompt) {
+      await generateImage(text, imagePrompt);
+      return;
+    }
     const nextUser = { role: "user", content: text };
     // Assistant placeholder we'll append tokens into.
     const pendingAssistant = { role: "assistant", content: "", provider: null, pending: true };
@@ -560,7 +635,10 @@ export default function ChatView({ initialModels = [] }) {
       }
     }
 
-    const history = [...messages, nextUser].map((m) => ({ role: m.role, content: m.content }));
+    // Image turns are not conversation the model can read: leave them out.
+    const history = [...messages, nextUser]
+      .filter((m) => !m.imageTurn)
+      .map((m) => ({ role: m.role, content: m.content }));
     // Web results, linked documents and the selected OpenProfile persona apply to this turn only.
     const turnContext = [];
     if (voiceMode && voicePersona) {
@@ -926,6 +1004,19 @@ export default function ChatView({ initialModels = [] }) {
               />
               Search the web
             </label>
+            <label
+              className="flex items-center gap-2 text-xs text-[var(--muted)]"
+              title="Turns each message into an image prompt, drawn by Z-Image-Turbo on a c0mpute CPU worker (about 2 minutes). Or type /image followed by a prompt."
+            >
+              <input
+                type="checkbox"
+                checked={imageMode}
+                disabled={streaming}
+                onChange={(e) => setImageMode(e.target.checked)}
+                className="accent-[var(--accent)]"
+              />
+              Generate image
+            </label>
           </div>
         </header>
 
@@ -967,7 +1058,7 @@ export default function ChatView({ initialModels = [] }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onComposerKey}
-            placeholder={streaming ? "Streaming from a provider…" : "Ask anything. Shift+Enter for a newline."}
+            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : "Ask anything, or /image a prompt. Shift+Enter for a newline."}
             rows={2}
             disabled={streaming}
             className="w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel-strong)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--muted)]/70 disabled:opacity-60"
@@ -1470,7 +1561,7 @@ function Readm3Button({ text }) {
 }
 
 function Bubble({ message }) {
-  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason } = message;
+  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image } = message;
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -1486,6 +1577,18 @@ function Bubble({ message }) {
           <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-[var(--muted)]">
             {provider.name ?? provider.nodeId}{provider.model ? ` · ${provider.model}` : ""}
           </p>
+        ) : null}
+        {!isUser && image ? (
+          <figure className="mt-1">
+            {/* eslint-disable-next-line @next/next/no-img-element -- a local blob: URL, nothing to optimise */}
+            <img src={image.url} alt={image.prompt} className="w-full max-w-[640px] rounded-xl border border-white/10" />
+            <figcaption className="mt-2 flex items-center justify-between gap-3 text-xs text-[var(--muted)]">
+              <span>Drawn in {image.seconds}s on a c0mpute CPU worker</span>
+              <a href={image.url} download="infernet-image.png" className="text-[var(--accent)] hover:underline">
+                Download
+              </a>
+            </figcaption>
+          </figure>
         ) : null}
         {content ? (
           isUser ? content : <MarkdownContent text={content} />
