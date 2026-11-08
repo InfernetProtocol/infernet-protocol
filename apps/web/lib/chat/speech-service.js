@@ -49,3 +49,41 @@ export async function readLimitedBody(request, maxBytes) {
   }
   return body;
 }
+
+/**
+ * POST JSON to the gateway and read the whole body, with NO header timeout.
+ *
+ * Node's fetch (undici) aborts any response whose headers take longer than
+ * 300 s ("fetch failed"), and a CPU image on a busy c0mpute worker can take
+ * longer. node:http waits as long as `timeoutMs`.
+ * Resolves { status, headers, body: Buffer } or null when unconfigured.
+ */
+export async function postSpeechGatewayLong(path, payload, { timeoutMs = 14 * 60 * 1000 } = {}) {
+  const service = speechGateway();
+  if (!service) return null;
+  const url = new URL(`${service.baseUrl}${path}`);
+  const { request } = await import(url.protocol === "https:" ? "node:https" : "node:http");
+  const body = Buffer.from(JSON.stringify(payload));
+  return new Promise((resolve, reject) => {
+    const req = request(
+      url,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${service.token}`,
+          "content-type": "application/json",
+          "content-length": body.length
+        }
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
+        res.on("error", reject);
+      }
+    );
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`gateway did not answer within ${Math.round(timeoutMs / 1000)}s`)));
+    req.on("error", reject);
+    req.end(body);
+  });
+}
