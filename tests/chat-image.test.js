@@ -64,3 +64,35 @@ describe("chat image job registry", () => {
     expect(getImageJob(id, { now: 16 * 60 * 1000 })).toBeNull();
   });
 });
+
+import { createServer } from "node:http";
+import { postSpeechGatewayLong } from "@/lib/chat/speech-service";
+
+describe("postSpeechGatewayLong", () => {
+  it("POSTs JSON with the bearer token and returns status, headers and body", async () => {
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "image/png", "x-c0mpute-job-id": "j1", "x-auth": req.headers.authorization });
+        res.end(Buffer.from(`ok:${body}`));
+      });
+    });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    const { port } = server.address();
+    const prev = { url: process.env.C0MPUTE_SPEECH_URL, token: process.env.C0MPUTE_SPEECH_TOKEN };
+    process.env.C0MPUTE_SPEECH_URL = `http://127.0.0.1:${port}/`;
+    process.env.C0MPUTE_SPEECH_TOKEN = "tok";
+    try {
+      const r = await postSpeechGatewayLong("/v1/images", { prompt: "x" });
+      expect(r.status).toBe(200);
+      expect(r.headers["x-c0mpute-job-id"]).toBe("j1");
+      expect(r.headers["x-auth"]).toBe("Bearer tok");
+      expect(r.body.toString()).toBe('ok:{"prompt":"x"}');
+    } finally {
+      process.env.C0MPUTE_SPEECH_URL = prev.url;
+      process.env.C0MPUTE_SPEECH_TOKEN = prev.token;
+      server.close();
+    }
+  });
+});

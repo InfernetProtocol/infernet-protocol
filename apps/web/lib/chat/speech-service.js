@@ -1,3 +1,6 @@
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+
 export function speechGateway() {
   const baseUrl = process.env.C0MPUTE_SPEECH_URL?.trim().replace(/\/+$/, "");
   const token = process.env.C0MPUTE_SPEECH_TOKEN;
@@ -62,7 +65,8 @@ export async function postSpeechGatewayLong(path, payload, { timeoutMs = 14 * 60
   const service = speechGateway();
   if (!service) return null;
   const url = new URL(`${service.baseUrl}${path}`);
-  const { request } = await import(url.protocol === "https:" ? "node:https" : "node:http");
+  // Static imports: Next cannot bundle a computed import() specifier.
+  const request = url.protocol === "https:" ? httpsRequest : httpRequest;
   const body = Buffer.from(JSON.stringify(payload));
   return new Promise((resolve, reject) => {
     const req = request(
