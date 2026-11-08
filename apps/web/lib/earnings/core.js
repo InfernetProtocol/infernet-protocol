@@ -41,8 +41,11 @@ export const DEFAULT_EARNINGS_CONFIG = Object.freeze({
     // hosted APIs, so the house is never paying more than the work is worth.
     subsidy_per_1k_output_usd: 0.0005,
     subsidy_approved: false,
-    // The published house fee: 2% of paid jobs, the operator keeps 98%.
-    house_fee_pct: 2,
+    // The published house fee: 5% of paid jobs, the operator keeps 95%. The
+    // same 5% as the c0mpute market fee (Anthony, 2026-11-08: one 5% fee
+    // across c0mpute and Infernet). Each credit records the fee it was taken
+    // at, so changing this never re-prices an earning already written.
+    house_fee_pct: 5,
     min_payout_usd: 5,
     // Requests at or below this many USD are approved and sent the moment
     // they are made. 0 = every request waits for an admin.

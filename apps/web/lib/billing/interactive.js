@@ -34,14 +34,17 @@ export const INTERACTIVE_SETTINGS_KEY = "interactive_billing";
  * The house's cut of an interactive charge, in percent. The provider keeps the
  * rest, exactly as on a paid batch.
  *
- * 20% (Anthony, 2026-11-05: "no 20% margin" - 20, not the 100 I had proposed).
- * It is a fee on the charge rather than a markup over a cost basis because
+ * 5%, the same house fee as paid jobs and batches and the c0mpute market fee
+ * (Anthony, 2026-11-08: one 5% commission across c0mpute and Infernet, the
+ * operator keeps 95%). It was 20% from 2026-11-05. Each credit records the
+ * fee it was taken at in metadata.house_fee_pct, so a change only affects new
+ * charges. It is a fee on the charge rather than a markup over a cost basis because
  * that is how this ledger already pays providers: the customer price is the
  * per-model table, and provider_earnings takes its share of what was actually
  * collected. A markup on the free-tier subsidy rate instead would pay a
  * provider many times the sale price on these models.
  */
-export const DEFAULT_INTERACTIVE_HOUSE_FEE_PCT = 20;
+export const DEFAULT_INTERACTIVE_HOUSE_FEE_PCT = 5;
 
 export const DEFAULT_INTERACTIVE_CONFIG = Object.freeze({
     house_fee_pct: DEFAULT_INTERACTIVE_HOUSE_FEE_PCT,

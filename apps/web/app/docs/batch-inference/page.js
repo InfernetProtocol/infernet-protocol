@@ -118,7 +118,7 @@ export default function BatchInferencePage() {
                 <li>At most {DEFAULT_INFERENCE_PRICING.max_in_flight} items of a batch run at once; the rest start as those finish.</li>
                 <li>Cancel stops queued items and releases their hold; items already running finish and are charged normally.</li>
                 <li>If paid batches are paused, new quotes and submits are refused; running batches finish.</li>
-                <li>Nodes are paid from the charge, less the house fee (2% today). See <Link href="/docs" className="text-[var(--accent)] hover:underline">the docs</Link> for running a node.</li>
+                <li>Nodes are paid from the charge, less the house fee (5%). See <Link href="/docs" className="text-[var(--accent)] hover:underline">the docs</Link> for running a node.</li>
             </ul>
         </main>
     );

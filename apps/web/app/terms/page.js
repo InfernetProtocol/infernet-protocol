@@ -6,7 +6,7 @@ export const metadata = {
         "Terms of Service for Infernet Protocol — the rules of the road for using infernetprotocol.com and the Infernet network."
 };
 
-const LAST_UPDATED = "2026-04-28";
+const LAST_UPDATED = "2026-11-08";
 
 export default function TermsPage() {
     return (
@@ -71,11 +71,17 @@ export default function TermsPage() {
                             a money transmitter on your behalf, and do not act as an escrow.
                         </p>
                         <p>
-                            We take a 2% house fee on paid jobs. Pricing displayed for any job is the price
-                            the client agrees to pay; the operator receives 98% of the agreed amount, less
-                            the payment processor&apos;s fee. Infernet and the c0mpute market are separate
-                            products: c0mpute&apos;s 5% market fee applies only to jobs bought on
-                            c0mpute.com/market and is never added to an Infernet job.
+                            We take a 5% house fee on paid jobs, paid batch inference and metered API
+                            usage. Pricing displayed for any job is the price the client agrees to pay; the
+                            operator receives 95% of the agreed amount, less the payment processor&apos;s
+                            fee. This is the same 5% as the c0mpute market fee (c0mpute.com/market), and the
+                            two are never stacked: an Infernet job pays Infernet&apos;s 5% only.
+                        </p>
+                        <p>
+                            <strong>Changed 2026-11-08:</strong> the house fee was 2% on paid jobs and
+                            batches (20% on metered API usage). The 5% fee applies to jobs, batches and
+                            charges created from 2026-11-08; earnings already credited keep the fee they
+                            were recorded at.
                         </p>
                     </Section>
 
