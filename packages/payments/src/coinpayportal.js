@@ -488,6 +488,16 @@ export async function createPayout({ recipientEmail, recipientWallet, amountUsd,
         return { outcome: "sent", payoutId: payout.id ?? null, txHash: payout.tx_hash };
     }
     const error = payload?.error || payload?.message || `HTTP ${response.status}`;
+    // A 502/503 whose body is not JSON came from the proxy in front of CoinPay
+    // while its app was down or restarting (a deploy): the request never reached
+    // CoinPay, so no payout exists. Report it as refused so the caller puts the
+    // request back in the queue instead of stranding it as 'sending'. A JSON 5xx
+    // is from CoinPay itself and stays unknown; so does a 504 (the app may still
+    // be working on it).
+    const notJson = payload?.raw !== undefined || Object.keys(payload ?? {}).length === 0;
+    if ((response.status === 502 || response.status === 503) && notJson) {
+        return { outcome: "failed", error: `CoinPay unavailable (HTTP ${response.status}), nothing sent` };
+    }
     if (status === "indeterminate" || response.status >= 500 || (response.ok && !payout?.tx_hash)) {
         return { outcome: "unknown", error, payoutId: payout?.id ?? null };
     }
