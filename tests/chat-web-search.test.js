@@ -25,9 +25,9 @@ function fakeFetch({ results, pages, searchStatus = 200 }) {
 describe("web search for chat", () => {
     const results = [
         { title: "Alpha", link: "https://a.example/x", snippet: "alpha snippet" },
-        { title: "Beta", link: "https://b.example/y", snippet: "beta snippet" },
-        { title: "Gamma", link: "https://c.example/z", snippet: "gamma snippet" },
-        { title: "Delta", link: "https://d.example/w", snippet: "delta snippet" },
+        { title: "Beta", link: "https://b.example/y", snippet: "alpha beta snippet" },
+        { title: "Gamma", link: "https://c.example/z", snippet: "alpha gamma snippet" },
+        { title: "Delta", link: "https://d.example/w", snippet: "alpha delta snippet" },
         { title: "no link" },
         { title: "Ftp", link: "ftp://e.example" }
     ];
@@ -53,7 +53,7 @@ describe("web search for chat", () => {
         // Snippet first (it carries the date), then the page text without its navigation lines.
         expect(out.context).toContain("[1] Alpha\nhttps://a.example/x\nalpha snippet\nAlpha 2.0 shipped on 2026-10-01 with a new engine.");
         expect(out.context).not.toContain("Skip to content");
-        expect(out.context).toContain("[3] Gamma\nhttps://c.example/z\ngamma snippet");
+        expect(out.context).toContain("[3] Gamma\nhttps://c.example/z\nalpha gamma snippet");
         expect(out.context).toContain("Cite them inline as [1], [2]");
         // Page bodies stay server-side; the browser only gets the citation list.
         expect(out.sources[0]).not.toHaveProperty("text");
@@ -93,5 +93,21 @@ describe("web search for chat", () => {
         await buildWebContext("q", { fetchImpl: impl, apiKey: "k" });
         const url = new URL(calls[0][0]);
         expect([url.searchParams.get("hl"), url.searchParams.get("gl")]).toEqual(["en", "us"]);
+    });
+
+    it("quotes distinctive terms and filters generic results that miss them", async () => {
+        const candidates = [
+            { title: "Command line interface tips", link: "https://generic.example/cli", snippet: "Latest command line features and version news." },
+            { title: "Infernet CLI release v0.1.89", link: "https://infernetprotocol.com/cli", snippet: "The latest Infernet CLI is version 0.1.89." },
+            { title: "Infernet API", link: "https://infernetprotocol.com/api", snippet: "API quickstart and SDK documentation." }
+        ];
+        const { impl, calls } = fakeFetch({ results: candidates, pages: {} });
+        const out = await buildWebContext("What is the latest version of the Infernet CLI?", { fetchImpl: impl, apiKey: "k" });
+        const search = new URL(calls[0][0]);
+        expect(search.searchParams.get("q")).toContain('"infernet"');
+        expect(search.searchParams.get("q")).toContain('"cli"');
+        expect(out.sources.map((source) => source.title)).toEqual(["Infernet CLI release v0.1.89"]);
+        expect(out.context).toContain("Infernet CLI release v0.1.89");
+        expect(out.context).not.toContain("Command line interface tips");
     });
 });
