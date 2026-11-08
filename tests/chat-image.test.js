@@ -37,3 +37,30 @@ describe("chat image helpers", () => {
     expect(imagePriceMicro({ INFERNET_IMAGE_PRICE_MICRO: "-3" })).toBe(DEFAULT_IMAGE_PRICE_MICRO);
   });
 });
+
+import { startImageJob, getImageJob, takeImageJob } from "@/lib/chat/image-jobs";
+
+describe("chat image job registry", () => {
+  it("reports pending, then hands the PNG out exactly once", async () => {
+    let finish;
+    const id = startImageJob(() => new Promise((r) => { finish = r; }));
+    expect(getImageJob(id).status).toBe("pending");
+    await new Promise((r) => setTimeout(r, 0));
+    finish({ png: new Uint8Array([1, 2, 3]), headers: { "x-image-model": "z-image-turbo" } });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getImageJob(id).status).toBe("done");
+    expect(takeImageJob(id).png).toEqual(new Uint8Array([1, 2, 3]));
+    expect(getImageJob(id)).toBeNull();
+  });
+
+  it("keeps the error and its status", async () => {
+    const id = startImageJob(async () => { throw Object.assign(new Error("No worker"), { status: 503 }); });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getImageJob(id)).toMatchObject({ status: "failed", error: "No worker", httpStatus: 503 });
+  });
+
+  it("forgets jobs after the TTL", () => {
+    const id = startImageJob(() => new Promise(() => {}), { now: 0 });
+    expect(getImageJob(id, { now: 16 * 60 * 1000 })).toBeNull();
+  });
+});

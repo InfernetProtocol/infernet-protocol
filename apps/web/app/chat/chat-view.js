@@ -515,19 +515,42 @@ export default function ChatView({ initialModels = [] }) {
         headers: { "Content-Type": "application/json", ...(await fingerprintHeader()) },
         body: JSON.stringify({ prompt })
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error ?? `Image generation failed (${res.status})`);
+      const started202 = await res.json().catch(() => null);
+      if (res.status !== 202 || !started202?.poll) {
+        throw new Error(started202?.error ?? `Image generation failed (${res.status})`);
       }
-      const blob = await res.blob();
+      // Drawing takes minutes on a CPU worker; poll rather than hold a request open.
+      let done = null;
+      const deadline = Date.now() + 15 * 60 * 1000;
+      while (!done) {
+        if (Date.now() > deadline) throw new Error("Image generation timed out");
+        await new Promise((r) => setTimeout(r, 4000));
+        const poll = await fetch(started202.poll, { cache: "no-store" });
+        if (poll.status === 202) {
+          const p = await poll.json().catch(() => null);
+          const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({
+            ...m,
+            status: `Drawing on a c0mpute CPU worker… ${secs}s (usually about 2 minutes)`
+          })));
+          continue;
+        }
+        if (!poll.ok) {
+          const data = await poll.json().catch(() => null);
+          throw new Error(data?.error ?? `Image generation failed (${poll.status})`);
+        }
+        done = poll;
+      }
+      const res2 = done;
+      const blob = await res2.blob();
       const url = URL.createObjectURL(blob);
       const seconds = Math.round((Date.now() - started) / 1000);
       setMessages((prev) => updateLastAssistant(prev, (m) => ({
         ...m,
         pending: false,
         status: null,
-        image: { url, prompt, seconds, worker: res.headers.get("x-c0mpute-worker-peer-id") ?? null },
-        provider: { name: "c0mpute", model: res.headers.get("x-image-model") ?? "z-image-turbo" }
+        image: { url, prompt, seconds, worker: res2.headers.get("x-c0mpute-worker-peer-id") ?? null },
+        provider: { name: "c0mpute", model: res2.headers.get("x-image-model") ?? "z-image-turbo" }
       })));
     } catch (err) {
       const message = err?.message ?? "Image generation failed";
