@@ -1,7 +1,7 @@
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor, paidLimit } from "@/lib/trusted-clients";
-import { fetchSpeechGateway, readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
+import { postSpeechGatewayLong, readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
@@ -66,27 +66,26 @@ export async function POST(request) {
   const id = startImageJob(async () => {
     let response;
     try {
-      response = await fetchSpeechGateway("/v1/images", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(parsed.spec),
-        // The gateway runs the auction and retries other workers itself.
-        signal: AbortSignal.timeout(14 * 60 * 1000)
-      });
+      // node:http, not fetch: undici gives up on headers after 300 s.
+      response = await postSpeechGatewayLong("/v1/images", parsed.spec);
     } catch (error) {
       throw Object.assign(new Error(`Image generation failed: ${error?.message ?? error}`), { status: 502 });
     }
     if (!response) throw Object.assign(new Error("Image generation is not configured"), { status: 503 });
-    if (!response.ok) {
+    if (response.status !== 200) {
       const busy = response.status === 503;
       throw Object.assign(
         new Error(busy ? "No c0mpute image worker is free right now — try again in a few minutes" : "Image generation failed"),
         { status: busy ? 503 : 502 }
       );
     }
-    const png = new Uint8Array(await response.arrayBuffer());
-    const jobId = response.headers.get("x-c0mpute-job-id") ?? "";
-    const worker = response.headers.get("x-c0mpute-worker-peer-id") ?? "";
+    const png = new Uint8Array(response.body);
+    const header = (name) => {
+      const v = response.headers[name];
+      return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+    };
+    const jobId = header("x-c0mpute-job-id");
+    const worker = header("x-c0mpute-worker-peer-id");
     let charge = null;
     if (chargeMode === "balance" && UUID.test(jobId)) {
       charge = await chargeImageJob({ userId, jobId, costMicro: imagePriceMicro() });
