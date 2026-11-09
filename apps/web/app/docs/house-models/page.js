@@ -42,7 +42,6 @@ export default function HouseModelsPage() {
                     Infernet publishes a short list of models that every provider node pulls and serves, so a
                     request for one of them can reach any node on the network, not only ours. It is on by default
                     for every node (new installs and existing ones through auto-update) and one command turns it off.
-                    Uncensored models on the list are the exception: a node serves them only if its operator opts in.
                 </p>
             </header>
 
@@ -105,13 +104,12 @@ export default function HouseModelsPage() {
             <Code>{`infernet house-models                 # what is pulled, disk used, last sync
 infernet house-models list            # the list and whether each model fits here
 infernet house-models off             # turn off (removes the ones the node pulled)
-infernet house-models uncensored on   # opt in to uncensored models (off by default)
-infernet house-models uncensored off  # and back off
+infernet house-models uncensored off  # skip uncensored models only
 infernet house-models cap 20          # house models may use at most 20 GB
 infernet house-models on              # back on`}</Code>
             <P>
                 At install time: <code>INFERNET_NO_HOUSE_MODELS=1</code> (or <code>--no-house-models</code>),{" "}
-                <code>INFERNET_UNCENSORED_MODELS=1</code> (or <code>--uncensored-models</code>) to opt in to uncensored models, which are off by default, and{" "}
+                <code>INFERNET_NO_UNCENSORED_MODELS=1</code> (or <code>--no-uncensored-models</code>) and{" "}
                 <code>INFERNET_HOUSE_MODELS_MAX_GB=20</code>. The same flags work on <code>infernet setup</code> and{" "}
                 <code>infernet start</code>. c0mpute nodes take the same flags on c0mpute&apos;s installer, and{" "}
                 <code>c0mpute worker status</code> shows the house models next to the rest of the node.{" "}
