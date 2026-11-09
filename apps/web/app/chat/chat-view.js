@@ -155,6 +155,9 @@ export default function ChatView({ initialModels = [] }) {
   // Image mode: every message is a prompt for a c0mpute CPU image worker.
   // `/image <prompt>` does the same for one message without the toggle.
   const [imageMode, setImageMode] = useState(false);
+  // Music mode: every message is a style prompt for ACE-Step 1.5 on a c0mpute
+  // worker (a "lyrics:" line adds vocals). `/music <style>` does one message.
+  const [musicMode, setMusicMode] = useState(false);
   const [error, setError] = useState(null);
   const [voiceMode, setVoiceMode] = useState(false);
   const [voiceCatalog, setVoiceCatalog] = useState(null);
@@ -698,7 +701,7 @@ export default function ChatView({ initialModels = [] }) {
     streamedTextRef.current = "";
     setVoiceError(null);
     setVoiceStatus("");
-    const music = parseMusicCommand(text);
+    const music = parseMusicCommand(text) ?? (musicMode ? parseMusicCommand(`/music ${text}`) : null);
     if (music) {
       await generateMusic(text, music);
       return;
@@ -1269,10 +1272,29 @@ export default function ChatView({ initialModels = [] }) {
                 type="checkbox"
                 checked={imageMode}
                 disabled={streaming}
-                onChange={(e) => setImageMode(e.target.checked)}
+                onChange={(e) => {
+                  setImageMode(e.target.checked);
+                  if (e.target.checked) setMusicMode(false);
+                }}
                 className="accent-[var(--accent)]"
               />
               Generate image
+            </label>
+            <label
+              className="flex items-center gap-2 text-xs text-[var(--muted)]"
+              title="Turns each message into a song, made by ACE-Step 1.5 (open model, MIT) on a c0mpute worker in a few minutes. Describe the style; add a line 'lyrics:' and the words for vocals, or leave them out for an instrumental. Or type /music followed by a style."
+            >
+              <input
+                type="checkbox"
+                checked={musicMode}
+                disabled={streaming}
+                onChange={(e) => {
+                  setMusicMode(e.target.checked);
+                  if (e.target.checked) setImageMode(false);
+                }}
+                className="accent-[var(--accent)]"
+              />
+              Generate music (ACE-Step 1.5)
             </label>
           </div>
         </header>
@@ -1315,7 +1337,7 @@ export default function ChatView({ initialModels = [] }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onComposerKey}
-            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : "Ask anything, /image a prompt, or /music a style. Shift+Enter for a newline."}
+            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : musicMode ? "Describe the music (genre, instruments, mood). For vocals add a line 'lyrics:' then the words." : "Ask anything, /image a prompt, or /music a style. Shift+Enter for a newline."}
             rows={2}
             disabled={streaming}
             className="w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel-strong)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--muted)]/70 disabled:opacity-60"
