@@ -423,6 +423,10 @@ async function runDaemon(args, ctx) {
         }
         return {
             active_jobs: stats.activeJobIds.size,
+            // How many jobs this daemon runs at once. Without it the router
+            // guesses (1 on CPU-only nodes, 4 with a GPU) and a GPU node
+            // running one job at a time gets 3 queued behind it.
+            concurrency_cap: maxConcurrentJobs,
             load_avg_1m: Array.isArray(host.load_avg) ? +host.load_avg[0]?.toFixed(2) : null,
             ram: {
                 total_gb: +totalRamGb.toFixed(2),
@@ -629,10 +633,21 @@ async function runDaemon(args, ctx) {
         // frees up.
         if (stats.activeJobIds.size >= maxConcurrentJobs) return;
         const polledAt = Date.now();
+        let refetch = false;
         try {
             const result = await client.pollJobs({ limit: 5 });
             stats.pollsOk += 1;
+            const fetchedAt = Date.now();
             for (const job of result?.jobs ?? []) {
+                // Jobs are awaited one by one, so after a long job the rest of
+                // this batch is minutes old. The control plane may have moved
+                // a queued job to a free node meanwhile (chat rebalancing), and
+                // running it here would only be refused at the first event.
+                // Fetch a fresh list instead.
+                if (Date.now() - fetchedAt > pollMs) {
+                    refetch = true;
+                    break;
+                }
                 // Skip jobs already being processed by this daemon — the
                 // server keeps returning 'assigned' jobs until we mark them
                 // complete, so without this guard the poll loop queues the
@@ -652,6 +667,7 @@ async function runDaemon(args, ctx) {
             stats.pollsFailed += 1;
             process.stderr.write(`job poll error: ${err?.message ?? err}\n`);
         }
+        if (refetch && !stats.draining) await pollJobs();
     }
 
     /**

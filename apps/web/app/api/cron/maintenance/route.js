@@ -48,6 +48,19 @@ export async function POST(request) {
                 console.error("[maintenance] silent-node emails:", err instanceof Error ? err.message : err);
             }
         }
+        // Chat jobs stuck in a busy node's queue while another node is free
+        // (lib/data/chat-rebalance.js). Streams do this for their own job;
+        // this catches callers that only poll.
+        let rebalanced = null;
+        if (!dryRun) {
+            try {
+                const { rebalanceStuckChatJobs } = await import("@/lib/data/chat-rebalance");
+                rebalanced = await rebalanceStuckChatJobs({ supabase });
+                if (rebalanced.moved) console.log(`[maintenance] rebalanced ${rebalanced.moved}/${rebalanced.checked} queued chat jobs`);
+            } catch (err) {
+                console.error("[maintenance] rebalance:", err instanceof Error ? err.message : err);
+            }
+        }
         // Paid batch inference: settle finished/timed-out items, dispatch queued ones.
         let batches = null;
         if (!dryRun) {
@@ -59,7 +72,7 @@ export async function POST(request) {
                 console.error("[maintenance] batches:", err instanceof Error ? err.message : err);
             }
         }
-        return NextResponse.json({ data: { ...reaped, silent, ...(batches ? { batches } : {}) } });
+        return NextResponse.json({ data: { ...reaped, silent, ...(rebalanced ? { rebalanced } : {}), ...(batches ? { batches } : {}) } });
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("[maintenance]", message);

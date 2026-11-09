@@ -1,6 +1,7 @@
 import "server-only";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getJobWithEvents } from "@/lib/data/chat";
+import { rebalanceChatJob } from "@/lib/data/chat-rebalance";
 import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapter";
 import { makeStreamSanitizer, sanitizeText } from "@/lib/sanitize-stream";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
@@ -26,6 +27,7 @@ import { encryptJSON, decryptJSON } from "@/lib/encrypt";
  *   - the consumer's `for await` is broken out of (channel cleanup runs)
  */
 const MAX_ALIVE_MS = 10 * 60 * 1000;
+const REBALANCE_EVERY_MS = 15_000;
 
 export async function* streamJobEvents(jobId) {
     const supabase = getSupabaseServerClient();
@@ -99,6 +101,11 @@ export async function* streamJobEvents(jobId) {
     channel.subscribe();
 
     const deadline = Date.now() + MAX_ALIVE_MS;
+    // While nothing has arrived, check now and then whether the job is stuck
+    // in a busy node's queue and another node is free (chat-rebalance.js).
+    // A moved job keeps its id, so this stream just keeps listening.
+    let started = pre.length > 0;
+    let nextRebalanceAt = Date.now() + REBALANCE_EVERY_MS;
 
     try {
         while (!closed) {
@@ -108,13 +115,18 @@ export async function* streamJobEvents(jobId) {
                     yield { type: "error", data: { message: "stream timeout" } };
                     return;
                 }
+                if (!started && Date.now() >= nextRebalanceAt) {
+                    nextRebalanceAt = Date.now() + REBALANCE_EVERY_MS;
+                    await rebalanceChatJob(jobId, { supabase });
+                }
                 await new Promise((res) => {
                     resolveNext = res;
-                    const t = setTimeout(res, Math.min(remaining, 30_000));
+                    const t = setTimeout(res, Math.min(remaining, started ? 30_000 : REBALANCE_EVERY_MS));
                     if (typeof t.unref === "function") t.unref();
                 });
                 continue;
             }
+            started = true;
             const ev = queue.shift();
             if (ev.type === "token") {
                 const cleanText = sanitizer.process(ev.data?.text ?? "");
