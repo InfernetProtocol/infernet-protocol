@@ -53,6 +53,95 @@ export function resolveFreeAllowance({ env = {}, settings = null } = {}) {
 }
 
 /**
+ * Node operators get more (Anthony, 2026-11-09: "node operators get a bigger
+ * free allowance"). Qualifying is decided in the database by
+ * operator_qualifies() (20261109000000_operator_free_quota.sql): a linked,
+ * enabled node at least three days old that our aggregators found reachable
+ * in at least half of the last day's probes.
+ */
+export const DEFAULT_OPERATOR_FREE_QUERIES_PER_DAY = 100;
+export const DEFAULT_OPERATOR_FREE_SONGS_PER_DAY = 5;
+
+/**
+ * The operator allowance from the interactive_billing settings row
+ * (operator_free_queries_per_day, operator_free_songs_per_day); the defaults
+ * when absent or malformed.
+ */
+export function resolveOperatorAllowance({ settings = null } = {}) {
+    const s = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+    return {
+        queries: int(s.operator_free_queries_per_day, DEFAULT_OPERATOR_FREE_QUERIES_PER_DAY),
+        songs: int(s.operator_free_songs_per_day, DEFAULT_OPERATOR_FREE_SONGS_PER_DAY)
+    };
+}
+
+/**
+ * The daily limit to spend against. A qualifying operator gets the larger of
+ * the two, so a misconfigured operator setting never leaves an operator with
+ * less than a stranger gets.
+ */
+export function pickFreeLimit({ base, operatorLimit, qualifies = false }) {
+    if (!qualifies || !Number.isInteger(operatorLimit)) return base;
+    return Math.max(base, operatorLimit);
+}
+
+/**
+ * Remember operator_qualifies() per user for a while (default five minutes),
+ * so a chat does not run a probe aggregation per message.
+ *
+ * `check(userId)` resolves to a boolean. Anything that goes wrong (it throws,
+ * or returns something that is not a boolean) reads as "not an operator" and
+ * is NOT cached, so a database hiccup costs an operator the bonus for one
+ * request rather than five minutes, and never blocks the request.
+ */
+export function createOperatorCache({ check, ttlMs = 5 * 60 * 1000, now = () => Date.now(), max = 10_000 } = {}) {
+    const seen = new Map();
+    return async function qualifies(userId) {
+        if (typeof userId !== "string" || userId.length === 0) return false;
+        const t = now();
+        const hit = seen.get(userId);
+        if (hit && hit.until > t) return hit.value;
+        let value;
+        try {
+            value = await check(userId);
+        } catch {
+            return false;
+        }
+        if (typeof value !== "boolean") return false;
+        seen.delete(userId);
+        if (seen.size >= max) seen.delete(seen.keys().next().value);
+        seen.set(userId, { value, until: t + ttlMs });
+        return value;
+    };
+}
+
+/**
+ * How many free songs a qualifying operator gets today.
+ *
+ * operator_free_songs_per_day, but never fewer than a stranger could make:
+ * a stranger spends one free query per song, so with the defaults they can
+ * make up to 10 (burst-limited), and a cap of 5 would leave the operator
+ * worse off than someone who never ran a node.
+ */
+export function operatorSongLimit({ songs, base }) {
+    const s = Number.isInteger(songs) && songs >= 0 ? songs : DEFAULT_OPERATOR_FREE_SONGS_PER_DAY;
+    const b = Number.isInteger(base) && base >= 0 ? base : 0;
+    return Math.max(s, b);
+}
+
+/** A 429 body for an operator who has made all of today's free songs. */
+export function songLimitMessage(limit) {
+    return `free daily song limit reached (${limit} ${limit === 1 ? "song" : "songs"} a day for node operators). `
+        + "Top up a compute balance to keep going, or spend what your nodes earned: "
+        + "POST /api/v1/billing/topup, or /api/v1/billing/fund-from-earnings.";
+}
+
+/** The per-day song counter for a qualifying operator, beside their query counter. */
+export function musicSubject(userId) {
+    return typeof userId === "string" && userId.length > 0 ? `music:user:${userId}` : null;
+}
+
+/**
  * Who this free query is charged against.
  *
  * `userId` wins over the address whenever we have one, including for a trusted
@@ -96,11 +185,26 @@ export function looksLikeBot(bot, threshold = DEFAULT_BOT_THRESHOLD) {
     return Number.isFinite(score) && score >= threshold;
 }
 
-/** A 429 body that tells the caller what to do about it. */
-export function freeLimitMessage(limit) {
-    return `free daily limit reached (${limit} ${limit === 1 ? "query" : "queries"} a day). `
+/** Where someone learns to run a node. */
+export const RUN_A_NODE_URL = "https://infernetprotocol.com/getting-started#operate";
+
+/**
+ * A 429 body that tells the caller what to do about it.
+ *
+ * Someone who is not already a qualifying operator also hears that running a
+ * node raises the allowance: the most useful thing to tell someone who wants
+ * more for free, and the cheapest way for the network to get more supply.
+ * `opts` is usually the consumeFreeQuery result itself ({ operator,
+ * operatorLimit }).
+ */
+export function freeLimitMessage(limit, { operator = false, operatorLimit = DEFAULT_OPERATOR_FREE_QUERIES_PER_DAY } = {}) {
+    let m = `free daily limit reached (${limit} ${limit === 1 ? "query" : "queries"} a day). `
         + "Top up a compute balance to keep going, or spend what your nodes earned: "
         + "POST /api/v1/billing/topup, or /api/v1/billing/fund-from-earnings.";
+    if (!operator && Number.isInteger(operatorLimit) && operatorLimit > limit) {
+        m += ` Or run an Infernet node to get ${operatorLimit} free queries a day: ${RUN_A_NODE_URL}`;
+    }
+    return m;
 }
 
 /** Seconds until the allowance resets (next UTC midnight). */
