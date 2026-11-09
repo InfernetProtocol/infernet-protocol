@@ -1,5 +1,6 @@
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getJobWithEvents } from "@/lib/data/chat";
+import { rebalanceChatJob } from "@/lib/data/chat-rebalance";
 import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapter";
 import { MIN_RPC_PEERS, MAX_RPC_PEERS, ENGINE_ID as RPC_ENGINE_ID } from "@infernetprotocol/rpc-adapter/constants";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
@@ -110,6 +111,19 @@ export async function GET(_request, { params }) {
         return;
       }
 
+      // While no event has arrived, check every 15 s whether the job is
+      // stuck in a busy node's queue while another node is free, and move it
+      // (lib/data/chat-rebalance.js). The job keeps its id, so this stream
+      // just keeps listening.
+      let rebalancing = false;
+      const rebalanceTimer = setInterval(async () => {
+        if (closed || lastId > 0) { clearInterval(rebalanceTimer); return; }
+        if (rebalancing) return;
+        rebalancing = true;
+        try { await rebalanceChatJob(jobId, { supabase }); } finally { rebalancing = false; }
+      }, 15_000);
+      if (typeof rebalanceTimer.unref === "function") rebalanceTimer.unref();
+
       // Default P2P path — subscribe to Realtime inserts for this job_id.
       const channel = supabase.channel(`chat-${jobId}`).on(
         "postgres_changes",
@@ -118,6 +132,7 @@ export async function GET(_request, { params }) {
           const ev = payload?.new;
           if (!ev || ev.id <= lastId) return;
           lastId = ev.id;
+          clearInterval(rebalanceTimer);
           safeEnqueue(sseFrame(ev.event_type, decryptJSON(ev.data), ev.id));
           if (ev.event_type === "done" || ev.event_type === "error") {
             try { supabase.removeChannel(channel); } catch { /* ignore */ }
@@ -139,7 +154,6 @@ export async function GET(_request, { params }) {
           .eq("job_id", jobId)
           .gt("id", lastId)
           .order("id", { ascending: true });
-        catchupDone = true;
         for (const ev of catchup ?? []) {
           if (ev.id <= lastId) continue;
           lastId = ev.id;
@@ -159,6 +173,7 @@ export async function GET(_request, { params }) {
       // hold resources forever.
       const maxAlive = setTimeout(() => {
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
+        clearInterval(rebalanceTimer);
         clearInterval(hb);
         safeClose();
       }, 10 * 60 * 1000);

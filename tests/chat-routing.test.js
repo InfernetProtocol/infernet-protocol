@@ -307,3 +307,21 @@ describe("meetsTrustTier", () => {
         expect(meetsTrustTier({}, "public")).toBe(true);
     });
 });
+
+describe("finishPick on CPU-only nodes", () => {
+    const cpu = (id, tps) => ({ id, reputation: 50, specs: { served_models: ["m"], bench: { tokens_per_second_avg: tps }, load: { active_jobs: 0, vram: { total_gb: 0 } } } });
+
+    it("sends the second job of a burst to the idle slower node", () => {
+        expect(finishPick([cpu("fast", 5.2), cpu("slow", 2.6)], { modelName: "m" }, { fast: 1 }).id).toBe("slow");
+    });
+
+    it("queues on a busy node rather than failing when every node is busy", () => {
+        expect(finishPick([cpu("fast", 5.2)], { modelName: "m" }, { fast: 2 }).id).toBe("fast");
+        expect(finishPick([cpu("fast", 5.2)], { modelName: "m" }, { fast: 4 })).toBeNull();
+    });
+
+    it("requireFreeSlot only returns a node that can start now", () => {
+        expect(finishPick([cpu("fast", 5.2)], { modelName: "m", requireFreeSlot: true }, { fast: 1 })).toBeNull();
+        expect(finishPick([cpu("fast", 5.2), cpu("slow", 1)], { modelName: "m", requireFreeSlot: true, excludeProviderIds: ["fast"] }, {}).id).toBe("slow");
+    });
+});

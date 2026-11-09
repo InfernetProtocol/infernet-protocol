@@ -5,7 +5,7 @@ import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 import { matchServedModel } from "@/lib/model-names";
 import { getModelDenylist } from "@/lib/data/blocklists";
 import { deniedModel } from "@/lib/moderation/blocklists";
-import { smartPick, isOverloaded, countInflight } from "@/lib/routing/smart-pick";
+import { smartPick, isSaturated, isOverloaded, countInflight } from "@/lib/routing/smart-pick";
 import { estimateInputTokens } from "@/lib/billing/core";
 
 /**
@@ -39,7 +39,7 @@ export function meetsTrustTier(provider, minTier) {
   return have >= need;
 }
 
-export async function pickChatProvider({ modelName, minTrustTier, requireE2E = false, excludeProviderIds = [] } = {}) {
+export async function pickChatProvider({ modelName, minTrustTier, requireE2E = false, excludeProviderIds = [], requireFreeSlot = false } = {}) {
   const supabase = getSupabaseServerClient();
   const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
 
@@ -59,12 +59,12 @@ export async function pickChatProvider({ modelName, minTrustTier, requireE2E = f
         .eq("status", "available")
         .gte("last_seen", twoMinAgo);
       if (fallback.error) throw fallback.error;
-      return finishPick(fallback.data ?? [], { modelName, minTrustTier, requireE2E, excludeProviderIds }, await inflightByProvider(supabase, fallback.data ?? []));
+      return finishPick(fallback.data ?? [], { modelName, minTrustTier, requireE2E, excludeProviderIds, requireFreeSlot }, await inflightByProvider(supabase, fallback.data ?? []));
     }
     throw error;
   }
 
-  return finishPick(data ?? [], { modelName, minTrustTier, requireE2E, excludeProviderIds }, await inflightByProvider(supabase, data ?? []));
+  return finishPick(data ?? [], { modelName, minTrustTier, requireE2E, excludeProviderIds, requireFreeSlot }, await inflightByProvider(supabase, data ?? []));
 }
 
 /**
@@ -93,7 +93,7 @@ async function inflightByProvider(supabase, rows) {
   }
 }
 
-export function finishPick(rows, { modelName, minTrustTier, requireE2E = false, excludeProviderIds = [] } = {}, inflight = {}) {
+export function finishPick(rows, { modelName, minTrustTier, requireE2E = false, excludeProviderIds = [], requireFreeSlot = false } = {}, inflight = {}) {
   let candidates = rows;
   const excluded = new Set(Array.isArray(excludeProviderIds) ? excludeProviderIds : []);
   if (excluded.size > 0) candidates = candidates.filter((provider) => !excluded.has(provider?.id));
@@ -129,32 +129,27 @@ export function finishPick(rows, { modelName, minTrustTier, requireE2E = false, 
     candidates = candidates.filter((p) => meetsTrustTier(p, minTrustTier));
   }
 
-  // Hard filter: drop saturated nodes. A node with active_jobs at or
-  // above its concurrency cap shouldn't get more work — it's currently
-  // unable to serve. Default cap = 4 if the node didn't advertise one.
-  // Live in-flight jobs count toward the cap too (isOverloaded).
-  candidates = candidates.filter((p) => notSaturated(p) && !isOverloaded(p, inflight));
+  // Hard filter: drop saturated nodes, whose queue is full (active jobs at
+  // the queue limit, max(concurrency cap, 4)) or whose GPU is pegged. Live
+  // in-flight jobs count too: the daemon's heartbeat only reports the job it
+  // is running, never the ones assigned behind it. Nodes with every slot
+  // busy stay eligible but rank last (lib/routing/smart-pick.js), so a burst
+  // queues on the node expected to finish first instead of failing over to
+  // the paid fallback or a 503.
+  candidates = candidates.filter((p) => !isSaturated(p, inflight));
+  // Moving a queued job (lib/data/chat-rebalance.js) only helps if the new
+  // node can start it now.
+  if (requireFreeSlot) candidates = candidates.filter((p) => !isOverloaded(p, inflight));
 
   if (candidates.length === 0) return null;
-  // Smart routing: the most capable provider that isn't overloaded
-  // (lib/routing/smart-pick.js), least utilized first among equals.
+  // Smart routing: the provider expected to finish the job first
+  // (lib/routing/smart-pick.js).
   return smartPick(candidates, inflight);
 }
 
-const DEFAULT_CONCURRENCY_CAP = 4;
-const HIGH_GPU_UTILIZATION_PCT = 95;
-
+/** False when routing must not add work to this node (heartbeat load only). */
 export function notSaturated(p) {
-  const load = p?.specs?.load;
-  if (!load) return true; // no load info → can't filter; trust the node
-  const cap = Number.isFinite(load.concurrency_cap) ? load.concurrency_cap : DEFAULT_CONCURRENCY_CAP;
-  if (Number.isFinite(load.active_jobs) && load.active_jobs >= cap) return false;
-  // GPU pegged at >95% util means a job is already streaming flat-out;
-  // adding another would queue inside Ollama.
-  if (Number.isFinite(load.gpu_utilization_max) && load.gpu_utilization_max >= HIGH_GPU_UTILIZATION_PCT) {
-    return false;
-  }
-  return true;
+  return !isSaturated(p, {});
 }
 
 /**
