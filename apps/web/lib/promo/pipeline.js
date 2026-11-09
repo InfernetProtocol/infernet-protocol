@@ -68,7 +68,8 @@ export async function runPromo(job, request, deps) {
 
   const { W, H } = dimensions(vertical);
   const seed = seedFor(`${brand.host}|${style}`);
-  const img = vertical ? { width: 512, height: 896 } : { width: 896, height: 512 };
+  // CPU workers draw ~350k pixels in about two minutes; ffmpeg upscales to 720p.
+  const img = vertical ? { width: 448, height: 768 } : { width: 768, height: 448 };
 
   // 3a. Frames, then motion per frame.
   const videoCfg = deps.video ?? { enabled: false };
@@ -132,7 +133,9 @@ export async function runPromo(job, request, deps) {
     }
   }
 
-  const framesTask = mapLimit(scenes, 4, async (sc, i) => {
+  // Two at a time: the network has few image workers, and a worker handed
+  // several renders at once slows every one of them past its deadline.
+  const framesTask = mapLimit(scenes, Number(process.env.PROMO_FRAME_CONCURRENCY) || 2, async (sc, i) => {
     const prompt = scenePrompt(storyboard, i, { style, colors: brand.colors, vertical });
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
