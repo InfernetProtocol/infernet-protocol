@@ -13,7 +13,8 @@ infernet.text.train). `job.json` is that package's job config:
       "base_model": "HuggingFaceTB/SmolLM2-135M-Instruct",
       "system_prompt": "You are ...",   optional
       "dataset": { "url": "corpus.jsonl", "sha256": "<hex>"? },   jsonl, see below
-      "hyperparams": { "lr", "batch_size", "epochs", "max_steps", "seq_len", "lora_r", "threads", "seed" },
+      "hyperparams": { "lr", "batch_size", "epochs", "max_steps", "seq_len", "lora_r", "threads", "seed",
+                       "dtype" },               float32 | bfloat16 | float16 | auto (default)
       "output": { "destination_url": "out/adapter" }
     }
 
@@ -26,6 +27,12 @@ Dataset records (one JSON object per line, mixing allowed):
                                            assistant turns only; the job's
                                            system prompt is added when the
                                            conversation has none
+
+`dtype` is what the base model's weights load in; the LoRA weights always
+train in float32. `auto` picks bfloat16 where the hardware does it natively
+(CUDA with bf16, CPUs with avx512_bf16 / amx_bf16 / Arm bf16) and float32
+elsewhere: bf16 is several times faster and needs half the RAM on those CPUs,
+but emulated bf16 on an older CPU is slower than float32.
 
 Relative paths resolve against the job file's directory. Progress goes to
 stdout as training-protocol v1 NDJSON (meta / step / eval / checkpoint /
@@ -73,6 +80,37 @@ def resolve(base_dir, p):
 DATASET_FORMATS = ("text", "messages")
 ROLES = ("system", "user", "assistant")
 IGNORE = -100
+
+
+DTYPES = ("float32", "bfloat16", "float16")
+DTYPE_ALIASES = {"fp32": "float32", "bf16": "bfloat16", "fp16": "float16", "half": "float16"}
+
+
+def cpu_has_bf16(cpuinfo=None):
+    """Whether this CPU does bfloat16 natively (x86 avx512_bf16 / amx_bf16, Arm bf16)."""
+    if cpuinfo is None:
+        try:
+            cpuinfo = Path("/proc/cpuinfo").read_text()
+        except OSError:
+            return False
+    flags = set()
+    for line in cpuinfo.splitlines():
+        key, _, val = line.partition(":")
+        if key.strip().lower() in ("flags", "features"):
+            flags.update(val.split())
+    return bool(flags & {"avx512_bf16", "amx_bf16", "bf16"})
+
+
+def resolve_dtype(requested, device, cuda_bf16=False, cpu_bf16=False):
+    """The dtype name to load the base model in: `hyperparams.dtype` if set,
+    else (auto) bfloat16 where it is native and float32 elsewhere."""
+    want = DTYPE_ALIASES.get(str(requested or "auto").lower(), str(requested or "auto").lower())
+    if want == "auto":
+        native = cuda_bf16 if device == "cuda" else cpu_bf16
+        return "bfloat16" if native else "float32"
+    if want not in DTYPES:
+        raise ValueError(f"hyperparams.dtype must be one of {', '.join(DTYPES)} or auto, not {requested!r}")
+    return want
 
 
 def parse_record(d):
@@ -204,6 +242,14 @@ def main():
     system = job.get("system_prompt") or DEFAULT_SYSTEM
     out_dir = resolve(base_dir, job["output"]["destination_url"])
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = resolve_dtype(
+        hp.get("dtype"), device,
+        cuda_bf16=device == "cuda" and torch.cuda.is_bf16_supported(),
+        cpu_bf16=cpu_has_bf16(),
+    )
+    hp["dtype"] = dtype
+    if dtype == "float16" and device == "cpu":
+        log("warning: float16 on CPU is slow and can overflow; bfloat16 or float32 is the better choice")
 
     random.seed(hp["seed"])
     torch.manual_seed(hp["seed"])
@@ -240,11 +286,11 @@ def main():
     total = int(hp["max_steps"] or steps_per_epoch * int(hp["epochs"]))
 
     emit(job_id, "meta", started_at=now(), backend="peft", world_size=1, kind=job.get("kind", "lora"),
-         base_model=job["base_model"], device=device, total_steps=total, documents=len(docs),
+         base_model=job["base_model"], device=device, dtype=dtype, total_steps=total, documents=len(docs),
          dataset_sha256=dataset_sha)
-    log(f"{len(docs)} docs -> {len(train_blocks[0])} train / {len(eval_blocks[0])} eval blocks of {hp['seq_len']} tokens; {total} steps on {device}")
+    log(f"{len(docs)} docs -> {len(train_blocks[0])} train / {len(eval_blocks[0])} eval blocks of {hp['seq_len']} tokens; {total} steps on {device} in {dtype}")
 
-    model = AutoModelForCausalLM.from_pretrained(job["base_model"], dtype=torch.float32).to(device)
+    model = AutoModelForCausalLM.from_pretrained(job["base_model"], dtype=getattr(torch, dtype)).to(device)
     # Recompute activations in the backward pass: roughly halves peak RAM, so
     # the job fits beside other work on a shared box.
     model.gradient_checkpointing_enable()
@@ -254,6 +300,11 @@ def main():
         target_modules=hp.get("target_modules") or ["q_proj", "k_proj", "v_proj", "o_proj"],
         task_type="CAUSAL_LM",
     ))
+    # The adapter trains in float32 whatever the base is in: bf16 optimizer
+    # updates on small LoRA weights lose most of their precision.
+    for p in model.parameters():
+        if p.requires_grad and p.dtype != torch.float32:
+            p.data = p.data.float()
     log(f"trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=float(hp["lr"]))
