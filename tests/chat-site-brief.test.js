@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 const { extractColors, readHtml, buildBrief, isPrivateAddress, lookupSiteRecord, submitToPitWorld } = await import("@/lib/site-brief");
 const { brandImagePrompt, brandContext, colorName } = await import("@/lib/brand-prompt");
 const { MAX_IMAGE_PROMPT_CHARS } = await import("@/lib/billing/image");
+const { wantsBranding, ruleImagePrompt, contentImagePrompt } = await import("@/lib/brand-prompt");
+const { writeImagePrompt, cleanWriterReply, writerInput } = await import("@/lib/image-prompt-writer");
 
 const RECORD = {
     url: "https://profullstack.com/",
@@ -84,6 +86,7 @@ describe("the image prompt", () => {
     it("gives the text chat a profile block", () => {
         const ctx = brandContext(brief);
         expect(ctx).toContain("pit.world's site index");
+        expect(ctx).toContain("do not analyze or comment on branding unless the user asked");
         expect(ctx).toContain("Tagline: Agentic Engineering");
     });
 });
@@ -112,5 +115,42 @@ describe("guards, index lookup and indexing", () => {
         expect(await submitToPitWorld("https://once.example/", { fetchImpl, now: 1 })).toBe(true);
         expect(await submitToPitWorld("https://once.example/", { fetchImpl, now: 2 })).toBe(false);
         expect(calls).toEqual([["https://pit.world/api/submit", { urls: ["https://once.example/"] }]]);
+    });
+});
+
+describe("doing what the user asked with the link", () => {
+    const brief = { url: "https://news.example/whales", host: "news.example", name: "Ocean News", title: "Blue whales return to Monterey Bay", description: "Hundreds of blue whales were seen feeding off the coast this week.", colors: { theme: "#ff0000", accents: [], scheme: "dark" } };
+
+    it("tells brand requests from content requests", () => {
+        expect(wantsBranding("make a banner ad for https://x.example")).toBe(true);
+        expect(wantsBranding("draw a cat in the style of https://x.example")).toBe(true);
+        expect(wantsBranding("draw what this article describes https://x.example")).toBe(false);
+        expect(wantsBranding("illustrate https://x.example")).toBe(false);
+    });
+    it("pictures the page content without branding when not asked", () => {
+        const p = ruleImagePrompt("draw what this describes https://news.example/whales", [brief]);
+        expect(p).toContain("Blue whales return to Monterey Bay");
+        expect(p).not.toMatch(/brand|#ff0000|headline/i);
+        expect(contentImagePrompt("a photo of https://gone.example/x", [])).toBe("a photo of gone.example");
+    });
+    it("uses the model's prompt, cleaned", async () => {
+        const seen = [];
+        const stream = async function* (opts) {
+            seen.push(opts.messages[1].content);
+            yield { type: "token", data: { text: "Here is the prompt: \"Blue whales feeding at dawn off a rocky coast https://x.example\"" } };
+        };
+        const out = await writeImagePrompt("draw what this describes https://news.example/whales", [{ url: brief.url, brief, text: "Whales everywhere." }], { stream, configured: true });
+        expect(out).toEqual({ prompt: "Blue whales feeding at dawn off a rocky coast", writer: "model" });
+        expect(seen[0]).toContain("IMAGE REQUEST:\ndraw what this describes");
+        expect(seen[0]).toContain("PAGE TEXT (start):\nWhales everywhere.");
+    });
+    it("falls back to the rule when the model fails or is not configured", async () => {
+        const stream = async function* () { yield { type: "error", data: { message: "HTTP 500" } }; };
+        const out = await writeImagePrompt("a banner ad for https://news.example/whales", [{ url: brief.url, brief }], { stream, configured: true });
+        expect(out.writer).toBe("rules");
+        expect(out.prompt).toContain('headline text reading "Ocean News"');
+        expect((await writeImagePrompt("draw https://news.example/whales", [{ url: brief.url, brief }], { configured: false })).writer).toBe("rules");
+        expect(cleanWriterReply("ok")).toBeNull();
+        expect(writerInput("x https://a.example", [{ url: "https://a.example" }])).toContain("(the link could not be read)");
     });
 });

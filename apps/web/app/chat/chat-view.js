@@ -9,7 +9,6 @@ import { unified } from "unified";
 import { getConversationKey, encrypt, decrypt } from "@/lib/nip44";
 import { CATALOG } from "@/lib/model-catalog";
 import { findDocumentUrls } from "@/lib/doc-urls";
-import { brandImagePrompt } from "@/lib/brand-prompt";
 
 // served_models carries raw ids (ollama tags like `dolphin3:8b`, or the full
 // `hf:org/repo` pull name for vLLM). Map those to the catalog's friendly names
@@ -521,41 +520,37 @@ export default function ChatView({ initialModels = [] }) {
     ]);
     setStreaming(true);
     try {
-      // A linked site is read first (pit.world's index + the page: name, tagline,
-      // colors), because the image model cannot open a link: "a banner for
-      // https://example.com" otherwise draws a generic banner.
+      // The image model cannot open a link, so a linked page is read first (pit.world's
+      // site record, the page and its colors) and a prompt is written that does what
+      // the user asked with it: branding for an ad or logo, the page's content for
+      // "draw what this describes". The prompt sent is shown under the image.
       const linkUrls = findDocumentUrls(prompt);
       if (linkUrls.length) {
-        const briefs = [];
-        const documents = [];
-        for (const linkUrl of linkUrls) {
-          let host = linkUrl;
-          try { host = new URL(linkUrl).host; } catch { /* keep the URL */ }
-          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: `Reading ${host} for its branding…` })));
-          try {
-            const sr = await fetch("/api/chat/site", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ url: linkUrl }),
-              signal
-            });
-            const sd = await sr.json().catch(() => null);
-            if (sr.ok && sd?.brief) {
-              briefs.push(sd.brief);
-              documents.push({ url: sd.brief.finalUrl ?? linkUrl, title: sd.brief.name ?? host, kind: sd.brief.record ? "pit.world site record" : "site profile" });
-            } else {
-              setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, webNote: `Could not read ${host}: ${sd?.error ?? "the reader failed"}` })));
-            }
-          } catch {
-            if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+        const hosts = linkUrls.map((u) => { try { return new URL(u).host; } catch { return u; } }).join(", ");
+        setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: `Reading ${hosts}…` })));
+        try {
+          const pr = await fetch("/api/chat/image/prompt", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt }),
+            signal
+          });
+          const pd = await pr.json().catch(() => null);
+          if (pr.ok && pd?.prompt) {
+            prompt = pd.prompt;
+            const note = pd.failed?.length ? `Could not read ${pd.failed.join(", ")}.` : null;
+            setMessages((prev) => updateLastAssistant(prev, (m) => ({
+              ...m,
+              documents: pd.documents ?? [],
+              webNote: note,
+              status: "Drawing on a c0mpute CPU worker… this takes about 2 minutes."
+            })));
+          } else {
+            setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, webNote: `Could not read the link: ${pd?.error ?? "the reader failed"}. Drawing from your words alone.` })));
           }
+        } catch {
+          if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
         }
-        prompt = brandImagePrompt(prompt, briefs);
-        setMessages((prev) => updateLastAssistant(prev, (m) => ({
-          ...m,
-          documents,
-          status: "Drawing on a c0mpute CPU worker… this takes about 2 minutes."
-        })));
       }
       const res = await fetch("/api/chat/image", {
         method: "POST",
