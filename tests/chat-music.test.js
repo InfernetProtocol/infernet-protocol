@@ -34,10 +34,23 @@ describe("chat music helpers", () => {
     expect(validateMusicRequest({ prompt: "x", duration: 5 }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "x", duration: 121 }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "x", duration: 30.5 }).ok).toBe(false);
-    expect(validateMusicRequest({ prompt: "x", lyrics: "y".repeat(4001) }).ok).toBe(false);
+    expect(validateMusicRequest({ prompt: "x", lyrics: "y".repeat(100_001) }).ok).toBe(false);
+    expect(validateMusicRequest({ prompt: "x".repeat(100_001) }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "x", seed: -1 }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "" }).ok).toBe(false);
     expect(validateMusicRequest(null).ok).toBe(false);
+  });
+
+  it("accepts 100k-character prompts and lyrics, clipping what the model cannot read", () => {
+    const long = "word ".repeat(19_999) + "word";
+    expect(long.length).toBe(99_999);
+    const r = validateMusicRequest({ prompt: long, lyrics: long });
+    expect(r.ok).toBe(true);
+    expect(r.spec.prompt.length).toBeLessThanOrEqual(1000);
+    expect(r.spec.prompt.length).toBeGreaterThan(800);
+    expect(r.spec.prompt.endsWith("word")).toBe(true);
+    expect(r.spec.lyrics.length).toBeLessThanOrEqual(4000);
+    expect(validateMusicRequest({ prompt: "short" }).spec.prompt).toBe("short");
   });
 
   it("prices a track flat, overridable by env", () => {

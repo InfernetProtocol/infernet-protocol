@@ -26,12 +26,13 @@ const AUDIO_TYPES = new Set(["audio/mpeg", "audio/wav", "audio/flac", "audio/ogg
  */
 export async function POST(request) {
   if (!speechGateway()) return errorJson("Music generation is not configured", 503);
-  if (Number(request.headers.get("content-length") ?? 0) > 32 * 1024) {
+  // 100k characters of prompt plus 100k of lyrics, UTF-8, with room to spare.
+  if (Number(request.headers.get("content-length") ?? 0) > 1024 * 1024) {
     return errorJson("Music request is too large", 413);
   }
   let body;
   try {
-    const bytes = await readLimitedBody(request, 32 * 1024);
+    const bytes = await readLimitedBody(request, 1024 * 1024);
     if (!bytes) return errorJson("Music request is too large", 413);
     body = JSON.parse(new TextDecoder().decode(bytes));
   } catch {

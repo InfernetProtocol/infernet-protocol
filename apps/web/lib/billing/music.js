@@ -3,8 +3,24 @@
 // the flat per-track price.
 
 export const MUSIC_MODEL = "ace-step-1.5";
-export const MAX_MUSIC_PROMPT_CHARS = 1000;
-export const MAX_MUSIC_LYRICS_CHARS = 4000;
+// What a person may send: long style briefs and whole songs are fine.
+export const MAX_MUSIC_PROMPT_CHARS = 100_000;
+export const MAX_MUSIC_LYRICS_CHARS = 100_000;
+// What reaches the worker. ACE-Step's tokenizer reads the first 256 tokens
+// of the caption (~1000 chars) and 2048 of the lyrics, and the job spec rides
+// in a gossiped offer capped at 64 KiB, so longer text is clipped here (at a
+// word or line boundary) instead of being refused.
+export const MODEL_PROMPT_CHARS = 1000;
+export const MODEL_LYRICS_CHARS = 4000;
+
+/** Clip to `max` characters, preferring to end at a line break or space. */
+export function clipText(text, max) {
+  const chars = Array.from(String(text ?? ""));
+  if (chars.length <= max) return chars.join("");
+  const head = chars.slice(0, max).join("");
+  const cut = Math.max(head.lastIndexOf("\n"), head.lastIndexOf(" "));
+  return (cut > head.length * 0.8 ? head.slice(0, cut) : head).trim();
+}
 export const MIN_MUSIC_SECONDS = 10;
 export const MAX_MUSIC_SECONDS = 120;
 export const DEFAULT_MUSIC_SECONDS = 30;
@@ -61,7 +77,12 @@ export function validateMusicRequest(body) {
   if (!Number.isInteger(duration) || duration < MIN_MUSIC_SECONDS || duration > MAX_MUSIC_SECONDS) {
     return { ok: false, error: `Duration must be a whole number of seconds from ${MIN_MUSIC_SECONDS} to ${MAX_MUSIC_SECONDS}` };
   }
-  const spec = { prompt, lyrics, duration, model: MUSIC_MODEL };
+  const spec = {
+    prompt: clipText(prompt, MODEL_PROMPT_CHARS),
+    lyrics: clipText(lyrics, MODEL_LYRICS_CHARS),
+    duration,
+    model: MUSIC_MODEL
+  };
   if (body?.seed !== undefined && body?.seed !== null) {
     const seed = Number(body.seed);
     if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) {
