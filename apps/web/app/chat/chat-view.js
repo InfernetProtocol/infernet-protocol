@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { parseImageCommand } from "@/lib/billing/image";
+import { parseMusicCommand } from "@/lib/billing/music";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -611,6 +612,77 @@ export default function ChatView({ initialModels = [] }) {
     }
   }
 
+  // `/music <style>` (optionally followed by `lyrics:` and the words) makes a
+  // short song with ACE-Step 1.5 on a c0mpute worker. Like images, it is a
+  // music turn the language model never sees.
+  async function generateMusic(text, { prompt, lyrics }) {
+    const started = Date.now();
+    const controller = new AbortController();
+    sendControllerRef.current = controller;
+    const signal = controller.signal;
+    const working = (secs) =>
+      `Composing on a c0mpute worker with ACE-Step 1.5…${secs ? ` ${secs}s` : ""} (a few minutes)`;
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: text, imageTurn: true },
+      { role: "assistant", content: "", pending: true, imageTurn: true, status: working(0) }
+    ]);
+    setStreaming(true);
+    try {
+      const res = await fetch("/api/chat/music", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await fingerprintHeader()) },
+        body: JSON.stringify({ prompt, lyrics }),
+        signal
+      });
+      const started202 = await res.json().catch(() => null);
+      if (res.status !== 202 || !started202?.poll) {
+        throw new Error(started202?.error ?? `Music generation failed (${res.status})`);
+      }
+      let done = null;
+      const deadline = Date.now() + 20 * 60 * 1000;
+      while (!done) {
+        if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+        if (Date.now() > deadline) throw new Error("Music generation timed out");
+        await new Promise((r) => setTimeout(r, 5000));
+        const poll = await fetch(started202.poll, { cache: "no-store", signal });
+        if (poll.status === 202) {
+          const p = await poll.json().catch(() => null);
+          const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: working(secs) })));
+          continue;
+        }
+        if (!poll.ok) {
+          const data = await poll.json().catch(() => null);
+          throw new Error(data?.error ?? `Music generation failed (${poll.status})`);
+        }
+        done = poll;
+      }
+      const blob = await done.blob();
+      const url = URL.createObjectURL(blob);
+      const seconds = Math.round((Date.now() - started) / 1000);
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({
+        ...m,
+        pending: false,
+        status: null,
+        audio: { url, prompt, lyrics, seconds, type: blob.type || "audio/mpeg", worker: done.headers.get("x-c0mpute-worker-peer-id") ?? null },
+        provider: { name: "c0mpute", model: done.headers.get("x-music-model") ?? "ace-step-1.5" }
+      })));
+      submittedTextRef.current = "";
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      const message = err?.message ?? "Music generation failed";
+      const submittedText = submittedTextRef.current;
+      if (submittedText) setInput((previous) => previous || submittedText);
+      submittedTextRef.current = "";
+      setError(message);
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, pending: false, status: null, failed: true, content: message })));
+    } finally {
+      if (sendControllerRef.current === controller) sendControllerRef.current = null;
+      setStreaming(false);
+    }
+  }
+
   async function sendMessage() {
     const text = input.trim();
     if (!text || streaming) return;
@@ -626,6 +698,11 @@ export default function ChatView({ initialModels = [] }) {
     streamedTextRef.current = "";
     setVoiceError(null);
     setVoiceStatus("");
+    const music = parseMusicCommand(text);
+    if (music) {
+      await generateMusic(text, music);
+      return;
+    }
     const imagePrompt = parseImageCommand(text) ?? (imageMode ? text : null);
     if (imagePrompt) {
       await generateImage(text, imagePrompt);
@@ -1238,7 +1315,7 @@ export default function ChatView({ initialModels = [] }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onComposerKey}
-            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : "Ask anything, or /image a prompt. Shift+Enter for a newline."}
+            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : "Ask anything, /image a prompt, or /music a style. Shift+Enter for a newline."}
             rows={2}
             disabled={streaming}
             className="w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel-strong)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--muted)]/70 disabled:opacity-60"
@@ -1752,7 +1829,7 @@ function Readm3Button({ text }) {
 }
 
 function Bubble({ message }) {
-  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image } = message;
+  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image, audio } = message;
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -1783,6 +1860,27 @@ function Bubble({ message }) {
               <details className="mt-2 text-xs text-[var(--muted)]">
                 <summary className="cursor-pointer">Prompt sent to the image model</summary>
                 <p className="mt-1 whitespace-pre-wrap">{image.prompt}</p>
+              </details>
+            ) : null}
+          </figure>
+        ) : null}
+        {!isUser && audio ? (
+          <figure className="mt-1">
+            <audio controls src={audio.url} className="w-full max-w-[640px]" />
+            <figcaption className="mt-2 flex items-center justify-between gap-3 text-xs text-[var(--muted)]">
+              <span>Composed in {audio.seconds}s on a c0mpute worker · {audio.prompt}</span>
+              <a
+                href={audio.url}
+                download={`infernet-music.${audio.type === "audio/wav" ? "wav" : audio.type === "audio/flac" ? "flac" : "mp3"}`}
+                className="text-[var(--accent)] hover:underline"
+              >
+                Download
+              </a>
+            </figcaption>
+            {audio.lyrics ? (
+              <details className="mt-2 text-xs text-[var(--muted)]">
+                <summary className="cursor-pointer">Lyrics</summary>
+                <p className="mt-1 whitespace-pre-wrap">{audio.lyrics}</p>
               </details>
             ) : null}
           </figure>
