@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, writeFile, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createPeftBackend, createTrainer, PEFT_KINDS, peftGenerate } from "../packages/training/src/index.js";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { createPeftBackend, createTrainer, PEFT_DATASET_FORMATS, PEFT_KINDS, peftGenerate } from "../packages/training/src/index.js";
 
 // A stand-in "python" that ignores its runner argument and prints what the
 // real runner prints: v1 events on stdout, logs on stderr, noise in between.
@@ -65,5 +67,19 @@ describe("peft training backend", () => {
     it("is selectable by name and knows its kinds", async () => {
         expect((await createTrainer({ backend: "peft" })).kind).toBe("peft");
         expect(PEFT_KINDS).toContain("lora");
+    });
+
+    it("advertises the dataset formats the runner reads", () => {
+        expect(PEFT_DATASET_FORMATS).toEqual(["text", "messages"]);
+    });
+
+    // The runner's dataset handling (multi-turn chats, assistant-only loss)
+    // is plain Python; run its unit tests where python3 exists.
+    const python3 = spawnSync("python3", ["--version"]).status === 0;
+    it.skipIf(!python3)("runner dataset tests pass (python3 -m unittest)", () => {
+        const test = fileURLToPath(new URL("../packages/training/runners/test_peft_train.py", import.meta.url));
+        const r = spawnSync("python3", [test], { encoding: "utf8" });
+        expect(r.stderr).toMatch(/OK/);
+        expect(r.status).toBe(0);
     });
 });

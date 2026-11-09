@@ -28,6 +28,14 @@ import { TMSG, TRAINING_PROTOCOL_VERSION } from "../protocol.js";
 export const PEFT_KINDS = Object.freeze(["lora", "peft"]);
 export const RUNNER_PATH = fileURLToPath(new URL("../../runners/peft_train.py", import.meta.url));
 export const PEFT_REQUIREMENTS = Object.freeze(["transformers>=4.46", "peft>=0.13", "safetensors>=0.4"]);
+/**
+ * Dataset record shapes runners/peft_train.py reads (its DATASET_FORMATS):
+ * `text` ({title?, text}: one briefing exchange) and `messages` (a whole
+ * multi-turn chat, loss on the assistant turns). Reported by
+ * `infernet model runtime status --peft --json` so callers (c0mpute's text
+ * workers) advertise only what this runner can train.
+ */
+export const PEFT_DATASET_FORMATS = Object.freeze(["text", "messages"]);
 
 export function peftRuntimeDir() {
     const base = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
@@ -97,7 +105,7 @@ export async function peftRuntimeStatus() {
         child.on("error", () => resolve(null));
         child.on("close", (c) => {
             try {
-                resolve(c === 0 ? { python: py, runner: RUNNER_PATH, ...JSON.parse(out) } : null);
+                resolve(c === 0 ? { python: py, runner: RUNNER_PATH, formats: [...PEFT_DATASET_FORMATS], ...JSON.parse(out) } : null);
             } catch {
                 resolve(null);
             }
