@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { parseImageCommand } from "@/lib/billing/image";
 import { describeNodeProgress, parseMusicCommand } from "@/lib/billing/music";
+import { describePromoProgress, detectPromoRequest, parsePromoCommand, PROMO_STYLES } from "@/lib/promo/request";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -723,6 +724,88 @@ export default function ChatView({ initialModels = [] }) {
     }
   }
 
+  // `/promo <url> [style] [vertical]` (or "make a pixar promo video for
+  // <url>") makes a 20-40 s cartoon promo: brand read from the site, a
+  // storyboard, keyframes, narration and a soundtrack on c0mpute workers, cut
+  // into an MP4 here. Frames show up as they are drawn.
+  async function generatePromo(text, req) {
+    const started = Date.now();
+    const controller = new AbortController();
+    sendControllerRef.current = controller;
+    const signal = controller.signal;
+    const styleLabel = PROMO_STYLES[req.style]?.label ?? req.style;
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: text, imageTurn: true },
+      { role: "assistant", content: "", pending: true, imageTurn: true, status: `Starting a ${styleLabel} promo for ${req.url}…` }
+    ]);
+    setStreaming(true);
+    try {
+      const res = await fetch("/api/chat/promo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await fingerprintHeader()) },
+        body: JSON.stringify({ url: req.url, style: req.style, vertical: req.vertical, brief: req.brief }),
+        signal
+      });
+      const start = await res.json().catch(() => null);
+      if (res.status !== 202 || !start?.poll) throw new Error(start?.error ?? `Promo failed to start (${res.status})`);
+      const base = start.poll;
+      const deadline = Date.now() + 60 * 60 * 1000;
+      let p = null;
+      while (true) {
+        if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+        if (Date.now() > deadline) throw new Error("The promo timed out");
+        await new Promise((r) => setTimeout(r, 4000));
+        const poll = await fetch(base, { cache: "no-store", signal });
+        p = await poll.json().catch(() => null);
+        if (poll.status === 202 || poll.status === 200) {
+          const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
+          const head = `${p?.title ?? `${styleLabel} promo`}${p?.brand?.name ? ` for ${p.brand.name}` : ""} · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({
+            ...m,
+            status: poll.status === 202 ? `${head}\n${describePromoProgress(p)}` : null,
+            promo: { id: start.id, base, title: p?.title ?? null, scenes: p?.scenes ?? [], vertical: Boolean(p?.vertical) }
+          })));
+          if (poll.status === 200) break;
+          continue;
+        }
+        throw new Error(p?.error ?? `Promo failed (${poll.status})`);
+      }
+      const seconds = Math.round((Date.now() - started) / 1000);
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({
+        ...m,
+        pending: false,
+        status: null,
+        provider: { name: "c0mpute", model: `promo · ${p.motion === "kenburns" ? "keyframes + camera moves" : "img2vid"}` },
+        promo: {
+          id: start.id,
+          base,
+          title: p.title ?? null,
+          tagline: p.tagline ?? null,
+          scenes: p.scenes ?? [],
+          vertical: Boolean(p.vertical),
+          video: p.video,
+          captions: p.captions,
+          duration: p.duration,
+          motion: p.motion,
+          seconds
+        }
+      })));
+      submittedTextRef.current = "";
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      const message = err?.message ?? "Promo failed";
+      const submittedText = submittedTextRef.current;
+      if (submittedText) setInput((previous) => previous || submittedText);
+      submittedTextRef.current = "";
+      setError(message);
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, pending: false, status: null, failed: true, content: message })));
+    } finally {
+      if (sendControllerRef.current === controller) sendControllerRef.current = null;
+      setStreaming(false);
+    }
+  }
+
   async function sendMessage() {
     const text = input.trim();
     if (!text || streaming) return;
@@ -738,6 +821,11 @@ export default function ChatView({ initialModels = [] }) {
     streamedTextRef.current = "";
     setVoiceError(null);
     setVoiceStatus("");
+    const promo = parsePromoCommand(text) ?? (musicMode || imageMode ? null : detectPromoRequest(text));
+    if (promo) {
+      await generatePromo(text, promo);
+      return;
+    }
     const music = parseMusicCommand(text) ?? (musicMode ? parseMusicCommand(`/music ${text}`) : null);
     if (music) {
       await generateMusic(text, music);
@@ -1374,7 +1462,7 @@ export default function ChatView({ initialModels = [] }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onComposerKey}
-            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : musicMode ? "Describe the music (genre, instruments, mood). For vocals add a line 'lyrics:' then the words." : "Ask anything, /image a prompt, or /music a style. Shift+Enter for a newline."}
+            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : musicMode ? "Describe the music (genre, instruments, mood). For vocals add a line 'lyrics:' then the words." : "Ask anything, /image a prompt, /music a style, or /promo a URL. Shift+Enter for a newline."}
             rows={2}
             disabled={streaming}
             className="w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel-strong)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--muted)]/70 disabled:opacity-60"
@@ -1887,8 +1975,55 @@ function Readm3Button({ text }) {
   );
 }
 
+function PromoCard({ promo }) {
+  const frames = (promo.scenes ?? []).map((s, i) => (s.frame ? i : null)).filter((i) => i !== null);
+  return (
+    <figure className="mt-1 mb-2">
+      {promo.video ? (
+        <video
+          controls
+          playsInline
+          preload="metadata"
+          src={promo.video}
+          className={`w-full rounded-xl border border-white/10 bg-black ${promo.vertical ? "max-w-[360px]" : "max-w-[640px]"}`}
+        >
+          {promo.captions ? <track kind="captions" src={promo.captions} srcLang="en" label="English" /> : null}
+        </video>
+      ) : null}
+      {frames.length ? (
+        <div className={`mt-2 grid gap-1.5 ${promo.vertical ? "grid-cols-4 max-w-[360px]" : "grid-cols-4 max-w-[640px]"}`}>
+          {frames.map((i) => (
+            // eslint-disable-next-line @next/next/no-img-element -- same-origin keyframe, nothing to optimise
+            <img
+              key={i}
+              src={`${promo.base}/frame/${i}`}
+              alt={promo.scenes[i]?.caption ?? `Scene ${i + 1}`}
+              title={`${i + 1}. ${promo.scenes[i]?.narration ?? ""}`}
+              className={`w-full rounded-md border border-white/10 object-cover ${promo.vertical ? "aspect-[9/16]" : "aspect-video"}`}
+            />
+          ))}
+        </div>
+      ) : null}
+      {promo.video ? (
+        <figcaption className="mt-2 flex max-w-[640px] flex-wrap items-center justify-between gap-3 text-xs text-[var(--muted)]">
+          <span>
+            {promo.title ? <span className="font-semibold text-white">{promo.title}</span> : null}
+            {promo.title ? " · " : ""}
+            {promo.duration ? `${Math.round(promo.duration)}s` : ""} · made in {promo.seconds}s on c0mpute workers
+            {promo.motion === "kenburns" ? " (keyframes with camera moves)" : promo.motion ? " (img2vid motion)" : ""}
+          </span>
+          <span className="flex gap-3">
+            <a href={`${promo.video}?download=1`} download="promo.mp4" className="text-[var(--accent)] hover:underline">Download MP4</a>
+            {promo.captions ? <a href={promo.captions} download="promo.srt" className="text-[var(--accent)] hover:underline">Captions .srt</a> : null}
+          </span>
+        </figcaption>
+      ) : null}
+    </figure>
+  );
+}
+
 function Bubble({ message }) {
-  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image, audio, cover } = message;
+  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image, audio, cover, promo } = message;
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -1935,6 +2070,7 @@ function Bubble({ message }) {
             </figcaption>
           </figure>
         ) : null}
+        {!isUser && promo ? <PromoCard promo={promo} /> : null}
         {!isUser && audio ? (
           <figure className="mt-1">
             <audio controls src={audio.url} className="w-full max-w-[640px]" />

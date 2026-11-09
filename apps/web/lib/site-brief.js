@@ -69,7 +69,7 @@ function publicLookup(hostname, options, callback) {
  * GET a public http(s) URL: follows up to 3 redirects, stops at `maxBytes`.
  * Resolves { url, status, type, body } or rejects.
  */
-export function fetchPublic(url, { maxBytes = MAX_HTML_BYTES, timeoutMs = PAGE_TIMEOUT_MS, accept = "text/html,*/*;q=0.5", redirects = 3 } = {}) {
+export function fetchPublic(url, { maxBytes = MAX_HTML_BYTES, timeoutMs = PAGE_TIMEOUT_MS, accept = "text/html,*/*;q=0.5", redirects = 3, binary = false } = {}) {
     return new Promise((resolve, reject) => {
         let target;
         try { target = new URL(url); } catch { return reject(new Error("Not a URL")); }
@@ -85,20 +85,26 @@ export function fetchPublic(url, { maxBytes = MAX_HTML_BYTES, timeoutMs = PAGE_T
                 if (redirects <= 0) return reject(new Error("Too many redirects"));
                 let next;
                 try { next = new URL(res.headers.location, target).href; } catch { return reject(new Error("Bad redirect")); }
-                return resolve(fetchPublic(next, { maxBytes, timeoutMs, accept, redirects: redirects - 1 }));
+                return resolve(fetchPublic(next, { maxBytes, timeoutMs, accept, redirects: redirects - 1, binary }));
             }
             const chunks = [];
             let size = 0;
+            let truncated = false;
             res.on("data", (chunk) => {
                 size += chunk.length;
                 if (size > maxBytes) {
+                    truncated = true;
                     chunks.push(chunk.subarray(0, chunk.length - (size - maxBytes)));
                     res.destroy();
                     return;
                 }
                 chunks.push(chunk);
             });
-            const done = () => resolve({ url: target.href, status, type: String(res.headers["content-type"] ?? ""), body: Buffer.concat(chunks).toString("utf8") });
+            // `binary` keeps the bytes (images); `truncated` says the cap cut it.
+            const done = () => {
+                const bytes = Buffer.concat(chunks);
+                resolve({ url: target.href, status, type: String(res.headers["content-type"] ?? ""), body: binary ? bytes : bytes.toString("utf8"), truncated });
+            };
             res.on("end", done);
             res.on("close", done);
             res.on("error", reject);

@@ -76,7 +76,9 @@ RUN pnpm --filter @infernetprotocol/web build
 FROM oven/bun:1.4.4-alpine AS bun
 
 FROM alpine:3.24 AS production
-RUN apk add --no-cache libstdc++ libgcc ca-certificates
+# ffmpeg + a caption font + rsvg-convert (SVG logos) for /chat promo videos
+# (lib/promo/assemble.js), which cut keyframes, narration and music into an MP4.
+RUN apk add --no-cache libstdc++ libgcc ca-certificates ffmpeg font-dejavu rsvg-convert
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN addgroup -S -g 1000 bun && adduser -S -D -u 1000 -G bun -h /home/bun bun
 WORKDIR /app
