@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": 3,
+  "version": 4,
   "updated": "2026-11-09",
   "about": "Infernet house models: every provider node pulls and serves the models below that fit it, unless its operator opts out (infernet house-models off; uncensored only: infernet house-models uncensored off). Adding a model is a PR to apps/web/public/house-models.json in InfernetProtocol/infernet-protocol. digest = sha256 of the registry manifest (what `ollama list`/api/tags reports); size_bytes = all layers + config. Docs: https://infernetprotocol.com/docs/house-models",
   "models": [
@@ -158,6 +158,30 @@
       "uncensored": false,
       "license": "nvidia-open-model-license",
       "description": "NVIDIA Nemotron 3 Nano 30B-A3B: hybrid Mamba-Transformer mixture-of-experts with ~3B active parameters, so it runs at small-model speed. Reasoning, tool calling and long context. Licensed by NVIDIA Corporation under the NVIDIA Open Model License (commercial use allowed).",
+      "added": "2026-11-09"
+    },
+    {
+      "name": "qwen2.5-7b",
+      "source": "qwen2.5:7b",
+      "digest": "sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+      "size_bytes": 4683087332,
+      "min_ram_gb": 8,
+      "min_disk_gb": 5,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "description": "Qwen2.5 7B Instruct: general instruct model; the fleet ai-providers default after the 9B.",
+      "added": "2026-11-09"
+    },
+    {
+      "name": "qwen3-4b",
+      "source": "qwen3:4b",
+      "digest": "sha256:359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+      "size_bytes": 2497293931,
+      "min_ram_gb": 8,
+      "min_disk_gb": 3,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "description": "Qwen3 4B: small general model with optional thinking mode; in the fleet ai-providers default list.",
       "added": "2026-11-09"
     }
   ]
