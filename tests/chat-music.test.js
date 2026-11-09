@@ -23,7 +23,7 @@ describe("chat music helpers", () => {
   });
 
   it("defaults to a 30 s instrumental ACE-Step job", () => {
-    expect(validateMusicRequest({ prompt: " jazz trio " })).toEqual({
+    expect(validateMusicRequest({ prompt: " jazz trio " })).toMatchObject({
       ok: true,
       spec: { prompt: "jazz trio", lyrics: "", duration: 30, model: MUSIC_MODEL }
     });
@@ -60,6 +60,60 @@ describe("chat music helpers", () => {
   });
 });
 
+import { durationFromBrief, toGatewaySpec } from "@/lib/billing/music";
+import { parseWriterReply, writeMusicSpec } from "@/lib/music-brief-writer";
+
+const BRIEF =
+  "Aggressive Celtic folk punk fused with gritty old-school boom-bap hip-hop and heavy rap-rock. 150-second song, 104 BPM, E minor, 4/4. " +
+  "Fierce Irish fiddle riffs ... Structure: 8-second instrumental intro, rap verse, explosive singalong chorus ... Full song with vocals and lyrics, 2–3 minutes.";
+
+describe("music briefs", () => {
+  it("reads the length a brief asks for", () => {
+    expect(durationFromBrief(BRIEF)).toBe(150);
+    expect(durationFromBrief("a ballad, 2-3 minutes")).toBe(180);
+    expect(durationFromBrief("2.5 min of ambient")).toBe(150);
+    expect(durationFromBrief("90 sec jingle")).toBe(90);
+    expect(durationFromBrief("104 BPM in 4/4")).toBeNull();
+  });
+
+  it("keeps the full brief for the writer and clips only the gateway spec", () => {
+    const long = "x ".repeat(3000).trim();
+    const r = validateMusicRequest({ prompt: long });
+    expect(r.request.prompt).toBe(long);
+    expect(r.request.duration).toBeNull();
+    expect(r.spec.prompt.length).toBeLessThanOrEqual(1000);
+    expect(toGatewaySpec({ prompt: "p", lyrics: "", duration: 500 }).duration).toBe(120);
+  });
+
+  it("parses the writer's JSON, tolerating chatter around it", () => {
+    const out = parseWriterReply('Sure!\n{"caption":"celtic punk, fiddle, rap, 104 bpm","lyrics":"[verse]\\nraise it up","duration":150}\nEnjoy');
+    expect(out).toEqual({ caption: "celtic punk, fiddle, rap, 104 bpm", lyrics: "[verse]\nraise it up", duration: 150 });
+    expect(parseWriterReply("no json here")).toBeNull();
+    expect(parseWriterReply('{"caption":"x"}')).toBeNull();
+  });
+
+  it("turns a lyric-less brief into caption + lyrics, and the brief's own length wins", async () => {
+    async function* stream() {
+      yield { type: "done", data: { text: '{"caption":"celtic folk punk, boom-bap, rap-rock, fiddle, 104 bpm, E minor","lyrics":"[verse]\\nwe drink to the fight","duration":95}' } };
+    }
+    const r = await writeMusicSpec({ prompt: BRIEF, lyrics: "", duration: null }, { stream, configured: true });
+    expect(r.writer).toBe("model");
+    expect(r.lyrics).toContain("[verse]");
+    expect(r.prompt).toContain("celtic folk punk");
+    expect(r.duration).toBe(120); // 150 asked, clamped to the gateway's 120 s cap
+  });
+
+  it("falls back to the brief, instrumental, when the writer fails", async () => {
+    async function* stream() {
+      yield { type: "error", data: { message: "down" } };
+    }
+    const r = await writeMusicSpec({ prompt: "lofi beats, 45 seconds", lyrics: "", duration: null }, { stream, configured: true });
+    expect(r).toEqual({ prompt: "lofi beats, 45 seconds", lyrics: "", duration: 45, writer: "rules" });
+    const own = await writeMusicSpec({ prompt: "folk", lyrics: "[verse]\nmine", duration: 40 }, { configured: true });
+    expect(own).toEqual({ prompt: "folk", lyrics: "[verse]\nmine", duration: 40, writer: "none" });
+  });
+});
+
 describe("chat music job registry", () => {
   it("reports pending, then hands the audio out exactly once", async () => {
     let finish;
@@ -79,6 +133,6 @@ describe("chat music job registry", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(getMusicJob(id)).toMatchObject({ status: "failed", error: "No worker", httpStatus: 503 });
     const old = startMusicJob(() => new Promise(() => {}), { now: 0 });
-    expect(getMusicJob(old, { now: 21 * 60 * 1000 })).toBeNull();
+    expect(getMusicJob(old, { now: 46 * 60 * 1000 })).toBeNull();
   });
 });

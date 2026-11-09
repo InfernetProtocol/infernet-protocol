@@ -28,7 +28,8 @@ export function createJobRegistry({ ttlMs = 15 * 60 * 1000, maxJobs = 200 } = {}
     const job = { id, createdAt: now, status: "pending", headers: {}, error: null, httpStatus: 0 };
     jobs.set(id, job);
     Promise.resolve()
-      .then(run)
+      // `run` gets the job, so it can publish progress (job.meta) to polls.
+      .then(() => run(job))
       .then((result) => {
         const { headers, ...rest } = result ?? {};
         Object.assign(job, rest);

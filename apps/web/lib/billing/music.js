@@ -73,22 +73,49 @@ export function validateMusicRequest(body) {
   if (lyrics.length > MAX_MUSIC_LYRICS_CHARS) {
     return { ok: false, error: `Lyrics must be at most ${MAX_MUSIC_LYRICS_CHARS} characters` };
   }
-  const duration = body?.duration === undefined || body?.duration === null ? DEFAULT_MUSIC_SECONDS : Number(body.duration);
-  if (!Number.isInteger(duration) || duration < MIN_MUSIC_SECONDS || duration > MAX_MUSIC_SECONDS) {
+  const explicit = body?.duration === undefined || body?.duration === null ? null : Number(body.duration);
+  if (explicit !== null && (!Number.isInteger(explicit) || explicit < MIN_MUSIC_SECONDS || explicit > MAX_MUSIC_SECONDS)) {
     return { ok: false, error: `Duration must be a whole number of seconds from ${MIN_MUSIC_SECONDS} to ${MAX_MUSIC_SECONDS}` };
   }
-  const spec = {
-    prompt: clipText(prompt, MODEL_PROMPT_CHARS),
-    lyrics: clipText(lyrics, MODEL_LYRICS_CHARS),
-    duration,
-    model: MUSIC_MODEL
-  };
+  let seed;
   if (body?.seed !== undefined && body?.seed !== null) {
-    const seed = Number(body.seed);
+    seed = Number(body.seed);
     if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) {
       return { ok: false, error: "Seed must be an integer from 0 to 4294967295" };
     }
-    spec.seed = seed;
   }
-  return { ok: true, spec };
+  // `request` keeps the full text for the brief writer; `spec` is what the
+  // gateway would get with no writing step (clipped, default length).
+  const request = { prompt, lyrics, duration: explicit, ...(seed !== undefined ? { seed } : {}) };
+  const spec = toGatewaySpec({ ...request, duration: explicit ?? DEFAULT_MUSIC_SECONDS });
+  return { ok: true, request, spec };
+}
+
+/** The gateway's txt2music body: text clipped to what the model reads. */
+export function toGatewaySpec({ prompt, lyrics, duration, seed }) {
+  const spec = {
+    prompt: clipText(prompt, MODEL_PROMPT_CHARS),
+    lyrics: clipText(lyrics ?? "", MODEL_LYRICS_CHARS),
+    duration: Math.min(MAX_MUSIC_SECONDS, Math.max(MIN_MUSIC_SECONDS, Math.round(duration ?? DEFAULT_MUSIC_SECONDS))),
+    model: MUSIC_MODEL
+  };
+  if (seed !== undefined && seed !== null) spec.seed = seed;
+  return spec;
+}
+
+/**
+ * A song length the brief states, in seconds, or null: "150-second song",
+ * "90 sec", "2-3 minutes" (the upper end), "2.5 min", "2:30".
+ */
+export function durationFromBrief(text) {
+  const s = String(text ?? "").toLowerCase();
+  let m = /\b(\d{1,2}):([0-5]\d)\b(?!\s*(?:am|pm))/.exec(s);
+  if (m && /min|long|length|song|track/.test(s)) return Number(m[1]) * 60 + Number(m[2]);
+  m = /\b(\d{2,3})\s*-?\s*(?:seconds?|secs?|s)\b/.exec(s);
+  if (m) return Number(m[1]);
+  m = /\b(\d+(?:\.\d+)?)\s*(?:[-–—]|to)\s*(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?)\b/.exec(s);
+  if (m) return Math.round(Number(m[2]) * 60);
+  m = /\b(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?)\b/.exec(s);
+  if (m) return Math.round(Number(m[1]) * 60);
+  return null;
 }

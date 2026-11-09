@@ -14,7 +14,7 @@ export async function GET(_request, { params }) {
   if (!job) return errorJson("This music job expired or the server restarted — try again", 404);
   if (job.status === "pending") {
     return Response.json(
-      { id, status: "pending", seconds: Math.round((Date.now() - job.createdAt) / 1000) },
+      { id, status: "pending", seconds: Math.round((Date.now() - job.createdAt) / 1000), ...(job.meta ?? {}) },
       { status: 202, headers: { "cache-control": "no-store" } }
     );
   }

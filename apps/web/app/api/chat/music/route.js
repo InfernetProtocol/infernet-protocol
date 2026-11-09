@@ -5,7 +5,8 @@ import { postSpeechGatewayLong, readLimitedBody, speechGateway, errorJson } from
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
-import { MUSIC_MODEL, musicPriceMicro, validateMusicRequest } from "@/lib/billing/music";
+import { MUSIC_MODEL, musicPriceMicro, toGatewaySpec, validateMusicRequest } from "@/lib/billing/music";
+import { writeMusicSpec } from "@/lib/music-brief-writer";
 import { startMusicJob } from "@/lib/chat/music-jobs";
 
 export const runtime = "nodejs";
@@ -16,6 +17,34 @@ export const dynamic = "force-dynamic";
 const limit = rateLimit({ windowMs: 60 * 60 * 1000, max: 4 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AUDIO_TYPES = new Set(["audio/mpeg", "audio/wav", "audio/flac", "audio/ogg"]);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * POST the song to the gateway, retrying what is not the song's fault: the
+ * connection dropping (the gateway re-execs itself on every c0mpute
+ * auto-update, which cuts in-flight requests: "socket hang up") and 503 (no
+ * worker free, or the one that took it was killed). A song job is idempotent.
+ */
+async function postWithRetries(spec, { attempts = 3 } = {}) {
+  let last = null;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      // node:http, not fetch: undici gives up on headers after 300 s.
+      const response = await postSpeechGatewayLong("/v1/music", spec, { timeoutMs: 30 * 60 * 1000 });
+      if (!response) throw Object.assign(new Error("Music generation is not configured"), { status: 503, final: true });
+      if (response.status !== 503 || i === attempts) return response;
+      last = response;
+    } catch (error) {
+      if (error?.final) throw error;
+      console.warn(`[chat/music] gateway attempt ${i} failed: ${error?.message ?? error}`);
+      if (i === attempts) {
+        throw Object.assign(new Error(`Music generation failed: ${error?.message ?? error}`), { status: 502 });
+      }
+    }
+    await sleep(i * 10_000);
+  }
+  return last;
+}
 
 /**
  * POST /api/chat/music  { prompt, lyrics?, duration?: 10..120, seed? }
@@ -66,15 +95,15 @@ export async function POST(request) {
 
   const userId = payer.userId;
   const chargeMode = billing.mode;
-  const id = startMusicJob(async () => {
-    let response;
-    try {
-      // node:http, not fetch: undici gives up on headers after 300 s.
-      response = await postSpeechGatewayLong("/v1/music", parsed.spec, { timeoutMs: 19 * 60 * 1000 });
-    } catch (error) {
-      throw Object.assign(new Error(`Music generation failed: ${error?.message ?? error}`), { status: 502 });
-    }
-    if (!response) throw Object.assign(new Error("Music generation is not configured"), { status: 503 });
+  const id = startMusicJob(async (job) => {
+    // A brief with no lyrics becomes a caption + original lyrics + length,
+    // so "a rap-rock song about ..." is sung, not an instrumental.
+    job.meta = { stage: "writing" };
+    const written = await writeMusicSpec(parsed.request);
+    const spec = toGatewaySpec({ ...parsed.request, ...written });
+    job.meta = { stage: "composing", caption: spec.prompt, lyrics: spec.lyrics, duration: spec.duration, writer: written.writer };
+
+    const response = await postWithRetries(spec);
     if (response.status !== 200) {
       const busy = response.status === 503;
       throw Object.assign(
