@@ -77,10 +77,12 @@
 #
 # House models (ON by default): provider nodes pull and serve the models
 # listed at https://infernetprotocol.com/house-models.json that fit the box
-# (RAM, and always leaving 10% of the disk free, 10-50 GB). Opt out:
+# (RAM, and always leaving 10% of the disk free, 10-50 GB). Uncensored house
+# models are OFF unless you opt in. Flags:
 #
 #   INFERNET_NO_HOUSE_MODELS=1      or  --no-house-models
-#   INFERNET_NO_UNCENSORED_MODELS=1 or  --no-uncensored-models  (uncensored only)
+#   INFERNET_UNCENSORED_MODELS=1    or  --uncensored-models     (opt in to uncensored)
+#   INFERNET_NO_UNCENSORED_MODELS=1 or  --no-uncensored-models  (keep them off)
 #   INFERNET_HOUSE_MODELS_MAX_GB=N  cap the disk house models may use
 #
 # Zero-touch full bootstrap (no SSH afterwards):
@@ -1426,6 +1428,7 @@ auto_bootstrap_native() {
     # House-model opt-outs ride along as setup flags; setup saves them to config.
     _house_flags=""
     [ "$INFERNET_NO_HOUSE_MODELS" = "1" ] && _house_flags="$_house_flags --no-house-models"
+    [ "$INFERNET_UNCENSORED_MODELS" = "1" ] && _house_flags="$_house_flags --uncensored-models"
     [ "$INFERNET_NO_UNCENSORED_MODELS" = "1" ] && _house_flags="$_house_flags --no-uncensored-models"
     [ -n "$INFERNET_HOUSE_MODELS_MAX_GB" ] && _house_flags="$_house_flags --house-models-max-gb $INFERNET_HOUSE_MODELS_MAX_GB"
     if [ "$INFERNET_NO_HOUSE_MODELS" = "1" ]; then
@@ -1487,6 +1490,7 @@ main() {
         case "$_arg" in
             --force) INFERNET_FORCE=1 ;;
             --no-house-models) INFERNET_NO_HOUSE_MODELS=1 ;;
+            --uncensored-models) INFERNET_UNCENSORED_MODELS=1 ;;
             --no-uncensored-models) INFERNET_NO_UNCENSORED_MODELS=1 ;;
             *) : ;;
         esac

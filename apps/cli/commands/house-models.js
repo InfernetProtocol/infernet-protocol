@@ -36,7 +36,8 @@ Flags:
   --help    Show this help
 
 Environment (beats config.json): INFERNET_HOUSE_MODELS=0,
-INFERNET_UNCENSORED_MODELS=0, INFERNET_HOUSE_MODELS_MAX_GB=<n>.
+INFERNET_UNCENSORED_MODELS=1 (uncensored are off unless opted in),
+INFERNET_HOUSE_MODELS_MAX_GB=<n>.
 
 House models are ON by default. The daemon checks
 https://infernetprotocol.com/house-models.json on start and every 6 hours,

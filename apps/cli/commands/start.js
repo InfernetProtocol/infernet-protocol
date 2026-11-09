@@ -87,7 +87,8 @@ Flags:
   --once                     Run one heartbeat + one poll and exit (debug)
   --no-house-models          Don't pull Infernet house models for this run
                              (persist with \`infernet house-models off\`)
-  --no-uncensored-models     Skip uncensored house models only
+  --uncensored-models        Also serve uncensored house models (off by default)
+  --no-uncensored-models     Skip uncensored house models (the default)
   --house-models-max-gb <n>  Cap the disk house models may use
   --help                     Show this help
 
@@ -172,6 +173,7 @@ function passthroughArgs(args) {
     if (args.has('no-advertise')) passthrough.push('--no-advertise');
     if (args.has('once')) passthrough.push('--once');
     if (args.has('no-house-models')) passthrough.push('--no-house-models');
+    if (args.has('uncensored-models')) passthrough.push('--uncensored-models');
     if (args.has('no-uncensored-models')) passthrough.push('--no-uncensored-models');
     const houseCap = args.get('house-models-max-gb');
     if (houseCap) passthrough.push('--house-models-max-gb', houseCap);

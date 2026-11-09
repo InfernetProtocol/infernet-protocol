@@ -50,7 +50,8 @@ Flags:
   --no-abliterated       Don't default to the abliterated (uncensored) model
                          when it fits; pick the largest stock Qwen instead.
   --no-house-models      Don't pull Infernet house models (saved to config).
-  --no-uncensored-models Skip uncensored house models only (saved to config).
+  --uncensored-models    Also serve uncensored house models (off by default; saved to config).
+  --no-uncensored-models Skip uncensored house models (the default; saved to config).
   --house-models-max-gb <n>
                          Cap the disk house models may use (saved to config).
   --backend <kind>       Pin engine backend (vllm | ollama | mojo | stub). Default: auto (prefers vLLM, falls back to Ollama).
@@ -861,6 +862,7 @@ export default async function setup(args) {
     if (isProvider) {
         const patch = {};
         if (args.has("no-house-models")) patch.enabled = false;
+        if (args.has("uncensored-models")) patch.uncensored = true;
         if (args.has("no-uncensored-models")) patch.uncensored = false;
         const capArg = Number(args.get("house-models-max-gb"));
         if (args.get("house-models-max-gb") !== undefined && Number.isFinite(capArg)) patch.maxDiskGb = capArg;
@@ -991,7 +993,7 @@ export default async function setup(args) {
             ok(`house models: ON — this node will pull the models listed at ${hs.manifestUrl}`);
             process.stdout.write(`  that fit it (RAM, and always leaving 10% of the disk free, 10-50 GB${hs.maxDiskGb != null ? `, capped at ${hs.maxDiskGb} GB` : ""}),\n`);
             process.stdout.write(`  in the background, and serve them on Infernet. Uncensored house models: ${hs.uncensored ? "on" : "off"}.\n`);
-            process.stdout.write("  Opt out: infernet house-models off   (uncensored only: infernet house-models uncensored off)\n");
+            process.stdout.write("  Opt out: infernet house-models off   (uncensored are off unless you run: infernet house-models uncensored on)\n");
         } else {
             ok("house models: off (turn on with `infernet house-models on`)");
         }
