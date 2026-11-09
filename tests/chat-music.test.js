@@ -32,7 +32,7 @@ describe("chat music helpers", () => {
   it("checks duration, lyrics, seed and junk", () => {
     expect(validateMusicRequest({ prompt: "x", duration: 60, seed: 7, lyrics: "hi" }).spec).toMatchObject({ duration: 60, seed: 7, lyrics: "hi" });
     expect(validateMusicRequest({ prompt: "x", duration: 5 }).ok).toBe(false);
-    expect(validateMusicRequest({ prompt: "x", duration: 121 }).ok).toBe(false);
+    expect(validateMusicRequest({ prompt: "x", duration: 181 }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "x", duration: 30.5 }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "x", lyrics: "y".repeat(100_001) }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "x".repeat(100_001) }).ok).toBe(false);
@@ -82,7 +82,7 @@ describe("music briefs", () => {
     expect(r.request.prompt).toBe(long);
     expect(r.request.duration).toBeNull();
     expect(r.spec.prompt.length).toBeLessThanOrEqual(1000);
-    expect(toGatewaySpec({ prompt: "p", lyrics: "", duration: 500 }).duration).toBe(120);
+    expect(toGatewaySpec({ prompt: "p", lyrics: "", duration: 500 }).duration).toBe(180);
   });
 
   it("parses the writer's JSON, tolerating chatter around it", () => {
@@ -100,7 +100,7 @@ describe("music briefs", () => {
     expect(r.writer).toBe("model");
     expect(r.lyrics).toContain("[verse]");
     expect(r.prompt).toContain("celtic folk punk");
-    expect(r.duration).toBe(120); // 150 asked, clamped to the gateway's 120 s cap
+    expect(r.duration).toBe(150); // the brief's "150-second song" beats the model's 95
   });
 
   it("falls back to the brief, instrumental, when the writer fails", async () => {
