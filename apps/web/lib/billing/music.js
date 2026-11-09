@@ -22,7 +22,8 @@ export function clipText(text, max) {
   return (cut > head.length * 0.8 ? head.slice(0, cut) : head).trim();
 }
 export const MIN_MUSIC_SECONDS = 10;
-export const MAX_MUSIC_SECONDS = 120;
+// c0mpute gateway >= 0.2.84 takes up to 180 s.
+export const MAX_MUSIC_SECONDS = 180;
 export const DEFAULT_MUSIC_SECONDS = 30;
 
 /**
