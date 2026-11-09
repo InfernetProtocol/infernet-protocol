@@ -73,6 +73,15 @@ export async function writeMusicSpec(
   if (lyrics) return { prompt, lyrics, duration: pickDuration(null), writer: "none" };
   const rules = () => ({ prompt, lyrics: "", duration: pickDuration(null), writer: "rules" });
   if (!configured) return rules();
+  // One retry: a DNS blip on the host (EAI_AGAIN) otherwise turns a sung
+  // song into an untitled instrumental.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const out = await writeOnce(attempt);
+    if (out) return out;
+  }
+  return rules();
+
+  async function writeOnce(attempt) {
   try {
     let text = "";
     const signal = AbortSignal.timeout(WRITER_TIMEOUT_MS);
@@ -90,7 +99,7 @@ export async function writeMusicSpec(
       else if (ev.type === "error") throw new Error(ev.data?.message ?? "writer failed");
     }
     const out = parseWriterReply(text);
-    if (!out) return rules();
+    if (!out) return null;
     const instrumental = !out.lyrics || /^\[instrumental\]$/i.test(out.lyrics);
     return {
       prompt: out.caption,
@@ -100,7 +109,9 @@ export async function writeMusicSpec(
       writer: "model"
     };
   } catch (e) {
-    console.warn("[music-brief-writer]", e?.message ?? e);
-    return rules();
+    console.warn(`[music-brief-writer] attempt ${attempt}:`, e?.message ?? e);
+    if (attempt === 1) await new Promise((r) => setTimeout(r, 2000));
+    return null;
+  }
   }
 }
