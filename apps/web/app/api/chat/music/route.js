@@ -3,8 +3,8 @@ import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor, paidLimit } from "@/lib/trusted-clients";
 import { fetchSpeechGateway, postSpeechGatewayLong, readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
-import { consumeFreeQuery } from "@/lib/data/free-tier";
-import { freeLimitMessage } from "@/lib/billing/free-tier";
+import { consumeFreeQuery, consumeOperatorSong } from "@/lib/data/free-tier";
+import { freeLimitMessage, songLimitMessage } from "@/lib/billing/free-tier";
 import { MUSIC_MODEL, coverArtPrompt, musicPriceMicro, toGatewaySpec, validateMusicRequest } from "@/lib/billing/music";
 import { writeMusicSpec } from "@/lib/music-brief-writer";
 import { setMusicCover, startMusicJob } from "@/lib/chat/music-jobs";
@@ -146,6 +146,11 @@ export async function POST(request) {
   } else {
     const burst = limit.check(ip);
     if (!burst.ok) return errorJson("Music rate limit exceeded — try again later", 429);
+    // A qualifying node operator has 100 free queries, not 100 free songs: a
+    // free song also spends one from their daily song counter. Anyone else is
+    // unaffected (applies: false) and pays one free query per song as before.
+    const song = await consumeOperatorSong({ userId: payer.userId ?? null });
+    if (song.applies && !song.ok) return errorJson(songLimitMessage(song.limit), 429);
     const free = await consumeFreeQuery({
       userId: payer.userId ?? null,
       clientSubject: payer.subject ?? null,
@@ -153,7 +158,7 @@ export async function POST(request) {
       fingerprint: request.headers.get("x-fingerprint"),
       userAgent: request.headers.get("user-agent")
     });
-    if (!free.ok) return errorJson(freeLimitMessage(free.limit), 429);
+    if (!free.ok) return errorJson(freeLimitMessage(free.limit, free), 429);
   }
 
   const userId = payer.userId;

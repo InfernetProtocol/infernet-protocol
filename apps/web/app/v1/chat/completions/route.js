@@ -110,7 +110,7 @@ export async function POST(request) {
       userAgent: request.headers.get("user-agent")
     });
         if (!free.ok) {
-            return err(429, freeLimitMessage(free.limit), {
+            return err(429, freeLimitMessage(free.limit, free), {
                 free_limit_per_day: free.limit,
                 used_today: free.used,
                 retry_after_seconds: free.retryAfter,

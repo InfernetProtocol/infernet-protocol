@@ -86,7 +86,7 @@ export async function POST(request) {
       });
       freeLeft = free.remaining;
       if (!free.ok) {
-        return err(429, freeLimitMessage(free.limit), {
+        return err(429, freeLimitMessage(free.limit, free), {
           free_limit_per_day: free.limit,
           used_today: free.used,
           resetAt: new Date(Date.now() + free.retryAfter * 1000).toISOString(),

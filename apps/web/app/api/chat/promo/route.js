@@ -78,7 +78,7 @@ export async function POST(request) {
       fingerprint: request.headers.get("x-fingerprint"),
       userAgent: request.headers.get("user-agent")
     });
-    if (!free.ok) return errorJson(freeLimitMessage(free.limit), 429);
+    if (!free.ok) return errorJson(freeLimitMessage(free.limit, free), 429);
   }
 
   const userId = payer.userId;
