@@ -89,10 +89,11 @@ describe("house-models manifest", () => {
 describe("house-models settings (opt-out)", () => {
     const args = (flags) => ({ has: (k) => k in flags, get: (k) => (flags[k] === true ? undefined : flags[k]) });
 
-    it("is on by default, uncensored included", () => {
+    it("is on by default, uncensored excluded", () => {
         const s = resolveSettings({ config: {}, env: {} });
         expect(s.enabled).toBe(true);
-        expect(s.uncensored).toBe(true);
+        expect(s.uncensored).toBe(false);
+        expect(s.sources.uncensored).toBe("default");
         expect(s.maxDiskGb).toBeNull();
     });
 
@@ -101,6 +102,17 @@ describe("house-models settings (opt-out)", () => {
         expect(resolveSettings({ config: {}, env: { INFERNET_HOUSE_MODELS: "0" } }).enabled).toBe(false);
         expect(resolveSettings({ config: {}, env: { INFERNET_NO_HOUSE_MODELS: "1" } }).enabled).toBe(false);
         expect(resolveSettings({ config: {}, env: {}, args: args({ "no-house-models": true }) }).enabled).toBe(false);
+    });
+
+    it("uncensored needs an explicit opt-in, which an operator's saved choice keeps", () => {
+        for (const s of [
+            resolveSettings({ config: { houseModels: { uncensored: true } }, env: {} }),
+            resolveSettings({ config: {}, env: { INFERNET_UNCENSORED_MODELS: "1" } }),
+            resolveSettings({ config: {}, env: {}, args: args({ "uncensored-models": true }) })
+        ]) {
+            expect(s.enabled).toBe(true);
+            expect(s.uncensored).toBe(true);
+        }
     });
 
     it("uncensored has its own opt-out that leaves the rest on", () => {
