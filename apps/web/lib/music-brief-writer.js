@@ -21,7 +21,8 @@ const CAPTION_CHARS = 600;
 
 export const MUSIC_WRITER_SYSTEM = [
   "You turn a music brief into input for the ACE-Step 1.5 song model.",
-  "Reply with one JSON object and nothing else: {\"caption\": string, \"lyrics\": string, \"duration\": number}.",
+  "Reply with one JSON object and nothing else: {\"title\": string, \"caption\": string, \"lyrics\": string, \"duration\": number}.",
+  "title: an original, catchy song title of 1 to 6 words that fits the brief (it goes on the cover art).",
   `caption: at most ${CAPTION_CHARS} characters of comma-separated style tags taken from the brief: genres, instruments, vocal type and delivery, mood, tempo in BPM, key. No sentences about structure, no lyrics.`,
   "lyrics: if the brief wants vocals, write ORIGINAL lyrics in English (or the language the brief asks for) that follow the structure the brief describes. Put each section on its own line in square brackets, e.g. [intro], [verse], [chorus], [bridge], [breakdown], [outro], with the sung or rapped lines under it. Make verses dense and rhythmic when it asks for rap, choruses short and repeatable. Fit the lyrics to the duration (about 2 to 3 lines per 10 seconds of vocals). If the brief wants an instrumental, use exactly \"[Instrumental]\".",
   `duration: the song length in seconds the brief asks for, from ${MIN_MUSIC_SECONDS} to ${MAX_MUSIC_SECONDS}; 60 if it does not say.`,
@@ -44,7 +45,9 @@ export function parseWriterReply(text) {
   const lyrics = typeof obj?.lyrics === "string" ? obj.lyrics.replace(/\r/g, "").trim() : "";
   const duration = Number(obj?.duration);
   if (caption.length < 8) return null;
+  const title = typeof obj?.title === "string" ? obj.title.replace(/["\n\r]/g, "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
   return {
+    title: title || null,
     caption: clipText(caption, CAPTION_CHARS),
     lyrics: clipText(lyrics, MODEL_LYRICS_CHARS),
     duration: Number.isFinite(duration) ? duration : null
@@ -93,6 +96,7 @@ export async function writeMusicSpec(
       prompt: out.caption,
       lyrics: instrumental ? "" : out.lyrics,
       duration: pickDuration(out.duration),
+      title: out.title,
       writer: "model"
     };
   } catch (e) {

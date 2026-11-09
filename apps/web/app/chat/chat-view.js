@@ -655,7 +655,16 @@ export default function ChatView({ initialModels = [] }) {
         if (poll.status === 202) {
           const p = await poll.json().catch(() => null);
           const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
-          if (p?.caption) meta = { caption: p.caption, lyrics: p.lyrics ?? "", duration: p.duration ?? null };
+          if (p?.caption) meta = { ...meta, caption: p.caption, lyrics: p.lyrics ?? "", duration: p.duration ?? null, title: p.title ?? null };
+          // Cover art is drawn in parallel and usually lands before the song.
+          if (p?.cover === "ready" && !meta?.coverUrl) {
+            const c = await fetch(`${started202.poll}/cover`, { cache: "no-store", signal }).catch(() => null);
+            if (c?.ok) {
+              const coverUrl = URL.createObjectURL(await c.blob());
+              meta = { ...meta, coverUrl };
+              setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, cover: { url: coverUrl, title: meta.title } })));
+            }
+          }
           const status =
             p?.stage === "writing"
               ? `Writing lyrics and a style from your brief… ${secs}s`
@@ -678,7 +687,8 @@ export default function ChatView({ initialModels = [] }) {
         ...m,
         pending: false,
         status: null,
-        audio: { url, prompt: meta?.caption ?? prompt, lyrics: meta?.lyrics || lyrics, seconds, type: blob.type || "audio/mpeg", worker: done.headers.get("x-c0mpute-worker-peer-id") ?? null },
+        cover: meta?.coverUrl ? { url: meta.coverUrl, title: meta.title } : undefined,
+        audio: { url, title: meta?.title ?? null, prompt: meta?.caption ?? prompt, lyrics: meta?.lyrics || lyrics, seconds, type: blob.type || "audio/mpeg", worker: done.headers.get("x-c0mpute-worker-peer-id") ?? null },
         provider: { name: "c0mpute", model: done.headers.get("x-music-model") ?? "ace-step-1.5" }
       })));
       submittedTextRef.current = "";
@@ -1861,7 +1871,7 @@ function Readm3Button({ text }) {
 }
 
 function Bubble({ message }) {
-  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image, audio } = message;
+  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image, audio, cover } = message;
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -1894,6 +1904,18 @@ function Bubble({ message }) {
                 <p className="mt-1 whitespace-pre-wrap">{image.prompt}</p>
               </details>
             ) : null}
+          </figure>
+        ) : null}
+        {!isUser && cover ? (
+          <figure className="mt-1 mb-2">
+            {/* eslint-disable-next-line @next/next/no-img-element -- a local blob: URL, nothing to optimise */}
+            <img src={cover.url} alt={cover.title ? `Cover art: ${cover.title}` : "Cover art"} className="aspect-square w-full max-w-[360px] rounded-xl border border-white/10 object-cover shadow-lg" />
+            <figcaption className="mt-2 flex max-w-[360px] items-center justify-between gap-3 text-xs text-[var(--muted)]">
+              <span className="font-semibold text-white">{cover.title ?? "Cover art"}</span>
+              <a href={cover.url} download="infernet-cover.png" className="text-[var(--accent)] hover:underline">
+                Cover
+              </a>
+            </figcaption>
           </figure>
         ) : null}
         {!isUser && audio ? (
