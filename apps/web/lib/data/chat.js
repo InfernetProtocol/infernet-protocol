@@ -39,7 +39,56 @@ export function meetsTrustTier(provider, minTier) {
   return have >= need;
 }
 
-export async function pickChatProvider({ modelName, minTrustTier, requireE2E = false, excludeProviderIds = [], requireFreeSlot = false } = {}) {
+/**
+ * Picks made by this process whose job may not be in the database yet.
+ *
+ * pickChatProvider reads the live in-flight count, then the caller inserts the
+ * job. Requests arriving together all read the count before any of them
+ * inserts, so a burst of three landed on the same node (2026-11-09, three
+ * jobs within 15 ms). The app is one Node process, so each pick is recorded
+ * here and counted by every pick whose database read could have missed it:
+ * not inserted yet, or inserted after that read started. Entries expire after
+ * PICK_TTL_MS, by when the database has them.
+ */
+const PICK_TTL_MS = 15_000;
+const localPicks = [];
+const pickEntries = new WeakMap();
+
+/** Add picks the database read starting at `readStartedAt` cannot have seen. Pure. */
+export function withLocalPicks(inflight, picks, readStartedAt, now = Date.now()) {
+  const out = { ...inflight };
+  for (const pick of picks) {
+    if (now - pick.at > PICK_TTL_MS) continue;
+    if (pick.insertedAt !== null && pick.insertedAt < readStartedAt) continue;
+    out[pick.providerId] = (out[pick.providerId] ?? 0) + 1;
+  }
+  return out;
+}
+
+function recordPick(provider) {
+  const now = Date.now();
+  while (localPicks.length > 0 && now - localPicks[0].at > PICK_TTL_MS) localPicks.shift();
+  const entry = { providerId: provider.id, at: now, insertedAt: null };
+  localPicks.push(entry);
+  pickEntries.set(provider, entry);
+}
+
+function markPickInserted(provider) {
+  const entry = provider ? pickEntries.get(provider) : null;
+  if (entry) entry.insertedAt = Date.now();
+}
+
+export async function pickChatProvider({ modelName, minTrustTier, requireE2E = false, excludeProviderIds = [], requireFreeSlot = false, reserve = false } = {}) {
+  // When the in-flight read starts; set just before it.
+  let readStartedAt = Date.now();
+  const opts = { modelName, minTrustTier, requireE2E, excludeProviderIds, requireFreeSlot };
+  // Pick and record in one synchronous step, so no other request's pick can
+  // run between them.
+  const decide = (rows, inflight) => {
+    const pick = finishPick(rows, opts, withLocalPicks(inflight, localPicks, readStartedAt));
+    if (pick && reserve) recordPick(pick);
+    return pick;
+  };
   const supabase = getSupabaseServerClient();
   const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
 
@@ -59,12 +108,16 @@ export async function pickChatProvider({ modelName, minTrustTier, requireE2E = f
         .eq("status", "available")
         .gte("last_seen", twoMinAgo);
       if (fallback.error) throw fallback.error;
-      return finishPick(fallback.data ?? [], { modelName, minTrustTier, requireE2E, excludeProviderIds, requireFreeSlot }, await inflightByProvider(supabase, fallback.data ?? []));
+      readStartedAt = Date.now();
+      const inflight = await inflightByProvider(supabase, fallback.data ?? []);
+      return decide(fallback.data ?? [], inflight);
     }
     throw error;
   }
 
-  return finishPick(data ?? [], { modelName, minTrustTier, requireE2E, excludeProviderIds, requireFreeSlot }, await inflightByProvider(supabase, data ?? []));
+  readStartedAt = Date.now();
+  const inflight = await inflightByProvider(supabase, data ?? []);
+  return decide(data ?? [], inflight);
 }
 
 /**
@@ -404,7 +457,7 @@ export async function createChatJob({
   let requestedModel = null;
 
   if (!p2pProvider && !pinned && !providerId) {
-    p2pProvider = await pickChatProvider({ modelName, minTrustTier });
+    p2pProvider = await pickChatProvider({ modelName, minTrustTier, reserve: true });
     // Asked by another name of the model: run it under the name the node serves.
     const servedName = p2pProvider && modelName ? matchServedModel(p2pProvider.specs?.served_models, modelName) : null;
     if (servedName && servedName !== modelName) {
@@ -412,7 +465,7 @@ export async function createChatJob({
       requestedModel = modelName;
     }
     if (!p2pProvider && isModelAlias(modelName)) {
-      const anyProvider = await pickChatProvider({ minTrustTier });
+      const anyProvider = await pickChatProvider({ minTrustTier, reserve: true });
       const target = aliasTargetFor(anyProvider);
       if (anyProvider && target) {
         p2pProvider = anyProvider;
@@ -532,6 +585,7 @@ export async function createChatJob({
   }
 
   if (error) throw error;
+  markPickInserted(p2pProvider);
 
   const provider = p2pProvider ?? (nimAvailable ? nimVirtualProvider() : null);
   return { job, provider, source, requestedModel };

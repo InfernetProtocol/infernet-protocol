@@ -3,7 +3,7 @@ import { filterFittingModels } from "../apps/cli/commands/register.js";
 
 // Don't import server-only modules in vitest's node env. Re-export
 // reputationWeightedPick from the same file.
-import { reputationWeightedPick, headroomScore, notSaturated, meetsTrustTier, finishPick, e2EChatModelNames } from "../apps/web/lib/data/chat.js";
+import { reputationWeightedPick, headroomScore, notSaturated, meetsTrustTier, finishPick, e2EChatModelNames, withLocalPicks } from "../apps/web/lib/data/chat.js";
 
 const GB = 1024 ** 3;
 const PUBKEY = "a".repeat(64);
@@ -318,6 +318,30 @@ describe("finishPick on CPU-only nodes", () => {
     it("queues on a busy node rather than failing when every node is busy", () => {
         expect(finishPick([cpu("fast", 5.2)], { modelName: "m" }, { fast: 2 }).id).toBe("fast");
         expect(finishPick([cpu("fast", 5.2)], { modelName: "m" }, { fast: 4 })).toBeNull();
+    });
+
+    it("withLocalPicks counts picks the database read cannot have seen", () => {
+        const now = 100_000;
+        const picks = [
+            { providerId: "a", at: now - 1_000, insertedAt: null },          // not inserted yet
+            { providerId: "a", at: now - 2_000, insertedAt: now - 500 },     // inserted after the read began
+            { providerId: "b", at: now - 3_000, insertedAt: now - 2_900 },   // inserted before: DB has it
+            { providerId: "c", at: now - 60_000, insertedAt: null }          // expired
+        ];
+        expect(withLocalPicks({ b: 1 }, picks, now - 800, now)).toEqual({ a: 2, b: 1 });
+    });
+
+    it("a simultaneous burst spreads once local picks are counted", () => {
+        const nodes = [cpu("fast", 5.2), cpu("mid", 2.6), cpu("slow", 1.1)];
+        const picks = [];
+        const got = [];
+        for (let i = 0; i < 3; i++) {
+            // Every request read the same empty in-flight snapshot from the DB.
+            const p = finishPick(nodes, { modelName: "m" }, withLocalPicks({}, picks, 0, 1));
+            picks.push({ providerId: p.id, at: 1, insertedAt: null });
+            got.push(p.id);
+        }
+        expect(got).toEqual(["fast", "mid", "slow"]);
     });
 
     it("requireFreeSlot only returns a node that can start now", () => {
