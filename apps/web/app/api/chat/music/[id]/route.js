@@ -1,5 +1,5 @@
 import { errorJson, fetchSpeechGateway } from "@/lib/chat/speech-service";
-import { getMusicJob, takeMusicJob } from "@/lib/chat/music-jobs";
+import { getMusicJob, musicJobs, takeMusicJob } from "@/lib/chat/music-jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +12,26 @@ export async function GET(_request, { params }) {
   if (!UUID.test(String(id))) return errorJson("Unknown music job", 404);
   const job = getMusicJob(id);
   if (!job) {
-    // This app restarted mid-song (a deploy) and forgot the job, but the
+    // Not this process's job: a restart (a deploy) or another container.
+    // The media store has its record, and the song once it is done.
+    const rec = await musicJobs.find(id);
+    if (rec?.status === "pending") {
+      return Response.json(
+        { id, status: "pending", seconds: Math.round((Date.now() - (rec.createdAt ?? Date.now())) / 1000), ...(rec.meta ?? {}), resumed: true },
+        { status: 202, headers: { "cache-control": "no-store" } }
+      );
+    }
+    if (rec?.status === "failed") return errorJson(rec.error || "Music generation failed", rec.httpStatus || 502);
+    if (rec?.status === "done") {
+      const bytes = await musicJobs.song(rec);
+      if (bytes) {
+        return new Response(bytes, {
+          status: 200,
+          headers: { "content-type": rec.result.contentType || "audio/mpeg", "cache-control": "no-store", ...(rec.result.headers ?? {}) }
+        });
+      }
+    }
+    // No record (an older job, or no store): the
     // c0mpute gateway (>= 0.2.90) keeps running it under our id: ask it.
     const res = await fetchSpeechGateway(`/v1/result/${id}`, { signal: AbortSignal.timeout(30_000) }).catch(() => null);
     if (res?.status === 202) {

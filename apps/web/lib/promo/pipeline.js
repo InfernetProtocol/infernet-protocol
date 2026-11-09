@@ -4,8 +4,15 @@
 // Frames, narration and the soundtrack run in parallel on c0mpute workers;
 // motion (img2vid) starts per frame as frames land, when a video worker is
 // online, and any scene without a clip gets Ken Burns camera moves instead.
+//
+// Every stage is idempotent and checkpointed on `job.checkpoint` (brand,
+// script, each frame, clip and narration line, the soundtrack), with each
+// artifact handed to `job.saveArtifact(name, bytes)` as it lands and
+// `job.checkpointed()` called after: the registry keeps both in the media
+// store. A job resumed after a restart (its files restored into job.dir)
+// skips whatever its checkpoint already has.
 
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { PROMO_STAGES, PROMO_STYLES, DEFAULT_STYLE } from "./request.js";
@@ -40,6 +47,12 @@ function stageBoard() {
  */
 export async function runPromo(job, request, deps) {
   const { style = DEFAULT_STYLE, vertical = false, brief = "", voice = "af_bella", music: wantMusic = true } = request;
+  const ck = (job.checkpoint ??= {});
+  ck.frames ??= {};
+  ck.clips ??= {};
+  ck.voice ??= {};
+  const keep = async (name, bytes) => job.saveArtifact?.(name, bytes);
+  const checkpoint = () => job.checkpointed?.();
   const stages = stageBoard();
   const publish = (patch = {}) => {
     job.meta = { ...job.meta, ...patch, stages: { ...stages } };
@@ -51,16 +64,43 @@ export async function runPromo(job, request, deps) {
   publish({ style, styleLabel: PROMO_STYLES[style]?.label, vertical });
 
   // 1. Brand.
-  set("brand", "running", `reading ${request.url}`);
-  const brand = await deps.brand(request.url);
-  const logoPath = brand.logo ? await deps.prepareLogo?.({ ...brand.logo, dir: job.dir }) : null;
+  let brand;
+  let logoPath = null;
+  if (ck.brand) {
+    brand = ck.brand.brand;
+    logoPath = ck.brand.logo ? path.join(job.dir, ck.brand.logo) : null;
+  } else {
+    set("brand", "running", `reading ${request.url}`);
+    const read = await deps.brand(request.url);
+    logoPath = read.logo ? await deps.prepareLogo?.({ ...read.logo, dir: job.dir }) : null;
+    if (logoPath) await keep(path.basename(logoPath), await readFile(logoPath));
+    const { logo: _bytes, ...rest } = read;
+    brand = rest;
+    ck.brand = { brand, logo: logoPath ? path.basename(logoPath) : null };
+    await checkpoint();
+  }
   set("brand", "done", `${brand.name}${logoPath ? " · logo" : ""} · ${brand.colors.primary}`);
   publish({ brand: { name: brand.name, tagline: brand.tagline, host: brand.host, url: brand.url, colors: brand.colors, logo: Boolean(logoPath) } });
 
   // 2. Storyboard.
-  set("script", "running", "writing the storyboard");
-  const { storyboard, writer } = await writeStoryboard({ brand, style, brief, vertical }, { stream: deps.stream, configured: deps.configured });
+  if (!ck.script) {
+    set("script", "running", "writing the storyboard");
+    ck.script = await writeStoryboard({ brand, style, brief, vertical }, { stream: deps.stream, configured: deps.configured });
+    await checkpoint();
+  }
+  const { storyboard, writer } = ck.script;
   const scenes = storyboard.scenes.map((s) => ({ ...s, frame: null, clip: null, voice: null, voiceSeconds: null }));
+  // What a run before a restart already made.
+  scenes.forEach((sc, i) => {
+    if (ck.clips[i]) {
+      sc.clip = path.join(job.dir, ck.clips[i].file);
+      sc.clipSeconds = ck.clips[i].seconds;
+    }
+    if (ck.voice[i]) {
+      sc.voice = path.join(job.dir, ck.voice[i].file);
+      sc.voiceSeconds = ck.voice[i].seconds;
+    }
+  });
   const planned = scenes.reduce((a, s) => a + s.duration, 0);
   set("script", "done", `${scenes.length} scenes · ~${Math.round(planned)}s${writer === "rules" ? " (template)" : ""}`);
   const publicScenes = () => scenes.map((s) => ({ caption: s.caption, narration: s.narration, duration: s.duration, frame: Boolean(s.frame), clip: Boolean(s.clip) }));
@@ -73,11 +113,11 @@ export async function runPromo(job, request, deps) {
 
   // 3a. Frames, then motion per frame.
   const videoCfg = deps.video ?? { enabled: false };
-  let videoState = videoCfg.enabled ? "unknown" : "off"; // unknown -> yes | no
+  let videoState = videoCfg.enabled ? ck.videoState ?? "unknown" : "off"; // unknown -> yes | no
   let videoProbe = null;
   const motionJobs = [];
   let framesDone = 0;
-  let clipsDone = 0;
+  let clipsDone = scenes.filter((sc) => sc.clip).length;
   set("frames", "running", `0/${scenes.length}`);
   set("motion", videoCfg.enabled ? "pending" : "skipped", videoCfg.enabled ? "waiting for frames" : "Ken Burns camera moves");
 
@@ -89,6 +129,8 @@ export async function runPromo(job, request, deps) {
         set("motion", "running", `img2vid scene ${i + 1}`);
         videoProbe = tryClip(i).then((ok) => {
           videoState = ok ? "yes" : "no";
+          ck.videoState = videoState;
+          checkpoint();
           if (!ok) set("motion", "skipped", "no video worker free: Ken Burns camera moves");
           return ok;
         });
@@ -102,6 +144,7 @@ export async function runPromo(job, request, deps) {
 
   async function tryClip(i) {
     const sc = scenes[i];
+    if (sc.clip) return true;
     const fps = 16;
     const frames = Math.min(81, Math.max(33, Math.round(sc.duration * fps / 4) * 4 + 1));
     try {
@@ -119,11 +162,15 @@ export async function runPromo(job, request, deps) {
         image_base64: sc.frameBytes.toString("base64")
       });
       if (!bytes || bytes.length < 1000) return false;
-      const file = path.join(job.dir, `clip-${i}.mp4`);
+      const name = `clip-${i}.mp4`;
+      const file = path.join(job.dir, name);
       await writeFile(file, bytes);
       sc.clip = file;
       sc.clipSeconds = (frames - 1) / fps;
       clipsDone++;
+      await keep(name, bytes);
+      ck.clips[i] = { file: name, seconds: sc.clipSeconds };
+      checkpoint();
       set("motion", "running", `${clipsDone}/${scenes.length} scenes animated (img2vid)`);
       publish({ scenes: publicScenes() });
       return true;
@@ -136,16 +183,35 @@ export async function runPromo(job, request, deps) {
   // Two at a time: the network has few image workers, and a worker handed
   // several renders at once slows every one of them past its deadline.
   const framesTask = mapLimit(scenes, Number(process.env.PROMO_FRAME_CONCURRENCY) || 2, async (sc, i) => {
+    if (ck.frames[i]) {
+      const file = path.join(job.dir, ck.frames[i]);
+      const png = await readFile(file).catch(() => null);
+      if (png?.length > 8) {
+        sc.frame = file;
+        sc.frameBytes = png;
+        framesDone++;
+        set("frames", "running", `${framesDone}/${scenes.length}`);
+        if (!sc.clip) motionJobs.push(animate(i));
+        return true;
+      }
+      delete ck.frames[i];
+    }
     const prompt = scenePrompt(storyboard, i, { style, colors: brand.colors, vertical });
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const png = await deps.gateway.image({ prompt, model: "z-image-turbo", ...img, steps: 8, seed });
+        // The request id lets a resumed job collect a frame the gateway
+        // finished after this process died, instead of drawing it again.
+        const png = await deps.gateway.image({ prompt, model: "z-image-turbo", ...img, steps: 8, seed }, { requestId: `${job.id}-frame-${i}-${attempt}`, resume: Boolean(job.resumed) && attempt === 1 });
         if (png?.length > 8) {
-          const file = path.join(job.dir, `frame-${i}.png`);
+          const name = `frame-${i}.png`;
+          const file = path.join(job.dir, name);
           await writeFile(file, png);
           sc.frame = file;
           sc.frameBytes = png;
           framesDone++;
+          await keep(name, png);
+          ck.frames[i] = name;
+          checkpoint();
           set("frames", "running", `${framesDone}/${scenes.length}`);
           publish({ scenes: publicScenes() });
           motionJobs.push(animate(i));
@@ -161,20 +227,29 @@ export async function runPromo(job, request, deps) {
 
   // 3b. Narration, one clip per scene so it lines up with its scene.
   const voiceTask = (async () => {
+    if (ck.voiceDone) {
+      const ok = scenes.filter((sc) => sc.voice).length;
+      set("voice", ok ? "done" : "failed", ok ? `${ok}/${scenes.length} lines · ${voice}` : "no TTS worker answered; captions only");
+      return;
+    }
     set("voice", "running", "Kokoro narration");
-    let ok = 0;
+    let ok = scenes.filter((sc) => sc.voice).length;
     await mapLimit(scenes, 3, async (sc, i) => {
-      if (!sc.narration) return;
+      if (!sc.narration || sc.voice) return;
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const wav = await deps.gateway.tts({ text: sc.narration, engine: "kokoro", voice, locale: "en-US", speed: 1.0 });
           const secs = wavSeconds(wav);
           if (secs) {
-            const file = path.join(job.dir, `voice-${i}.wav`);
+            const name = `voice-${i}.wav`;
+            const file = path.join(job.dir, name);
             await writeFile(file, wav);
             sc.voice = file;
             sc.voiceSeconds = secs;
             ok++;
+            await keep(name, wav);
+            ck.voice[i] = { file: name, seconds: secs };
+            checkpoint();
             set("voice", "running", `${ok}/${scenes.length} lines`);
             return;
           }
@@ -184,6 +259,8 @@ export async function runPromo(job, request, deps) {
         await sleep(5000);
       }
     });
+    ck.voiceDone = true;
+    await checkpoint();
     set("voice", ok ? "done" : "failed", ok ? `${ok}/${scenes.length} lines · ${voice}` : "no TTS worker answered; captions only");
   })();
 
@@ -193,21 +270,31 @@ export async function runPromo(job, request, deps) {
       set("music", "skipped", "off");
       return null;
     }
+    if (ck.music) {
+      set("music", ck.music.file ? "done" : "failed", ck.music.file ? "instrumental" : "no music worker answered; narration only");
+      return ck.music.file ? path.join(job.dir, ck.music.file) : null;
+    }
     const estimate = buildTimeline(scenes.map((s) => ({ duration: s.duration, voiceSeconds: s.narration ? s.narration.split(/\s+/).length / 2.6 : 0 }))).total;
     const duration = Math.min(180, Math.max(10, Math.ceil(estimate + 3)));
     set("music", "running", `ACE-Step ${duration}s instrumental`);
     try {
       const out = await deps.gateway.music(
         { prompt: musicCaption(storyboard, style), lyrics: "", duration, model: "ace-step-1.5", seed },
-        { requestId: job.id, onProgress: (line) => set("music", "running", line) }
+        { requestId: job.id, resume: Boolean(job.resumed), onProgress: (line) => set("music", "running", line) }
       );
       if (!out?.bytes?.length) throw new Error("empty soundtrack");
-      const file = path.join(job.dir, `music.${out.type === "audio/flac" ? "flac" : out.type === "audio/wav" ? "wav" : "mp3"}`);
+      const name = `music.${out.type === "audio/flac" ? "flac" : out.type === "audio/wav" ? "wav" : "mp3"}`;
+      const file = path.join(job.dir, name);
       await writeFile(file, out.bytes);
+      await keep(name, out.bytes);
+      ck.music = { file: name };
+      await checkpoint();
       set("music", "done", `${duration}s instrumental`);
       return file;
     } catch (e) {
       console.warn(`[promo] music: ${e?.message ?? e}`);
+      ck.music = { file: null };
+      await checkpoint();
       set("music", "failed", "no music worker answered; narration only");
       return null;
     }
@@ -230,6 +317,7 @@ export async function runPromo(job, request, deps) {
     let timer;
     await Promise.race([Promise.allSettled(motionJobs), new Promise((r) => { timer = setTimeout(r, budget); })]);
     clearTimeout(timer);
+    if (videoState === "no" && stages.motion.state !== "skipped") set("motion", "skipped", "no video worker free: Ken Burns camera moves");
     if (videoState === "yes") set("motion", "done", `${clipsDone}/${scenes.length} scenes img2vid${clipsDone < scenes.length ? ", the rest Ken Burns" : ""}`);
   }
 

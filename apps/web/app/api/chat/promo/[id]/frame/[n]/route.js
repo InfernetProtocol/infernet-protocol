@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { errorJson } from "@/lib/chat/speech-service";
 import { isPromoId, promoJobs } from "@/lib/promo/jobs";
 
@@ -11,10 +10,12 @@ export async function GET(_request, { params }) {
   const { id, n } = await params;
   const i = Number(n);
   if (!isPromoId(id) || !Number.isInteger(i) || i < 0 || i > 15) return errorJson("Unknown frame", 404);
-  const job = promoJobs.get(id);
+  const job = await promoJobs.find(id);
   if (!job) return errorJson("This promo expired", 404);
   try {
-    const png = await readFile(path.join(job.dir, `frame-${i}.png`));
+    const file = await promoJobs.file(job, `frame-${i}.png`);
+    if (!file) throw new Error("not drawn");
+    const png = await readFile(file);
     return new Response(png, { status: 200, headers: { "content-type": "image/png", "cache-control": "private, max-age=3600" } });
   } catch {
     return errorJson("Not drawn yet", 404);
