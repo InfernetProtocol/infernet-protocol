@@ -1,7 +1,7 @@
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor, paidLimit } from "@/lib/trusted-clients";
-import { postSpeechGatewayLong, readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
+import { fetchSpeechGateway, postSpeechGatewayLong, readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
@@ -25,12 +25,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * auto-update, which cuts in-flight requests: "socket hang up") and 503 (no
  * worker free, or the one that took it was killed). A song job is idempotent.
  */
-async function postWithRetries(spec, { attempts = 3 } = {}) {
+async function postWithRetries(spec, { attempts = 3, requestId = null, onProgress = null } = {}) {
   let last = null;
+  // While the gateway works, read its live stage for this request (which
+  // node won, its ETA, queued, retrying) so the chat can show it. Gateways
+  // older than c0mpute 0.2.85 answer 404 and the chat keeps its timer.
+  const watch = requestId && onProgress ? watchProgress(requestId, onProgress) : null;
+  try {
+    return await attemptAll();
+  } finally {
+    watch?.stop();
+  }
+
+  async function attemptAll() {
   for (let i = 1; i <= attempts; i++) {
     try {
       // node:http, not fetch: undici gives up on headers after 300 s.
-      const response = await postSpeechGatewayLong("/v1/music", spec, { timeoutMs: 30 * 60 * 1000 });
+      const response = await postSpeechGatewayLong("/v1/music", spec, {
+        timeoutMs: 30 * 60 * 1000,
+        headers: requestId ? { "x-request-id": requestId } : {}
+      });
       if (!response) throw Object.assign(new Error("Music generation is not configured"), { status: 503, final: true });
       if (response.status !== 503 || i === attempts) return response;
       last = response;
@@ -41,9 +55,34 @@ async function postWithRetries(spec, { attempts = 3 } = {}) {
         throw Object.assign(new Error(`Music generation failed: ${error?.message ?? error}`), { status: 502 });
       }
     }
+    onProgress?.({ stage: "retrying", attempt: i + 1, detail: "the gateway connection dropped or no worker was free" });
     await sleep(i * 10_000);
   }
   return last;
+  }
+}
+
+/** Poll the gateway's GET /v1/progress/<id> every 5 s until stopped. */
+function watchProgress(requestId, onProgress) {
+  let stopped = false;
+  (async () => {
+    while (!stopped) {
+      await sleep(5000);
+      if (stopped) break;
+      try {
+        const res = await fetchSpeechGateway(`/v1/progress/${encodeURIComponent(requestId)}`, {
+          signal: AbortSignal.timeout(4000)
+        });
+        if (res?.ok) {
+          const p = await res.json().catch(() => null);
+          if (!stopped && p && typeof p.stage === "string") onProgress(p);
+        }
+      } catch {
+        // Progress is best effort; the song request itself decides the outcome.
+      }
+    }
+  })();
+  return { stop: () => { stopped = true; } };
 }
 
 /**
@@ -103,7 +142,23 @@ export async function POST(request) {
     const spec = toGatewaySpec({ ...parsed.request, ...written });
     job.meta = { stage: "composing", caption: spec.prompt, lyrics: spec.lyrics, duration: spec.duration, writer: written.writer };
 
-    const response = await postWithRetries(spec);
+    const response = await postWithRetries(spec, {
+      requestId: job.id,
+      onProgress: (p) => {
+        job.meta = {
+          ...job.meta,
+          node: {
+            stage: p.stage,
+            worker: typeof p.worker === "string" ? p.worker : undefined,
+            eta_s: Number.isFinite(p.eta_s) ? p.eta_s : undefined,
+            elapsed_s: Number.isFinite(p.elapsed_s) ? p.elapsed_s : undefined,
+            stage_elapsed_s: Number.isFinite(p.stage_elapsed_s) ? p.stage_elapsed_s : undefined,
+            attempt: Number.isFinite(p.attempt) ? p.attempt : undefined,
+            detail: typeof p.detail === "string" ? p.detail.slice(0, 200) : undefined
+          }
+        };
+      }
+    });
     if (response.status !== 200) {
       const busy = response.status === 503;
       throw Object.assign(

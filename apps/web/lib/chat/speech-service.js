@@ -61,7 +61,7 @@ export async function readLimitedBody(request, maxBytes) {
  * longer. node:http waits as long as `timeoutMs`.
  * Resolves { status, headers, body: Buffer } or null when unconfigured.
  */
-export async function postSpeechGatewayLong(path, payload, { timeoutMs = 14 * 60 * 1000 } = {}) {
+export async function postSpeechGatewayLong(path, payload, { timeoutMs = 14 * 60 * 1000, headers: extraHeaders = {} } = {}) {
   const service = speechGateway();
   if (!service) return null;
   const url = new URL(`${service.baseUrl}${path}`);
@@ -74,6 +74,7 @@ export async function postSpeechGatewayLong(path, payload, { timeoutMs = 14 * 60
       {
         method: "POST",
         headers: {
+          ...extraHeaders,
           authorization: `Bearer ${service.token}`,
           "content-type": "application/json",
           "content-length": body.length
