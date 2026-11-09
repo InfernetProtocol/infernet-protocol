@@ -120,3 +120,37 @@ export function durationFromBrief(text) {
   if (m) return Math.round(Number(m[1]) * 60);
   return null;
 }
+
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/**
+ * One line for the chat from the c0mpute gateway's live progress for a song
+ * ({ stage, worker, eta_s, stage_elapsed_s, attempt, detail }).
+ */
+export function describeNodeProgress(p) {
+  const node = typeof p?.worker === "string" ? `node …${p.worker.slice(-8)}` : "a node";
+  const retry = (p?.attempt ?? 1) > 1 ? ` (attempt ${p.attempt})` : "";
+  const inStage = Number.isFinite(p?.stage_elapsed_s) ? p.stage_elapsed_s : 0;
+  switch (p?.stage) {
+    case "starting":
+    case "finding_worker":
+      return `Finding a c0mpute music worker${retry}`;
+    case "queued":
+      return `Every music worker is busy; queued ${mmss(inStage)}`;
+    case "rendering": {
+      const left = Number.isFinite(p.eta_s) ? Math.max(0, p.eta_s - inStage) : null;
+      const eta = left === null ? "" : left > 0 ? ` · ~${mmss(left)} left (node's estimate)` : " · past the node's estimate, still working";
+      return `Rendering on ${node}${retry} · ${mmss(inStage)} in${eta}`;
+    }
+    case "fetching_result":
+      return `Song finished on ${node}; fetching it`;
+    case "retrying":
+      return `${p.worker ? node : "The worker"} failed${p.detail ? ` (${p.detail})` : ""}; trying another worker`;
+    case "done":
+      return "Song ready";
+    case "failed":
+      return "Song failed";
+    default:
+      return "Composing on a c0mpute worker";
+  }
+}

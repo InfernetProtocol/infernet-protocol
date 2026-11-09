@@ -114,6 +114,20 @@ describe("music briefs", () => {
   });
 });
 
+import { describeNodeProgress } from "@/lib/billing/music";
+
+describe("node progress line", () => {
+  it("names the node, its ETA, queueing and retries", () => {
+    expect(describeNodeProgress({ stage: "rendering", worker: "12D3KooWG9TmqCHN63oFoxb2bwTGRYqwW8e1C2Ua9e14XtPja8R9", eta_s: 600, stage_elapsed_s: 125 }))
+      .toBe("Rendering on node …XtPja8R9 · 2:05 in · ~7:55 left (node's estimate)");
+    expect(describeNodeProgress({ stage: "rendering", worker: "abcdefgh12345678", eta_s: 60, stage_elapsed_s: 90 })).toContain("past the node's estimate");
+    expect(describeNodeProgress({ stage: "queued", stage_elapsed_s: 61 })).toBe("Every music worker is busy; queued 1:01");
+    expect(describeNodeProgress({ stage: "finding_worker", attempt: 2 })).toBe("Finding a c0mpute music worker (attempt 2)");
+    expect(describeNodeProgress({ stage: "retrying", detail: "no worker" })).toBe("The worker failed (no worker); trying another worker");
+    expect(describeNodeProgress(null)).toBe("Composing on a c0mpute worker");
+  });
+});
+
 describe("chat music job registry", () => {
   it("reports pending, then hands the audio out exactly once", async () => {
     let finish;

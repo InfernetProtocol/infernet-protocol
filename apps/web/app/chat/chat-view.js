@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { parseImageCommand } from "@/lib/billing/image";
-import { parseMusicCommand } from "@/lib/billing/music";
+import { describeNodeProgress, parseMusicCommand } from "@/lib/billing/music";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -659,7 +659,7 @@ export default function ChatView({ initialModels = [] }) {
           const status =
             p?.stage === "writing"
               ? `Writing lyrics and a style from your brief… ${secs}s`
-              : `${working(secs)}${meta?.duration ? ` · ${meta.duration}s song` : ""}${
+              : `${p?.node ? `${describeNodeProgress(p.node)} · ${secs}s total` : working(secs)}${meta?.duration ? ` · ${meta.duration}s song` : ""}${
                   meta?.lyrics ? `\n\nLyrics:\n${meta.lyrics}` : meta ? "\n\n(instrumental)" : ""
                 }`;
           setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status })));
