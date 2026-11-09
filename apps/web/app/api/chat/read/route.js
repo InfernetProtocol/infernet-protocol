@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { findDocumentUrls } from "@/lib/doc-urls";
 import { readDocument, documentContext, ReadError } from "@/lib/read-url";
+import { siteBrief } from "@/lib/site-brief";
+import { brandContext } from "@/lib/brand-prompt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,20 +36,38 @@ export async function POST(request) {
     if (daily.count >= DAILY_CAP) return err(429, "Document reading is at its daily limit. It resets at 00:00 UTC.");
     daily.count += 1;
 
-    try {
-        const doc = await readDocument(url);
+    const [docR, briefR] = await Promise.allSettled([readDocument(url), siteBrief(url)]);
+    const brief = briefR.status === "fulfilled" ? briefR.value : null;
+    const profile = brandContext(brief);
+
+    if (docR.status === "fulfilled") {
+        const doc = docR.value;
+        const context = profile ? `${documentContext(doc)}\n\n${profile}` : documentContext(doc);
         return NextResponse.json({
             url,
             finalUrl: doc.finalUrl ?? url,
-            title: doc.title ?? url,
+            title: doc.title ?? brief?.title ?? url,
             kind: doc.kind,
             pages: doc.pages ?? null,
             chars: doc.chars ?? doc.text.length,
-            context: documentContext(doc)
+            brief,
+            context
         });
-    } catch (e) {
-        const status = e instanceof ReadError ? e.status : 502;
-        if (!(e instanceof ReadError)) console.error("[chat/read]", e?.message ?? e);
-        return err(status, e?.message ?? "The document could not be read.");
     }
+    if (profile) {
+        return NextResponse.json({
+            url,
+            finalUrl: brief.finalUrl ?? url,
+            title: brief.title ?? brief.name ?? url,
+            kind: "site profile",
+            pages: null,
+            chars: profile.length,
+            brief,
+            context: `The user linked ${brief.finalUrl ?? url}. Its full text could not be read just now, but its site profile is below. Answer from it and do not invent details it does not contain.\n\n${profile}`
+        });
+    }
+    const e = docR.reason;
+    const status = e instanceof ReadError ? e.status : 502;
+    if (!(e instanceof ReadError)) console.error("[chat/read]", e?.message ?? e);
+    return err(status, e?.message ?? "The document could not be read.");
 }
