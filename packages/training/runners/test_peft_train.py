@@ -103,5 +103,28 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(pt.DATASET_FORMATS, ("text", "messages"))
 
 
+
+class DtypeTests(unittest.TestCase):
+    def test_explicit_dtype_is_honoured(self):
+        for want in ("float32", "bfloat16", "float16"):
+            self.assertEqual(pt.resolve_dtype(want, "cpu"), want)
+        self.assertEqual(pt.resolve_dtype("bf16", "cpu"), "bfloat16")
+        self.assertEqual(pt.resolve_dtype("FP32", "cuda", cuda_bf16=True), "float32")
+
+    def test_auto_picks_bf16_only_where_native(self):
+        self.assertEqual(pt.resolve_dtype(None, "cpu", cpu_bf16=True), "bfloat16")
+        self.assertEqual(pt.resolve_dtype("auto", "cpu", cpu_bf16=False), "float32")
+        self.assertEqual(pt.resolve_dtype(None, "cuda", cuda_bf16=True), "bfloat16")
+        self.assertEqual(pt.resolve_dtype(None, "cuda", cuda_bf16=False, cpu_bf16=True), "float32")
+
+    def test_unknown_dtype_fails_loudly(self):
+        with self.assertRaises(ValueError):
+            pt.resolve_dtype("int8", "cpu")
+
+    def test_cpu_bf16_detection(self):
+        self.assertTrue(pt.cpu_has_bf16("flags\t\t: fpu sse avx2 avx512f avx512_bf16\n"))
+        self.assertTrue(pt.cpu_has_bf16("Features\t: fp asimd bf16 i8mm\n"))
+        self.assertFalse(pt.cpu_has_bf16("flags\t\t: fpu sse avx2 avx512f\n"))
+
 if __name__ == "__main__":
     unittest.main()
