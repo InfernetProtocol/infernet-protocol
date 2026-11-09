@@ -2,16 +2,13 @@ import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor, paidLimit } from "@/lib/trusted-clients";
 import { readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
-import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
+import { resolveBillingCaller, authorizeInteractive } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
-import { streamChatCompletion, isNimConfigured } from "@infernetprotocol/nim-adapter";
 import { PROMO_MODEL, promoPriceMicro, validatePromoRequest } from "@/lib/promo/request";
 import { promoJobs } from "@/lib/promo/jobs";
-import { promoBrand } from "@/lib/promo/brand";
-import { promoGateway } from "@/lib/promo/gateway";
-import { runPromo } from "@/lib/promo/pipeline";
-import { hasFfmpeg, prepareLogo, renderPromo } from "@/lib/promo/assemble";
+import { promoRunner } from "@/lib/promo/run";
+import { hasFfmpeg } from "@/lib/promo/assemble";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,18 +16,6 @@ export const dynamic = "force-dynamic";
 // A promo holds several workers for minutes and renders here with ffmpeg:
 // strangers get two an hour on top of the daily free allowance.
 const limit = rateLimit({ windowMs: 60 * 60 * 1000, max: 2 });
-
-function videoConfig(env = process.env) {
-  const num = (k, d) => (Number.isFinite(Number(env[k])) && Number(env[k]) > 0 ? Math.floor(Number(env[k])) : d);
-  return {
-    enabled: env.PROMO_VIDEO !== "0",
-    model: env.PROMO_VIDEO_MODEL || "wan2.2-ti2v-5b",
-    width: num("PROMO_VIDEO_WIDTH", 832),
-    height: num("PROMO_VIDEO_HEIGHT", 480),
-    steps: num("PROMO_VIDEO_STEPS", 20),
-    budgetMs: num("PROMO_MOTION_BUDGET_S", 20 * 60) * 1000
-  };
-}
 
 /**
  * POST /api/chat/promo  { url, style?, vertical?, brief?, voice?, music? }
@@ -81,25 +66,10 @@ export async function POST(request) {
     if (!free.ok) return errorJson(freeLimitMessage(free.limit, free), 429);
   }
 
-  const userId = payer.userId;
-  const chargeMode = billing.mode;
-  const id = promoJobs.start(async (job) => {
-    const result = await runPromo(job, parsed.request, {
-      brand: promoBrand,
-      prepareLogo,
-      render: renderPromo,
-      gateway: promoGateway,
-      stream: streamChatCompletion,
-      configured: isNimConfigured(),
-      video: videoConfig()
-    });
-    if (chargeMode === "balance") {
-      const costMicro = promoPriceMicro({ frames: result.frames, music: result.music, clips: result.clips });
-      const charge = await chargeImageJob({ userId, jobId: job.id, costMicro });
-      job.meta = { ...job.meta, charged_usd: charge?.charged ? charge.charged_usd : null };
-    }
-    return result;
-  });
+  // The record keeps the request and who pays, so a deploy mid-promo
+  // resumes it (lib/promo/run.js resumePromos) instead of losing it.
+  const billingRecord = { mode: billing.mode, userId: payer.userId ?? null };
+  const id = promoJobs.start(promoRunner(parsed.request, billingRecord), { request: parsed.request, billing: billingRecord });
   return Response.json(
     { id, status: "pending", poll: `/api/chat/promo/${id}` },
     { status: 202, headers: { "cache-control": "no-store" } }

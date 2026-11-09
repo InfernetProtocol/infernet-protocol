@@ -9,9 +9,10 @@ export const dynamic = "force-dynamic";
 export async function GET(_request, { params }) {
   const { id } = await params;
   if (!isPromoId(id)) return errorJson("Unknown promo job", 404);
-  const job = promoJobs.get(id);
+  const job = await promoJobs.find(id);
   if (!job?.result?.srt) return errorJson("No captions (yet)", 404);
-  const srt = await readFile(job.result.srt).catch(() => null);
+  const file = await promoJobs.file(job, "promo.srt");
+  const srt = file ? await readFile(file).catch(() => null) : null;
   if (!srt) return errorJson("No captions", 404);
   return new Response(srt, {
     status: 200,

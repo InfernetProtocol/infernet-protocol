@@ -3,8 +3,9 @@
 //
 // A job takes minutes on a c0mpute worker and nginx cuts a request at 300 s,
 // so the POST route starts the job and returns an id, and the page polls
-// GET .../<id>. Results live in this process only, for `ttlMs`: a deploy
-// mid-job loses it and the page reports that.
+// GET .../<id>. This registry is the in-process view, for `ttlMs`; music
+// jobs are also kept in the media store (music-jobs.js, durable-jobs.js) so
+// a deploy mid-song resumes the job instead of losing it.
 
 import { randomUUID } from "node:crypto";
 
@@ -22,10 +23,10 @@ export function createJobRegistry({ ttlMs = 15 * 60 * 1000, maxJobs = 200 } = {}
     while (jobs.size > maxJobs) jobs.delete(jobs.keys().next().value);
   }
 
-  function start(run, { now = Date.now() } = {}) {
+  /** `id`/`createdAt` are given when a job is resumed under its old id. */
+  function start(run, { now = Date.now(), id = randomUUID(), createdAt = now } = {}) {
     sweep(now);
-    const id = randomUUID();
-    const job = { id, createdAt: now, status: "pending", headers: {}, error: null, httpStatus: 0 };
+    const job = { id, createdAt, status: "pending", headers: {}, error: null, httpStatus: 0 };
     jobs.set(id, job);
     Promise.resolve()
       // `run` gets the job, so it can publish progress (job.meta) to polls.

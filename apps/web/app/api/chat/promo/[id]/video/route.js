@@ -14,11 +14,11 @@ export const dynamic = "force-dynamic";
 export async function GET(request, { params }) {
   const { id } = await params;
   if (!isPromoId(id)) return errorJson("Unknown promo job", 404);
-  const job = promoJobs.get(id);
-  if (!job) return errorJson("This promo expired or the server restarted", 404);
+  const job = await promoJobs.find(id);
+  if (!job) return errorJson("This promo expired", 404);
   if (job.status !== "done" || !job.result?.video) return errorJson("The promo is not finished yet", 409);
-  const file = job.result.video;
-  const size = (await stat(file).catch(() => null))?.size;
+  const file = await promoJobs.file(job, "promo.mp4");
+  const size = file ? (await stat(file).catch(() => null))?.size : 0;
   if (!size) return errorJson("The promo file is gone", 410);
   const download = new URL(request.url).searchParams.get("download") === "1";
   const headers = {

@@ -11,8 +11,8 @@ export const dynamic = "force-dynamic";
 export async function GET(_request, { params }) {
   const { id } = await params;
   if (!isPromoId(id)) return errorJson("Unknown promo job", 404);
-  const job = promoJobs.get(id);
-  if (!job) return errorJson("This promo expired or the server restarted; try again", 404);
+  const job = await promoJobs.find(id);
+  if (!job) return errorJson("This promo expired; make a new one", 404);
   const body = publicJob(job);
   if (job.status === "failed") return Response.json(body, { status: job.httpStatus || 502, headers: { "cache-control": "no-store" } });
   return Response.json(body, { status: job.status === "done" ? 200 : 202, headers: { "cache-control": "no-store" } });

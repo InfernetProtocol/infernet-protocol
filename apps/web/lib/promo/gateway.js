@@ -5,7 +5,7 @@ import "server-only";
 // workers, narration on TTS workers, the soundtrack on music workers and
 // img2vid clips on video workers.
 
-import { fetchSpeechGateway, postSpeechGatewayLong } from "@/lib/chat/speech-service";
+import { awaitGatewayResult, fetchSpeechGateway, postSpeechGatewayLong } from "@/lib/chat/speech-service";
 import { describeNodeProgress } from "@/lib/billing/music";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -24,8 +24,21 @@ async function post(path, body, timeoutMs, headers) {
   return response;
 }
 
-export async function image(spec) {
-  const r = await post("/v1/images", spec, 15 * 60 * 1000);
+/**
+ * A result the gateway (c0mpute >= 0.2.90) kept for `requestId` after the
+ * caller went away: a job resumed after a deploy collects it instead of
+ * paying for the work twice. Null when the gateway never saw the id.
+ */
+async function kept(requestId, timeoutMs) {
+  if (!requestId) return null;
+  const r = await awaitGatewayResult(requestId, { timeoutMs }).catch(() => null);
+  return r?.status === 200 ? r : null;
+}
+
+export async function image(spec, { requestId = null, resume = false } = {}) {
+  const old = resume ? await kept(requestId, 12 * 60 * 1000) : null;
+  if (old?.body?.length > 8) return old.body;
+  const r = await post("/v1/images", spec, 15 * 60 * 1000, requestId ? { "x-request-id": requestId } : {});
   if (r.status === 200) return r.body;
   throw fail("image", r);
 }
@@ -43,7 +56,7 @@ export async function video(spec) {
 }
 
 /** The soundtrack, with the gateway's live node progress relayed as one line. */
-export async function music(spec, { requestId = null, onProgress = null } = {}) {
+export async function music(spec, { requestId = null, onProgress = null, resume = false } = {}) {
   let stopped = false;
   if (requestId && onProgress) {
     (async () => {
@@ -61,6 +74,8 @@ export async function music(spec, { requestId = null, onProgress = null } = {}) 
     })();
   }
   try {
+    const old = resume ? await kept(requestId, 25 * 60 * 1000) : null;
+    if (old?.body?.length) return { bytes: old.body, type: String(old.headers["content-type"] ?? "audio/mpeg").split(";")[0].trim() };
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const r = await post("/v1/music", spec, 25 * 60 * 1000, requestId ? { "x-request-id": requestId } : {});
