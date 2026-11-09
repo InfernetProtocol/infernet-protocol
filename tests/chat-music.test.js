@@ -172,6 +172,42 @@ describe("node progress line", () => {
   });
 });
 
+import { createServer } from "node:http";
+import { awaitGatewayResult } from "@/lib/chat/speech-service";
+
+describe("songs survive an app restart (gateway /v1/result)", () => {
+  it("waits through 202s, returns the finished song, and null for an unknown id", async () => {
+    let calls = 0;
+    const server = createServer((req, res) => {
+      if (req.url === "/v1/result/song-1") {
+        calls += 1;
+        if (calls < 3) { res.writeHead(202, { "content-type": "application/json" }); res.end('{"stage":"rendering"}'); return; }
+        res.writeHead(200, { "content-type": "audio/mpeg", "x-c0mpute-worker-peer-id": "w1" });
+        res.end(Buffer.from("ID3-song"));
+        return;
+      }
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end('{"error":"no such request"}');
+    });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    const prev = { url: process.env.C0MPUTE_SPEECH_URL, token: process.env.C0MPUTE_SPEECH_TOKEN };
+    process.env.C0MPUTE_SPEECH_URL = `http://127.0.0.1:${server.address().port}`;
+    process.env.C0MPUTE_SPEECH_TOKEN = "tok";
+    try {
+      const r = await awaitGatewayResult("song-1", { everyMs: 5, timeoutMs: 5000 });
+      expect(r.status).toBe(200);
+      expect(r.headers["content-type"]).toBe("audio/mpeg");
+      expect(r.body.toString()).toBe("ID3-song");
+      expect(calls).toBe(3);
+      expect(await awaitGatewayResult("nope", { everyMs: 5, timeoutMs: 1000 })).toBeNull();
+    } finally {
+      process.env.C0MPUTE_SPEECH_URL = prev.url;
+      process.env.C0MPUTE_SPEECH_TOKEN = prev.token;
+      server.close();
+    }
+  });
+});
+
 describe("chat music job registry", () => {
   it("reports pending, then hands the audio out exactly once", async () => {
     let finish;

@@ -1,7 +1,7 @@
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor, paidLimit } from "@/lib/trusted-clients";
-import { fetchSpeechGateway, postSpeechGatewayLong, readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
+import { awaitGatewayResult, fetchSpeechGateway, postSpeechGatewayLong, readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery, consumeOperatorSong } from "@/lib/data/free-tier";
 import { freeLimitMessage, songLimitMessage } from "@/lib/billing/free-tier";
@@ -52,6 +52,13 @@ async function postWithRetries(spec, { attempts = 3, requestId = null, onProgres
     } catch (error) {
       if (error?.final) throw error;
       console.warn(`[chat/music] gateway attempt ${i} failed: ${error?.message ?? error}`);
+      // The connection dropped, but a c0mpute >= 0.2.90 gateway keeps the
+      // song running under our request id: wait for it instead of starting
+      // a second one.
+      if (requestId) {
+        const kept = await awaitGatewayResult(requestId);
+        if (kept) return kept;
+      }
       if (i === attempts) {
         throw Object.assign(new Error(`Music generation failed: ${error?.message ?? error}`), { status: 502 });
       }
@@ -70,9 +77,16 @@ async function postWithRetries(spec, { attempts = 3, requestId = null, onProgres
  */
 async function makeCover(id, { caption, title }) {
   const body = { prompt: coverArtPrompt({ caption, title }), model: IMAGE_MODEL, ...IMAGE_SIZES.square, steps: 8 };
+  const coverId = `${id}-cover`;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const response = await postSpeechGatewayLong("/v1/images", body, { timeoutMs: 15 * 60 * 1000 });
+      let response = await postSpeechGatewayLong("/v1/images", body, {
+        timeoutMs: 15 * 60 * 1000,
+        headers: { "x-request-id": coverId }
+      }).catch(async (error) => {
+        console.warn(`[chat/music] cover attempt ${attempt} failed: ${error?.message ?? error}`);
+        return awaitGatewayResult(coverId, { timeoutMs: 12 * 60 * 1000 });
+      });
       if (response?.status === 200 && response.body?.length > 8) {
         setMusicCover(id, new Uint8Array(response.body));
         return true;

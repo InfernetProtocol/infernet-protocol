@@ -92,3 +92,32 @@ export async function postSpeechGatewayLong(path, payload, { timeoutMs = 14 * 60
     req.end(body);
   });
 }
+
+/**
+ * Wait for a request the gateway is still running detached (c0mpute >=
+ * 0.2.90): poll GET /v1/result/<id> until it is done. Resolves the same
+ * { status, headers, body } shape as postSpeechGatewayLong, or null when the
+ * gateway does not know the request (older gateway, or it never started).
+ */
+export async function awaitGatewayResult(requestId, { timeoutMs = 30 * 60 * 1000, everyMs = 10_000 } = {}) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    let res;
+    try {
+      res = await fetchSpeechGateway(`/v1/result/${encodeURIComponent(requestId)}`, { signal: AbortSignal.timeout(60_000) });
+    } catch {
+      await new Promise((r) => setTimeout(r, everyMs));
+      continue;
+    }
+    if (!res) return null;
+    if (res.status === 404) return null;
+    if (res.status === 202) {
+      await res.body?.cancel().catch(() => {});
+      await new Promise((r) => setTimeout(r, everyMs));
+      continue;
+    }
+    const body = Buffer.from(await res.arrayBuffer());
+    return { status: res.status, headers: Object.fromEntries(res.headers), body };
+  }
+  return null;
+}

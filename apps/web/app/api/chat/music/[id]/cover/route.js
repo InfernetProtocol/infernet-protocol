@@ -1,4 +1,4 @@
-import { errorJson } from "@/lib/chat/speech-service";
+import { errorJson, fetchSpeechGateway } from "@/lib/chat/speech-service";
 import { getMusicCover } from "@/lib/chat/music-jobs";
 
 export const runtime = "nodejs";
@@ -14,6 +14,14 @@ export async function GET(_request, { params }) {
   const { id } = await params;
   if (!UUID.test(String(id))) return errorJson("Unknown music job", 404);
   const png = getMusicCover(id);
-  if (!png) return errorJson("No cover art for this song (yet)", 404);
+  if (!png) {
+    // After a restart the cover lives only on the gateway (>= 0.2.90).
+    const res = await fetchSpeechGateway(`/v1/result/${id}-cover`, { signal: AbortSignal.timeout(30_000) }).catch(() => null);
+    if (res?.status === 200 && (res.headers.get("content-type") ?? "").startsWith("image/png")) {
+      return new Response(res.body, { status: 200, headers: { "content-type": "image/png", "cache-control": "private, max-age=3600" } });
+    }
+    await res?.body?.cancel().catch(() => {});
+    return errorJson("No cover art for this song (yet)", 404);
+  }
   return new Response(png, { status: 200, headers: { "content-type": "image/png", "cache-control": "private, max-age=3600" } });
 }
