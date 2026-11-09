@@ -160,7 +160,7 @@ export async function runPromo(job, request, deps) {
         seed,
         image_format: "png",
         image_base64: sc.frameBytes.toString("base64")
-      });
+      }, { maxWaitS: (videoCfg.budgetMs ?? 20 * 60 * 1000) / 1000 });
       if (!bytes || bytes.length < 1000) return false;
       const name = `clip-${i}.mp4`;
       const file = path.join(job.dir, name);

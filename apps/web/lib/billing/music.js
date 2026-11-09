@@ -157,8 +157,12 @@ export function describeNodeProgress(p) {
     case "starting":
     case "finding_worker":
       return `Finding a c0mpute music worker${retry}`;
-    case "queued":
-      return `Every music worker is busy; queued ${mmss(inStage)}`;
+    case "queued": {
+      // The gateway holds the song in its queue (up to 2 h) until a music
+      // worker is free; nothing has failed.
+      const pos = Number.isFinite(p?.queue_position) ? ` (#${p.queue_position} in line)` : "";
+      return `Queued for a c0mpute music worker${pos} · ${mmss(inStage)}`;
+    }
     case "rendering": {
       const left = Number.isFinite(p.eta_s) ? Math.max(0, p.eta_s - inStage) : null;
       const eta = left === null ? "" : left > 0 ? ` · ~${mmss(left)} left (node's estimate)` : " · past the node's estimate, still working";

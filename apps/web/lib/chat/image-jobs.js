@@ -6,8 +6,11 @@
 // IMAGE_JOB_TTL_MS: a deploy mid-job loses it and the page reports that.
 
 import { randomUUID } from "node:crypto";
+import { GATEWAY_JOB_LIMIT_MS } from "@/lib/chat/speech-service";
 
-export const IMAGE_JOB_TTL_MS = 15 * 60 * 1000;
+// A job may wait in the gateway's queue for a worker (2 h by default) before
+// it renders; it stays readable that long plus a margin to collect it.
+export const IMAGE_JOB_TTL_MS = GATEWAY_JOB_LIMIT_MS + 30 * 60 * 1000;
 const MAX_JOBS = 200;
 const jobs = new Map();
 
@@ -19,16 +22,18 @@ function sweep(now = Date.now()) {
 }
 
 /**
- * Start `run()` in the background. It must resolve to
+ * Start `run(job)` in the background. It must resolve to
  * { png: Uint8Array, headers: object } or throw an Error with `.status`.
+ * `job.id` doubles as the gateway request id; `job.meta` carries the
+ * gateway's live progress (queued, rendering) for the poll route.
  */
 export function startImageJob(run, { now = Date.now() } = {}) {
   sweep(now);
   const id = randomUUID();
-  const job = { id, createdAt: now, status: "pending", png: null, headers: {}, error: null, httpStatus: 0 };
+  const job = { id, createdAt: now, status: "pending", png: null, headers: {}, error: null, httpStatus: 0, meta: null };
   jobs.set(id, job);
   Promise.resolve()
-    .then(run)
+    .then(() => run(job))
     .then(({ png, headers }) => {
       job.status = "done";
       job.png = png;

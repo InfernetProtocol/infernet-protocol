@@ -6,7 +6,7 @@ import {
   parseMusicCommand,
   validateMusicRequest
 } from "@/lib/billing/music";
-import { startMusicJob, getMusicJob, takeMusicJob } from "@/lib/chat/music-jobs";
+import { startMusicJob, getMusicJob, takeMusicJob, MUSIC_JOB_TTL_MS } from "@/lib/chat/music-jobs";
 
 describe("chat music helpers", () => {
   it("parses /music and /song, with optional lyrics", () => {
@@ -132,7 +132,9 @@ describe("cover art", () => {
   it("keeps covers apart from the song job, until they expire", () => {
     setMusicCover("c1", new Uint8Array([1]), { now: 0 });
     expect(getMusicCover("c1", { now: 1000 })).toEqual(new Uint8Array([1]));
-    expect(getMusicCover("c1", { now: 46 * 60 * 1000 })).toBeNull();
+    // A song may sit in the gateway's queue for up to 2 h: still kept at 90 min.
+    expect(getMusicCover("c1", { now: 90 * 60 * 1000 })).toEqual(new Uint8Array([1]));
+    expect(getMusicCover("c1", { now: MUSIC_JOB_TTL_MS + 1 })).toBeNull();
     expect(getMusicCover("nope")).toBeNull();
   });
 
@@ -165,7 +167,8 @@ describe("node progress line", () => {
     expect(describeNodeProgress({ stage: "rendering", worker: "12D3KooWG9TmqCHN63oFoxb2bwTGRYqwW8e1C2Ua9e14XtPja8R9", eta_s: 600, stage_elapsed_s: 125 }))
       .toBe("Rendering on node …XtPja8R9 · 2:05 in · ~7:55 left (node's estimate)");
     expect(describeNodeProgress({ stage: "rendering", worker: "abcdefgh12345678", eta_s: 60, stage_elapsed_s: 90 })).toContain("past the node's estimate");
-    expect(describeNodeProgress({ stage: "queued", stage_elapsed_s: 61 })).toBe("Every music worker is busy; queued 1:01");
+    expect(describeNodeProgress({ stage: "queued", stage_elapsed_s: 61 })).toBe("Queued for a c0mpute music worker · 1:01");
+    expect(describeNodeProgress({ stage: "queued", stage_elapsed_s: 5, queue_position: 2 })).toBe("Queued for a c0mpute music worker (#2 in line) · 0:05");
     expect(describeNodeProgress({ stage: "finding_worker", attempt: 2 })).toBe("Finding a c0mpute music worker (attempt 2)");
     expect(describeNodeProgress({ stage: "retrying", detail: "no worker" })).toBe("The worker failed (no worker); trying another worker");
     expect(describeNodeProgress(null)).toBe("Composing on a c0mpute worker");
@@ -227,6 +230,7 @@ describe("chat music job registry", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(getMusicJob(id)).toMatchObject({ status: "failed", error: "No worker", httpStatus: 503 });
     const old = startMusicJob(() => new Promise(() => {}), { now: 0 });
-    expect(getMusicJob(old, { now: 46 * 60 * 1000 })).toBeNull();
+    expect(getMusicJob(old, { now: 90 * 60 * 1000 })).not.toBeNull();
+    expect(getMusicJob(old, { now: MUSIC_JOB_TTL_MS + 1 })).toBeNull();
   });
 });
