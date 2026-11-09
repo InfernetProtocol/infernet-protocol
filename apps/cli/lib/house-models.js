@@ -19,10 +19,9 @@
  *     (10% of the disk, at least 10 GB, at most 50 GB), and house models as a
  *     whole stay under the operator's disk cap if one is set.
  *   - Opt out of everything with `--no-house-models`, `infernet house-models
- *     off` or INFERNET_HOUSE_MODELS=0. Uncensored house models are OFF unless
- *     the operator opts in with `--uncensored-models`, `infernet house-models
- *     uncensored on` or INFERNET_UNCENSORED_MODELS=1. Opting out removes what
- *     the daemon pulled.
+ *     off` or INFERNET_HOUSE_MODELS=0; opt out of uncensored ones only with
+ *     `--no-uncensored-models`, `infernet house-models uncensored off` or
+ *     INFERNET_UNCENSORED_MODELS=0. Opting out removes what the daemon pulled.
  */
 
 import fs from 'node:fs/promises';
@@ -160,17 +159,15 @@ export async function fetchManifest({ url = DEFAULT_MANIFEST_URL, fetchImpl = fe
 }
 
 /**
- * Effective settings: CLI flags beat env, env beats config.json. House models
- * default ON; uncensored house models default OFF and need an explicit opt-in
- * (`--uncensored-models`, `infernet house-models uncensored on`,
- * INFERNET_UNCENSORED_MODELS=1), so nobody serves them without choosing to.
+ * Effective settings: CLI flags beat env, env beats config.json, and the
+ * default is ON (house models and uncensored house models both).
  */
 export function resolveSettings({ config = {}, env = process.env, args = null } = {}) {
     const cfg = config?.houseModels ?? {};
     let enabled = cfg.enabled !== false;
-    let uncensored = cfg.uncensored === true;
+    let uncensored = cfg.uncensored !== false;
     let maxDiskGb = Number.isFinite(Number(cfg.maxDiskGb)) && cfg.maxDiskGb !== null ? Number(cfg.maxDiskGb) : null;
-    const sources = { enabled: cfg.enabled === false ? 'config' : 'default', uncensored: typeof cfg.uncensored === 'boolean' ? 'config' : 'default' };
+    const sources = { enabled: cfg.enabled === false ? 'config' : 'default', uncensored: cfg.uncensored === false ? 'config' : 'default' };
 
     if (isOff(env.INFERNET_HOUSE_MODELS)) { enabled = false; sources.enabled = 'env INFERNET_HOUSE_MODELS'; }
     else if (isOn(env.INFERNET_HOUSE_MODELS)) { enabled = true; sources.enabled = 'env INFERNET_HOUSE_MODELS'; }
@@ -184,7 +181,6 @@ export function resolveSettings({ config = {}, env = process.env, args = null } 
     }
 
     if (args?.has?.('no-house-models')) { enabled = false; sources.enabled = '--no-house-models'; }
-    if (args?.has?.('uncensored-models')) { uncensored = true; sources.uncensored = '--uncensored-models'; }
     if (args?.has?.('no-uncensored-models')) { uncensored = false; sources.uncensored = '--no-uncensored-models'; }
     const argCap = Number(args?.get?.('house-models-max-gb'));
     if (Number.isFinite(argCap) && args?.get?.('house-models-max-gb') !== undefined) maxDiskGb = argCap;
@@ -614,6 +610,6 @@ export function formatStatus({ settings, state, installed = null }) {
         lines.push(`  last sync: ${ls.at}${ls.errors?.length ? `, ${ls.errors.length} error(s): ${ls.errors.map((e) => `${e.name ?? 'manifest'}: ${e.error}`).join('; ')}` : ''}`);
         for (const s of ls.skipped ?? []) lines.push(`  skipped ${s.name}: ${s.reason}`);
     }
-    lines.push('  opt out: infernet house-models off  |  uncensored (off by default): infernet house-models uncensored on|off');
+    lines.push('  opt out: infernet house-models off  |  uncensored only: infernet house-models uncensored off');
     return lines.join('\n');
 }
