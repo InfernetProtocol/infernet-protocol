@@ -46,6 +46,7 @@ export {
     peftGenerate,
     peftRuntimeStatus,
     GENERATE_RUNNER_PATH as PEFT_GENERATE_RUNNER_PATH,
+    PEFT_DATASET_FORMATS,
     PEFT_KINDS,
     resolvePeftPython,
     RUNNER_PATH as PEFT_RUNNER_PATH,
