@@ -136,6 +136,21 @@ describe("cover art", () => {
     expect(getMusicCover("nope")).toBeNull();
   });
 
+  it("the writer retries once when the model call fails", async () => {
+    let calls = 0;
+    async function* stream() {
+      calls += 1;
+      if (calls === 1) {
+        yield { type: "error", data: { message: "getaddrinfo EAI_AGAIN" } };
+        return;
+      }
+      yield { type: "done", data: { text: '{"title":"Second Try","caption":"dark synthwave, analog bass","lyrics":"[verse]\\nneon","duration":30}' } };
+    }
+    const r = await writeMusicSpec({ prompt: "dark synthwave", lyrics: "", duration: null }, { stream, configured: true });
+    expect(calls).toBe(2);
+    expect(r).toMatchObject({ writer: "model", title: "Second Try" });
+  });
+
   it("the writer names the song", async () => {
     async function* stream() {
       yield { type: "done", data: { text: '{"title":"Pints of Rebellion","caption":"celtic punk, fiddle, rap","lyrics":"[verse]\\nraise it","duration":90}' } };

@@ -688,10 +688,27 @@ export default function ChatView({ initialModels = [] }) {
         pending: false,
         status: null,
         cover: meta?.coverUrl ? { url: meta.coverUrl, title: meta.title } : undefined,
-        audio: { url, title: meta?.title ?? null, prompt: meta?.caption ?? prompt, lyrics: meta?.lyrics || lyrics, seconds, type: blob.type || "audio/mpeg", worker: done.headers.get("x-c0mpute-worker-peer-id") ?? null },
+        audio: { url, job: started202.id, title: meta?.title ?? null, prompt: meta?.caption ?? prompt, lyrics: meta?.lyrics || lyrics, seconds, type: blob.type || "audio/mpeg", worker: done.headers.get("x-c0mpute-worker-peer-id") ?? null },
         provider: { name: "c0mpute", model: done.headers.get("x-music-model") ?? "ace-step-1.5" }
       })));
       submittedTextRef.current = "";
+      // The song can beat its cover (image workers queue separately): keep
+      // looking for the cover for a while and attach it to this song's card.
+      if (!meta?.coverUrl) {
+        const jobId = started202.id;
+        const title = meta?.title ?? null;
+        (async () => {
+          const until = Date.now() + 8 * 60 * 1000;
+          while (Date.now() < until) {
+            await new Promise((r) => setTimeout(r, 6000));
+            const c = await fetch(`${started202.poll}/cover`, { cache: "no-store" }).catch(() => null);
+            if (!c?.ok) continue;
+            const coverUrl = URL.createObjectURL(await c.blob());
+            setMessages((prev) => prev.map((m) => (m.audio?.job === jobId ? { ...m, cover: { url: coverUrl, title } } : m)));
+            return;
+          }
+        })();
+      }
     } catch (err) {
       if (err?.name === "AbortError") return;
       const message = err?.message ?? "Music generation failed";
