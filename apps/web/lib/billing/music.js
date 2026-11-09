@@ -121,6 +121,28 @@ export function durationFromBrief(text) {
   return null;
 }
 
+/**
+ * The text-to-image prompt for a song's cover art (Z-Image-Turbo, square).
+ * Uses the song's style caption and, when the writer named the song, puts
+ * the title on the cover as the only lettering.
+ */
+export function coverArtPrompt({ caption, title }) {
+  const style = clipText(String(caption ?? "").replace(/\b\d+\s*bpm\b|\b[A-G](?:#|b)?\s*(?:major|minor)\b|\b\d\/\d\b/gi, ""), 360)
+    .replace(/[\s,]+$/, "");
+  const name = typeof title === "string" ? title.replace(/["\n]/g, "").trim().slice(0, 60) : "";
+  return [
+    "Square album cover artwork for a song.",
+    style ? `The music: ${style}.` : "",
+    "Translate the genre and mood into one bold, striking image: a strong central subject, cinematic lighting, rich color palette, high-detail illustration or photo style that fits the genre.",
+    name
+      ? `The only lettering is the title "${name}" in big, stylish, legible type that suits the genre.`
+      : "No text, no letters, no logos.",
+    "Professional album art, centered composition, no frames, no borders, no watermark."
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**

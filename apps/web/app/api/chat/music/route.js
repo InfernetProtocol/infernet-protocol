@@ -5,9 +5,10 @@ import { fetchSpeechGateway, postSpeechGatewayLong, readLimitedBody, speechGatew
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
-import { MUSIC_MODEL, musicPriceMicro, toGatewaySpec, validateMusicRequest } from "@/lib/billing/music";
+import { MUSIC_MODEL, coverArtPrompt, musicPriceMicro, toGatewaySpec, validateMusicRequest } from "@/lib/billing/music";
 import { writeMusicSpec } from "@/lib/music-brief-writer";
-import { startMusicJob } from "@/lib/chat/music-jobs";
+import { setMusicCover, startMusicJob } from "@/lib/chat/music-jobs";
+import { IMAGE_MODEL, IMAGE_SIZES } from "@/lib/billing/image";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,29 @@ async function postWithRetries(spec, { attempts = 3, requestId = null, onProgres
   }
   return last;
   }
+}
+
+/**
+ * Draw the song's cover on a c0mpute image worker and keep it for
+ * GET /api/chat/music/<id>/cover. Resolves true/false; never throws. One
+ * retry, for the same dropped-connection reason as the song.
+ */
+async function makeCover(id, { caption, title }) {
+  const body = { prompt: coverArtPrompt({ caption, title }), model: IMAGE_MODEL, ...IMAGE_SIZES.square, steps: 8 };
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await postSpeechGatewayLong("/v1/images", body, { timeoutMs: 15 * 60 * 1000 });
+      if (response?.status === 200 && response.body?.length > 8) {
+        setMusicCover(id, new Uint8Array(response.body));
+        return true;
+      }
+      if (response && response.status !== 503) return false;
+    } catch (error) {
+      console.warn(`[chat/music] cover attempt ${attempt} failed: ${error?.message ?? error}`);
+    }
+    await sleep(10_000);
+  }
+  return false;
 }
 
 /** Poll the gateway's GET /v1/progress/<id> every 5 s until stopped. */
@@ -140,7 +164,14 @@ export async function POST(request) {
     job.meta = { stage: "writing" };
     const written = await writeMusicSpec(parsed.request);
     const spec = toGatewaySpec({ ...parsed.request, ...written });
-    job.meta = { stage: "composing", caption: spec.prompt, lyrics: spec.lyrics, duration: spec.duration, writer: written.writer };
+    const title = written.title ?? null;
+    job.meta = { stage: "composing", caption: spec.prompt, lyrics: spec.lyrics, duration: spec.duration, writer: written.writer, title, cover: "pending" };
+
+    // Cover art, in parallel on the image workers (Z-Image-Turbo, ~2 min):
+    // it never delays or fails the song, and is usually ready first.
+    makeCover(job.id, { caption: spec.prompt, title }).then((ok) => {
+      job.meta = { ...job.meta, cover: ok ? "ready" : "failed" };
+    });
 
     const response = await postWithRetries(spec, {
       requestId: job.id,

@@ -87,7 +87,7 @@ describe("music briefs", () => {
 
   it("parses the writer's JSON, tolerating chatter around it", () => {
     const out = parseWriterReply('Sure!\n{"caption":"celtic punk, fiddle, rap, 104 bpm","lyrics":"[verse]\\nraise it up","duration":150}\nEnjoy');
-    expect(out).toEqual({ caption: "celtic punk, fiddle, rap, 104 bpm", lyrics: "[verse]\nraise it up", duration: 150 });
+    expect(out).toEqual({ title: null, caption: "celtic punk, fiddle, rap, 104 bpm", lyrics: "[verse]\nraise it up", duration: 150 });
     expect(parseWriterReply("no json here")).toBeNull();
     expect(parseWriterReply('{"caption":"x"}')).toBeNull();
   });
@@ -115,6 +115,35 @@ describe("music briefs", () => {
 });
 
 import { describeNodeProgress } from "@/lib/billing/music";
+
+import { coverArtPrompt } from "@/lib/billing/music";
+import { getMusicCover, setMusicCover } from "@/lib/chat/music-jobs";
+
+describe("cover art", () => {
+  it("builds a square album-cover prompt with the title as the only lettering", () => {
+    const p = coverArtPrompt({ caption: "Celtic folk punk, boom-bap, fiddle, 104 BPM, E minor, 4/4", title: 'Pints & "Rebellion"' });
+    expect(p).toContain("album cover");
+    expect(p).toContain("Celtic folk punk");
+    expect(p).not.toMatch(/104 BPM|E minor|4\/4/);
+    expect(p).toContain('title "Pints & Rebellion"');
+    expect(coverArtPrompt({ caption: "lofi", title: null })).toContain("No text");
+  });
+
+  it("keeps covers apart from the song job, until they expire", () => {
+    setMusicCover("c1", new Uint8Array([1]), { now: 0 });
+    expect(getMusicCover("c1", { now: 1000 })).toEqual(new Uint8Array([1]));
+    expect(getMusicCover("c1", { now: 46 * 60 * 1000 })).toBeNull();
+    expect(getMusicCover("nope")).toBeNull();
+  });
+
+  it("the writer names the song", async () => {
+    async function* stream() {
+      yield { type: "done", data: { text: '{"title":"Pints of Rebellion","caption":"celtic punk, fiddle, rap","lyrics":"[verse]\\nraise it","duration":90}' } };
+    }
+    const r = await writeMusicSpec({ prompt: "celtic punk rap song", lyrics: "", duration: null }, { stream, configured: true });
+    expect(r.title).toBe("Pints of Rebellion");
+  });
+});
 
 describe("node progress line", () => {
   it("names the node, its ETA, queueing and retries", () => {
