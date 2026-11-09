@@ -12,6 +12,18 @@ import { MAX_IMAGE_PROMPT_CHARS } from "./billing/image.js";
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"'`]+/gi;
 
+/**
+ * Requests that are about the brand itself (an ad for it, its logo, in its
+ * style). Anything else that links a page wants the page's content, not its
+ * branding: "draw what this article describes https://...".
+ */
+const WANTS_BRANDING = /\b(brand|branding|branded|on-brand|banner|ads?|advert|advertisement|logo|logotype|poster|flyer|billboard|marketing|promo|promotional|campaign|hero|header|cover|thumbnail|og image|social (?:post|card|image)|business card|mascot|merch|look and feel|style of|in (?:its|their|the site'?s) style|colou?rs? (?:of|from)|identity)\b/i;
+
+/** True when the request is about the linked site's brand rather than what the page says. */
+export function wantsBranding(prompt) {
+    return WANTS_BRANDING.test(String(prompt ?? ""));
+}
+
 /** Images where lettering is the point: the name (and tagline) should be drawn. */
 const WANTS_TEXT = /\b(banner|ad|ads|advert|advertisement|poster|flyer|billboard|header|hero|cover|thumbnail|logo|card|sign|signage|social post|og image)\b/i;
 
@@ -113,6 +125,29 @@ export function brandImagePrompt(userPrompt, briefs = [], { max = MAX_IMAGE_PROM
     return out;
 }
 
+/**
+ * The image prompt for a request that wants what a linked page is about (not
+ * its branding): each link becomes a short description of the page.
+ */
+export function contentImagePrompt(userPrompt, briefs = [], { max = MAX_IMAGE_PROMPT_CHARS } = {}) {
+    let prompt = String(userPrompt ?? "");
+    for (const b of (briefs ?? []).filter(Boolean)) {
+        const about = [b.title && b.title !== b.name ? b.title : b.name, clip(b.description, 300)].filter(Boolean).join(": ");
+        const label = about ? `(${about})` : b.host;
+        prompt = prompt.split(b.url).join(label);
+        if (b.finalUrl) prompt = prompt.split(b.finalUrl).join(label);
+    }
+    prompt = prompt.replace(URL_RE, (u) => {
+        try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; }
+    }).replace(/\s+/g, " ").trim();
+    return prompt.length > max ? `${prompt.slice(0, max - 1).replace(/\s+\S*$/, "")}…` : prompt;
+}
+
+/** The rule-based image prompt (used when no model is available to write one). */
+export function ruleImagePrompt(userPrompt, briefs = []) {
+    return wantsBranding(userPrompt) ? brandImagePrompt(userPrompt, briefs) : contentImagePrompt(userPrompt, briefs);
+}
+
 /** The system-message section a text chat gets for one linked site. */
 export function brandContext(brief) {
     if (!brief) return "";
@@ -129,7 +164,7 @@ export function brandContext(brief) {
     if (!rows.length) return "";
     const source = brief.record ? "pit.world's site index and the page itself" : "the page itself";
     return [
-        `Site profile for ${brief.host}, from ${source}. Use it for branding, tone and facts about this site:`,
+        `Background on ${brief.host}, from ${source}. The user's request decides what to do with the link: use these details only where the request needs them, and do not analyze or comment on branding unless the user asked about it.`,
         ...rows.map((r) => `- ${r}`)
     ].join("\n");
 }
