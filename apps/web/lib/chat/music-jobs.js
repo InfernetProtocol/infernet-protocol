@@ -4,7 +4,8 @@
 
 import { createJobRegistry } from "@/lib/chat/media-jobs";
 
-export const MUSIC_JOB_TTL_MS = 20 * 60 * 1000;
+// Writing (~1 min) + queue (up to 8) + a 2-3 minute song on CPU (up to ~15).
+export const MUSIC_JOB_TTL_MS = 45 * 60 * 1000;
 const registry = createJobRegistry({ ttlMs: MUSIC_JOB_TTL_MS, maxJobs: 100 });
 
 /** `run()` resolves to { audio: Uint8Array, contentType, headers } or throws with `.status`. */

@@ -643,7 +643,10 @@ export default function ChatView({ initialModels = [] }) {
         throw new Error(started202?.error ?? `Music generation failed (${res.status})`);
       }
       let done = null;
-      const deadline = Date.now() + 20 * 60 * 1000;
+      // The server writes lyrics from the brief first, then the song renders;
+      // what it wrote arrives on the polls and stays with the finished track.
+      let meta = null;
+      const deadline = Date.now() + 45 * 60 * 1000;
       while (!done) {
         if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
         if (Date.now() > deadline) throw new Error("Music generation timed out");
@@ -652,7 +655,14 @@ export default function ChatView({ initialModels = [] }) {
         if (poll.status === 202) {
           const p = await poll.json().catch(() => null);
           const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
-          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status: working(secs) })));
+          if (p?.caption) meta = { caption: p.caption, lyrics: p.lyrics ?? "", duration: p.duration ?? null };
+          const status =
+            p?.stage === "writing"
+              ? `Writing lyrics and a style from your brief… ${secs}s`
+              : `${working(secs)}${meta?.duration ? ` · ${meta.duration}s song` : ""}${
+                  meta?.lyrics ? `\n\nLyrics:\n${meta.lyrics}` : meta ? "\n\n(instrumental)" : ""
+                }`;
+          setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, status })));
           continue;
         }
         if (!poll.ok) {
@@ -668,7 +678,7 @@ export default function ChatView({ initialModels = [] }) {
         ...m,
         pending: false,
         status: null,
-        audio: { url, prompt, lyrics, seconds, type: blob.type || "audio/mpeg", worker: done.headers.get("x-c0mpute-worker-peer-id") ?? null },
+        audio: { url, prompt: meta?.caption ?? prompt, lyrics: meta?.lyrics || lyrics, seconds, type: blob.type || "audio/mpeg", worker: done.headers.get("x-c0mpute-worker-peer-id") ?? null },
         provider: { name: "c0mpute", model: done.headers.get("x-music-model") ?? "ace-step-1.5" }
       })));
       submittedTextRef.current = "";
