@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": 1,
+  "version": 2,
   "updated": "2026-11-09",
   "about": "Infernet house models: every provider node pulls and serves the models below that fit it, unless its operator opts out (infernet house-models off; uncensored only: infernet house-models uncensored off). Adding a model is a PR to apps/web/public/house-models.json in InfernetProtocol/infernet-protocol. digest = sha256 of the registry manifest (what `ollama list`/api/tags reports); size_bytes = all layers + config. Docs: https://infernetprotocol.com/docs/house-models",
   "models": [
@@ -74,6 +74,66 @@
       "uncensored": false,
       "license": "deepseek-model-license",
       "description": "DeepSeek-Coder-V2-Lite 16B by DeepSeek: mixture-of-experts with ~2.4B active parameters, so it runs at small-model speed on CPU nodes. Code and general chat.Commercial use allowed under the DeepSeek Model License.",
+      "added": "2026-11-09"
+    },
+    {
+      "name": "qwen2.5-coder-1.5b",
+      "source": "qwen2.5-coder:1.5b",
+      "digest": "sha256:d7372fd828518a4d38b1eb196c673c31a85f2ed302b3d1e406c4c2d1b64a0668",
+      "size_bytes": 986062089,
+      "min_ram_gb": 4,
+      "min_disk_gb": 2,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "description": "Qwen2.5-Coder 1.5B Instruct by Alibaba Qwen: fast code completion and small coding tasks, fits almost any node.",
+      "added": "2026-11-09"
+    },
+    {
+      "name": "qwen2.5-coder-7b",
+      "source": "qwen2.5-coder:7b",
+      "digest": "sha256:dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+      "size_bytes": 4683087561,
+      "min_ram_gb": 8,
+      "min_disk_gb": 5,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "description": "Qwen2.5-Coder 7B Instruct by Alibaba Qwen: the best small open coding model for code generation, repair and explanation across 40+ languages.",
+      "added": "2026-11-09"
+    },
+    {
+      "name": "qwen2.5-coder-14b",
+      "source": "qwen2.5-coder:14b",
+      "digest": "sha256:9ec8897f747e246e970bc5cfdda85d22f1123dc2e3d34978a010a75968716849",
+      "size_bytes": 8988124298,
+      "min_ram_gb": 16,
+      "min_disk_gb": 10,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "description": "Qwen2.5-Coder 14B Instruct by Alibaba Qwen: stronger code generation and reasoning for nodes with 16 GB+ RAM.",
+      "added": "2026-11-09"
+    },
+    {
+      "name": "qwen3-coder-30b",
+      "source": "qwen3-coder:30b",
+      "digest": "sha256:06c1097efce0431c2045fe7b2e5108366e43bee1b4603a7aded8f21689e90bca",
+      "size_bytes": 18556700761,
+      "min_ram_gb": 32,
+      "min_disk_gb": 20,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "description": "Qwen3-Coder 30B-A3B Instruct by Alibaba Qwen: mixture-of-experts with ~3.3B active parameters, so it runs at small-model speed. Agentic coding and tool calling, 256K context.",
+      "added": "2026-11-09"
+    },
+    {
+      "name": "devstral-24b",
+      "source": "devstral:24b",
+      "digest": "sha256:9bd74193e93935e9d8564d88607b220a9d341c4a36b748cffcbd9ad4f47a9ca9",
+      "size_bytes": 14333928046,
+      "min_ram_gb": 32,
+      "min_disk_gb": 16,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "description": "Devstral Small 24B by Mistral AI and All Hands AI: built for coding agents that edit real codebases. Best on GPU nodes.",
       "added": "2026-11-09"
     }
   ]
