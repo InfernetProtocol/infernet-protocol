@@ -14,7 +14,14 @@ export async function GET(_request, { params }) {
   if (!job) return errorJson("This image job expired or the server restarted — try again", 404);
   if (job.status === "pending") {
     return Response.json(
-      { id, status: "pending", seconds: Math.round((Date.now() - job.createdAt) / 1000) },
+      {
+        id,
+        status: "pending",
+        seconds: Math.round((Date.now() - job.createdAt) / 1000),
+        // The gateway's live stage: "queued" (waiting for a free worker,
+        // with a position and a one-line detail) or "rendering".
+        ...(job.meta ? { stage: job.meta.stage, detail: job.meta.detail, queue_position: job.meta.queue_position, eta_s: job.meta.eta_s } : {})
+      },
       { status: 202, headers: { "cache-control": "no-store" } }
     );
   }

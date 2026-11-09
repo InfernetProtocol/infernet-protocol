@@ -121,3 +121,93 @@ export async function awaitGatewayResult(requestId, { timeoutMs = 30 * 60 * 1000
   }
   return null;
 }
+
+/**
+ * How long a c0mpute gateway keeps a job queued for a worker before giving up
+ * (c0mpute >= 0.2.99 queues instead of failing fast; 2 h by default), plus
+ * time for the render itself. Every caller that waits on a gateway job must
+ * allow at least this, or it fails a job the gateway is still going to serve.
+ */
+export const GATEWAY_QUEUE_WAIT_MS = Number(process.env.C0MPUTE_QUEUE_WAIT_MS) || 2 * 60 * 60 * 1000;
+export const GATEWAY_JOB_LIMIT_MS = GATEWAY_QUEUE_WAIT_MS + 45 * 60 * 1000;
+
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Run one long gateway job (image, song, clip) to its end and resolve
+ * { status, headers, body } like postSpeechGatewayLong.
+ *
+ * The request carries `x-request-id` and `Prefer: wait=60`: a gateway that
+ * has a worker answers with the result; one that is queueing the job answers
+ * 202 within a minute and we poll GET /v1/result/<id> until it is served or
+ * the gateway's own max wait runs out (it then answers 503 "no worker for
+ * <workload>/<model> within 2h"). We never post the same job twice while the
+ * gateway knows it, so a queued job costs no retries and no second charge;
+ * it is posted again only when the gateway lost it (404, or the connection
+ * dropped and it never saw the id). Older gateways ignore Prefer and answer
+ * synchronously, which is handled the same way.
+ */
+export async function runGatewayJob(path, spec, { requestId, timeoutMs = GATEWAY_JOB_LIMIT_MS, onProgress = null, resume = false, attempts = 3, pollMs = 10_000, maxWaitS = null } = {}) {
+  if (!requestId) throw new Error("runGatewayJob needs a request id");
+  const until = Date.now() + timeoutMs;
+  let stopped = false;
+  if (onProgress) {
+    (async () => {
+      while (!stopped) {
+        await sleepMs(5000);
+        if (stopped) break;
+        try {
+          const res = await fetchSpeechGateway(`/v1/progress/${encodeURIComponent(requestId)}`, { signal: AbortSignal.timeout(4000) });
+          if (res?.ok) {
+            const p = await res.json().catch(() => null);
+            if (!stopped && p && typeof p.stage === "string") onProgress(p);
+          } else {
+            await res?.body?.cancel().catch(() => {});
+          }
+        } catch { /* best effort */ }
+      }
+    })();
+  }
+  const wait = () => awaitGatewayResult(requestId, { timeoutMs: Math.max(0, until - Date.now()), everyMs: pollMs });
+  try {
+    if (resume) {
+      const kept = await wait().catch(() => null);
+      if (kept) return kept;
+    }
+    let lastError = null;
+    for (let i = 1; i <= attempts && Date.now() < until; i++) {
+      let response;
+      try {
+        response = await postSpeechGatewayLong(path, spec, {
+          timeoutMs: Math.max(60_000, until - Date.now()),
+          headers: { "x-request-id": requestId, prefer: "wait=60", ...(maxWaitS ? { "x-max-wait": String(Math.round(maxWaitS)) } : {}) }
+        });
+      } catch (error) {
+        lastError = error;
+        // The connection dropped (the gateway restarting into an update): it
+        // kept the job under our id if it saw it; wait for that.
+        const kept = await wait().catch(() => null);
+        if (kept) return kept;
+        await sleepMs(i * 5000);
+        continue;
+      }
+      if (!response) throw Object.assign(new Error("The c0mpute gateway is not configured"), { status: 503 });
+      if (response.status !== 202) return response;
+      const done = await wait();
+      if (done) return done;
+      // 404: the gateway forgot the job (a data loss, not a queue): post again.
+    }
+    throw Object.assign(new Error(`gateway job ${requestId} did not finish: ${lastError?.message ?? "timed out"}`), { status: 504 });
+  } finally {
+    stopped = true;
+  }
+}
+
+/** The gateway's error message from a non-200 response body, if any. */
+export function gatewayError(response) {
+  try {
+    return JSON.parse(Buffer.from(response.body).toString("utf8"))?.error ?? "";
+  } catch {
+    return "";
+  }
+}

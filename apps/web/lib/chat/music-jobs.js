@@ -9,11 +9,13 @@
 // MEDIA_JOB_TTL_DAYS (7) from any process.
 
 import { createJobRegistry } from "@/lib/chat/media-jobs";
+import { GATEWAY_JOB_LIMIT_MS } from "@/lib/chat/speech-service";
 import { createDurableJobs, keepJobAlive, ttlFromEnv } from "@/lib/chat/durable-jobs";
 import { mediaStore } from "@/lib/chat/media-store";
 
-// Writing (~1 min) + queue (up to 8) + a 2-3 minute song on CPU (up to ~15).
-export const MUSIC_JOB_TTL_MS = 45 * 60 * 1000;
+// Writing (~1 min) + the gateway's queue wait for a free worker (up to 2 h)
+// + a 2-3 minute song on CPU, plus a margin to collect it.
+export const MUSIC_JOB_TTL_MS = GATEWAY_JOB_LIMIT_MS + 30 * 60 * 1000;
 const SWEEP_EVERY_MS = 60 * 60 * 1000;
 const EXT = { "audio/mpeg": "mp3", "audio/wav": "wav", "audio/flac": "flac", "audio/ogg": "ogg" };
 

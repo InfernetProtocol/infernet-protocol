@@ -38,7 +38,7 @@ describe("chat image helpers", () => {
   });
 });
 
-import { startImageJob, getImageJob, takeImageJob } from "@/lib/chat/image-jobs";
+import { startImageJob, getImageJob, takeImageJob, IMAGE_JOB_TTL_MS } from "@/lib/chat/image-jobs";
 
 describe("chat image job registry", () => {
   it("reports pending, then hands the PNG out exactly once", async () => {
@@ -59,9 +59,19 @@ describe("chat image job registry", () => {
     expect(getImageJob(id)).toMatchObject({ status: "failed", error: "No worker", httpStatus: 503 });
   });
 
-  it("forgets jobs after the TTL", () => {
+  it("keeps a job through a long queue wait, then forgets it after the TTL", () => {
     const id = startImageJob(() => new Promise(() => {}), { now: 0 });
-    expect(getImageJob(id, { now: 16 * 60 * 1000 })).toBeNull();
+    // Queued 90 min for a worker: still there (the old 15 min TTL lost it).
+    expect(getImageJob(id, { now: 90 * 60 * 1000 })).not.toBeNull();
+    expect(getImageJob(id, { now: IMAGE_JOB_TTL_MS + 1 })).toBeNull();
+  });
+
+  it("hands the job (id, meta) to the runner", async () => {
+    let seen;
+    const id = startImageJob(async (job) => { seen = job; job.meta = { stage: "queued" }; return { png: new Uint8Array([1]) }; });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen.id).toBe(id);
+    expect(getImageJob(id).meta).toEqual({ stage: "queued" });
   });
 });
 
@@ -93,6 +103,92 @@ describe("postSpeechGatewayLong", () => {
       process.env.C0MPUTE_SPEECH_URL = prev.url;
       process.env.C0MPUTE_SPEECH_TOKEN = prev.token;
       server.close();
+    }
+  });
+});
+
+import { runGatewayJob } from "@/lib/chat/speech-service";
+
+/** A fake c0mpute gateway: `posts` POSTs answered by `onPost`, results by `onResult`. */
+async function fakeGateway(onPost, onResult) {
+  const seen = { posts: 0, polls: 0, headers: [] };
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      if (req.method === "POST") {
+        seen.posts++;
+        seen.headers.push(req.headers);
+        return onPost(req, res, seen);
+      }
+      if (req.url.startsWith("/v1/result/")) {
+        seen.polls++;
+        return onResult(req, res, seen);
+      }
+      res.writeHead(404).end();
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const prev = { url: process.env.C0MPUTE_SPEECH_URL, token: process.env.C0MPUTE_SPEECH_TOKEN };
+  process.env.C0MPUTE_SPEECH_URL = `http://127.0.0.1:${server.address().port}`;
+  process.env.C0MPUTE_SPEECH_TOKEN = "tok";
+  return {
+    seen,
+    close() {
+      process.env.C0MPUTE_SPEECH_URL = prev.url;
+      process.env.C0MPUTE_SPEECH_TOKEN = prev.token;
+      server.close();
+    }
+  };
+}
+
+describe("runGatewayJob (queued gateway jobs)", () => {
+  it("waits out a queued job (202) and returns the result, posting it once", async () => {
+    const gw = await fakeGateway(
+      (req, res) => res.writeHead(202, { "content-type": "application/json" }).end(JSON.stringify({ stage: "queued" })),
+      (req, res, seen) => {
+        if (seen.polls < 3) return res.writeHead(202).end("{}");
+        res.writeHead(200, { "content-type": "image/png" }).end("PNG");
+      }
+    );
+    try {
+      const r = await runGatewayJob("/v1/images", { prompt: "x" }, { requestId: "req-1", pollMs: 20 });
+      expect(r.status).toBe(200);
+      expect(r.body.toString()).toBe("PNG");
+      expect(gw.seen.posts).toBe(1);
+      expect(gw.seen.headers[0]["x-request-id"]).toBe("req-1");
+      expect(gw.seen.headers[0].prefer).toBe("wait=60");
+    } finally {
+      gw.close();
+    }
+  });
+
+  it("returns the gateway's final 503 (queue wait expired) without retrying", async () => {
+    const gw = await fakeGateway(
+      (req, res) => res.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ error: "no worker for diffusion.txt2img/z-image-turbo within 2h" })),
+      (req, res) => res.writeHead(404).end()
+    );
+    try {
+      const r = await runGatewayJob("/v1/images", { prompt: "x" }, { requestId: "req-2", pollMs: 20 });
+      expect(r.status).toBe(503);
+      expect(JSON.parse(r.body.toString()).error).toMatch(/within 2h/);
+      expect(gw.seen.posts).toBe(1);
+    } finally {
+      gw.close();
+    }
+  });
+
+  it("posts again only when the gateway lost the job (404)", async () => {
+    const gw = await fakeGateway(
+      (req, res, seen) => (seen.posts === 1 ? res.writeHead(202).end("{}") : res.writeHead(200).end("OK")),
+      (req, res) => res.writeHead(404).end()
+    );
+    try {
+      const r = await runGatewayJob("/v1/images", { prompt: "x" }, { requestId: "req-3", pollMs: 20 });
+      expect(r.status).toBe(200);
+      expect(gw.seen.posts).toBe(2);
+    } finally {
+      gw.close();
     }
   });
 });

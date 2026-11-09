@@ -1,7 +1,7 @@
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor, paidLimit } from "@/lib/trusted-clients";
-import { postSpeechGatewayLong, readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
+import { runGatewayJob, gatewayError, readLimitedBody, speechGateway, errorJson } from "@/lib/chat/speech-service";
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
@@ -63,21 +63,30 @@ export async function POST(request) {
 
   const userId = payer.userId;
   const chargeMode = billing.mode;
-  const id = startImageJob(async () => {
+  const id = startImageJob(async (job) => {
     let response;
     try {
-      // node:http, not fetch: undici gives up on headers after 300 s.
-      response = await postSpeechGatewayLong("/v1/images", parsed.spec);
+      // Waits in the gateway's queue for a worker (up to 2 h) instead of
+      // failing when none is free; the poll route shows "queued".
+      response = await runGatewayJob("/v1/images", parsed.spec, {
+        requestId: job.id,
+        onProgress: (p) => {
+          job.meta = {
+            stage: p.stage,
+            detail: typeof p.detail === "string" ? p.detail.slice(0, 200) : undefined,
+            queue_position: Number.isFinite(p.queue_position) ? p.queue_position : undefined,
+            elapsed_s: Number.isFinite(p.elapsed_s) ? p.elapsed_s : undefined,
+            eta_s: Number.isFinite(p.eta_s) ? p.eta_s : undefined
+          };
+        }
+      });
     } catch (error) {
-      throw Object.assign(new Error(`Image generation failed: ${error?.message ?? error}`), { status: 502 });
+      throw Object.assign(new Error(`Image generation failed: ${error?.message ?? error}`), { status: Number(error?.status) || 502 });
     }
-    if (!response) throw Object.assign(new Error("Image generation is not configured"), { status: 503 });
     if (response.status !== 200) {
-      const busy = response.status === 503;
-      throw Object.assign(
-        new Error(busy ? "No c0mpute image worker is free right now — try again in a few minutes" : "Image generation failed"),
-        { status: busy ? 503 : 502 }
-      );
+      // 503 now means the gateway's whole queue wait ran out with no worker.
+      const why = gatewayError(response);
+      throw Object.assign(new Error(why || "Image generation failed"), { status: response.status === 503 ? 503 : 502 });
     }
     const png = new Uint8Array(response.body);
     const header = (name) => {

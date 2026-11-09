@@ -5,10 +5,9 @@ import "server-only";
 // workers, narration on TTS workers, the soundtrack on music workers and
 // img2vid clips on video workers.
 
-import { awaitGatewayResult, fetchSpeechGateway, postSpeechGatewayLong } from "@/lib/chat/speech-service";
+import { randomUUID } from "node:crypto";
+import { postSpeechGatewayLong, runGatewayJob } from "@/lib/chat/speech-service";
 import { describeNodeProgress } from "@/lib/billing/music";
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function fail(what, response) {
   let message = "";
@@ -24,21 +23,13 @@ async function post(path, body, timeoutMs, headers) {
   return response;
 }
 
-/**
- * A result the gateway (c0mpute >= 0.2.90) kept for `requestId` after the
- * caller went away: a job resumed after a deploy collects it instead of
- * paying for the work twice. Null when the gateway never saw the id.
- */
-async function kept(requestId, timeoutMs) {
-  if (!requestId) return null;
-  const r = await awaitGatewayResult(requestId, { timeoutMs }).catch(() => null);
-  return r?.status === 200 ? r : null;
-}
+// Images, clips and the soundtrack wait in the gateway's queue for a free
+// worker (up to 2 h) instead of failing, keep their request id across a
+// deploy (resume collects what the gateway kept), and are never posted twice
+// while the gateway has them.
 
 export async function image(spec, { requestId = null, resume = false } = {}) {
-  const old = resume ? await kept(requestId, 12 * 60 * 1000) : null;
-  if (old?.body?.length > 8) return old.body;
-  const r = await post("/v1/images", spec, 15 * 60 * 1000, requestId ? { "x-request-id": requestId } : {});
+  const r = await runGatewayJob("/v1/images", spec, { requestId: requestId ?? randomUUID(), resume });
   if (r.status === 200) return r.body;
   throw fail("image", r);
 }
@@ -49,50 +40,27 @@ export async function tts(spec) {
   throw fail("narration", r);
 }
 
-export async function video(spec) {
-  const r = await post("/v1/videos", spec, 50 * 60 * 1000);
+/**
+ * A motion clip. Optional: the pipeline gives motion a budget and shows a
+ * still for any clip not back by then, so the gateway is told to stop
+ * queueing it at the same point (`maxWaitS`) rather than hold it 2 h.
+ */
+export async function video(spec, { requestId = null, resume = false, maxWaitS = null } = {}) {
+  const r = await runGatewayJob("/v1/videos", spec, { requestId: requestId ?? randomUUID(), resume, maxWaitS });
   if (r.status === 200 && /video\/mp4/.test(String(r.headers["content-type"] ?? ""))) return r.body;
   throw fail("img2vid", r);
 }
 
 /** The soundtrack, with the gateway's live node progress relayed as one line. */
 export async function music(spec, { requestId = null, onProgress = null, resume = false } = {}) {
-  let stopped = false;
-  if (requestId && onProgress) {
-    (async () => {
-      while (!stopped) {
-        await sleep(5000);
-        if (stopped) break;
-        try {
-          const res = await fetchSpeechGateway(`/v1/progress/${encodeURIComponent(requestId)}`, { signal: AbortSignal.timeout(4000) });
-          if (res?.ok) {
-            const p = await res.json().catch(() => null);
-            if (!stopped && p?.stage) onProgress(describeNodeProgress(p));
-          }
-        } catch { /* best effort */ }
-      }
-    })();
-  }
-  try {
-    const old = resume ? await kept(requestId, 25 * 60 * 1000) : null;
-    if (old?.body?.length) return { bytes: old.body, type: String(old.headers["content-type"] ?? "audio/mpeg").split(";")[0].trim() };
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const r = await post("/v1/music", spec, 25 * 60 * 1000, requestId ? { "x-request-id": requestId } : {});
-        if (r.status === 200) {
-          const type = String(r.headers["content-type"] ?? "audio/mpeg").split(";")[0].trim();
-          return { bytes: r.body, type };
-        }
-        if (r.status !== 503 || attempt === 2) throw fail("music", r);
-      } catch (e) {
-        if (attempt === 2 || (e?.status && e.status !== 503)) throw e;
-      }
-      await sleep(10_000);
-    }
-  } finally {
-    stopped = true;
-  }
-  throw new Error("music failed");
+  const r = await runGatewayJob("/v1/music", spec, {
+    requestId: requestId ?? randomUUID(),
+    resume,
+    onProgress: onProgress ? (p) => onProgress(describeNodeProgress(p)) : null
+  });
+  if (r.status !== 200) throw fail("music", r);
+  const type = String(r.headers["content-type"] ?? "audio/mpeg").split(";")[0].trim();
+  return { bytes: r.body, type };
 }
 
 export const promoGateway = { image, tts, video, music };
