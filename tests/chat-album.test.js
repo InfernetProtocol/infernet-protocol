@@ -158,6 +158,18 @@ describe("album plan parsing", () => {
     expect(parseAlbumPlan('{"band":"x","tracks":[]}', 3)).toBeNull();
   });
 
+  it("mends a dropped value and trailing commas (seen live from llama-3.3-70b)", () => {
+    const live =
+      '{"band": "Rusty Bolts", "album": "Metal Waves", "genre": "Surf Rock", "sound": "upbeat", "concept": "c", "tracks": [{"title": "Circuit Breaker", "theme": "a", "vocals": true, "duration": 120}, {"title": "Riding the Tide", "theme": "b", "vocals":, "duration": 120},]}';
+    const plan = parseAlbumPlan(live, 2, { duration: 20 });
+    expect(plan.tracks.map((t) => [t.title, t.vocals, t.duration])).toEqual([
+      ["Circuit Breaker", true, 20],
+      ["Riding the Tide", true, 20]
+    ]);
+    const yesNo = parseAlbumPlan('{"band":"B","album":"A","tracks":[{"title":"x","vocals":"no"},{"title":"y","vocals":"yes"}]}', 2);
+    expect(yesNo.tracks.map((t) => t.vocals)).toEqual([false, true]);
+  });
+
   it("gives each track's writer the album's context", () => {
     const plan = parseAlbumPlan(reply, 3);
     const brief = trackBrief(plan, plan.tracks[0], "my idea");
