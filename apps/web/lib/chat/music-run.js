@@ -62,17 +62,20 @@ export function musicRunner(request, billing = {}) {
       job.meta = { stage: "writing" };
       const written = await writeMusicSpec(request);
       ck.spec = toGatewaySpec({ ...request, ...written });
-      ck.title = written.title ?? null;
+      // An album track keeps the title the album planner gave it.
+      ck.title = request.title ?? written.title ?? null;
       ck.writer = written.writer ?? null;
       await job.checkpointed?.();
     }
     const spec = ck.spec;
     const title = ck.title ?? null;
-    job.meta = { stage: "composing", caption: spec.prompt, lyrics: spec.lyrics, duration: spec.duration, writer: ck.writer, title, cover: ck.cover ?? "pending" };
+    // Album tracks (cover: false) share the album's cover instead of one each.
+    const wantsCover = request.cover !== false;
+    job.meta = { stage: "composing", caption: spec.prompt, lyrics: spec.lyrics, duration: spec.duration, writer: ck.writer, title, cover: wantsCover ? ck.cover ?? "pending" : "none" };
 
     // Cover art, in parallel on the image workers (Z-Image-Turbo, ~2 min):
     // it never delays or fails the song, and is usually ready first.
-    if (!ck.cover) {
+    if (wantsCover && !ck.cover) {
       makeCover(job.id, { caption: spec.prompt, title }, { resume: Boolean(job.resumed) }).then((ok) => {
         ck.cover = ok ? "ready" : "failed";
         job.meta = { ...job.meta, cover: ck.cover };

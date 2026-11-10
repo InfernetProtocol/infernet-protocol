@@ -10,6 +10,6 @@ export const dynamic = "force-dynamic";
  * leave open: it only ever carries on with jobs that were already paid for.
  */
 export async function POST() {
-  const { promos, songs } = await resumeMediaJobs();
-  return Response.json({ resumed: { promos: promos.length, songs: songs.length } }, { headers: { "cache-control": "no-store" } });
+  const { promos, songs, albums } = await resumeMediaJobs();
+  return Response.json({ resumed: { promos: promos.length, songs: songs.length, albums: albums.length } }, { headers: { "cache-control": "no-store" } });
 }
