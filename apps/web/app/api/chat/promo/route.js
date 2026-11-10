@@ -6,7 +6,7 @@ import { resolveBillingCaller, authorizeInteractive } from "@/lib/data/interacti
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
 import { PROMO_MODEL, promoPriceMicro, validatePromoRequest } from "@/lib/promo/request";
-import { promoJobs } from "@/lib/promo/jobs";
+import { promoJobs, promoMaxRunning } from "@/lib/promo/jobs";
 import { promoRunner } from "@/lib/promo/run";
 import { hasFfmpeg } from "@/lib/promo/assemble";
 
@@ -37,8 +37,7 @@ export async function POST(request) {
   }
   const parsed = validatePromoRequest(body);
   if (!parsed.ok) return errorJson(parsed.error, 400);
-  const maxRunning = Number(process.env.PROMO_MAX_RUNNING) > 0 ? Number(process.env.PROMO_MAX_RUNNING) : 3;
-  if (promoJobs.running() >= maxRunning) {
+  if (promoJobs.running() >= promoMaxRunning()) {
     return errorJson("Every promo slot is busy; try again in a few minutes", 503);
   }
 

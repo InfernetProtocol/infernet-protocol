@@ -177,6 +177,47 @@ describe("promo jobs survive a restart", () => {
   });
 });
 
+describe("promo resume respects PROMO_MAX_RUNNING and cleans up", () => {
+  it("resumes no more jobs than the cap allows; the rest wait for a later pass", async () => {
+    const store = createFsStore(tmp("promo-cap-"));
+    const durableA = createDurableJobs({ kind: "promo", store, owner: "A" });
+    const regA = createPromoRegistry({ root: tmp("promo-capa-"), durable: durableA });
+    const ids = [1, 2, 3].map(() => regA.start(() => new Promise(() => {}), { request: { url: BRAND.url } }));
+    await until(async () => (await Promise.all(ids.map((id) => durableA.load(id)))).every((r) => r?.status === "pending"));
+    // Process A dies; B boots after the leases lapse, already rendering one promo of its own.
+    const later = () => Date.now() + 2 * 60_000;
+    const regB = createPromoRegistry({ root: tmp("promo-capb-"), durable: createDurableJobs({ kind: "promo", store, owner: "B", now: later }) });
+    regB.start(() => new Promise(() => {}));
+    const hang = () => () => new Promise(() => {});
+    const first = await regB.resumeAll(hang, { maxRunning: 2 });
+    expect(first).toHaveLength(1);
+    expect(regB.running()).toBe(2);
+    expect(await regB.resumeAll(hang, { maxRunning: 2 })).toEqual([]);
+    // A fresh process with room picks up the two left behind (B still holds its one).
+    const regC = createPromoRegistry({ root: tmp("promo-capc-"), durable: createDurableJobs({ kind: "promo", store, owner: "C", now: later }) });
+    const second = await regC.resumeAll(hang, { maxRunning: 3 });
+    expect(second.sort()).toEqual(ids.filter((id) => !first.includes(id)).sort());
+  });
+
+  it("removes stale work dirs nobody owns, keeps fresh ones and live jobs", async () => {
+    const { mkdirSync, utimesSync, existsSync } = await import("node:fs");
+    const root = tmp("promo-sweep-");
+    const reg = createPromoRegistry({ root, ttlMs: 60_000 });
+    const live = reg.start(() => new Promise(() => {}));
+    const stale = "11111111-1111-4111-8111-111111111111";
+    const fresh = "22222222-2222-4222-8222-222222222222";
+    for (const id of [stale, fresh]) mkdirSync(path.join(root, id, "x"), { recursive: true });
+    mkdirSync(path.join(root, "not-a-job"));
+    const old = new Date(Date.now() - 10 * 60_000);
+    for (const p of [path.join(root, stale), path.join(root, live), path.join(root, "not-a-job")]) utimesSync(p, old, old);
+    expect(reg.sweepLocal()).toBe(1);
+    expect(existsSync(path.join(root, stale))).toBe(false);
+    expect(existsSync(path.join(root, fresh))).toBe(true);
+    expect(existsSync(path.join(root, live))).toBe(true);
+    expect(existsSync(path.join(root, "not-a-job"))).toBe(true);
+  });
+});
+
 describe("songs survive a restart", () => {
   it("resumes with the written spec and keeps the song for any process", async () => {
     const store = createFsStore(tmp("music-store-"));

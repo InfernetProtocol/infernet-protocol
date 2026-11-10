@@ -11,7 +11,7 @@
 // downloadable for MEDIA_JOB_TTL_DAYS (7) from any process.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -24,6 +24,13 @@ export const PROMO_JOB_TTL_MS = 3 * 60 * 60 * 1000;
 const MAX_JOBS = 40;
 const SWEEP_EVERY_MS = 60 * 60 * 1000;
 const FILE_NAME = /^[A-Za-z0-9._-]+$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** How many promos one process renders at once (PROMO_MAX_RUNNING, default 3). */
+export function promoMaxRunning(env = process.env) {
+  const n = Number(env.PROMO_MAX_RUNNING);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 3;
+}
 
 export function promoRoot(env = process.env) {
   return env.PROMO_WORK_DIR || path.join(os.tmpdir(), "infernet-promo");
@@ -195,19 +202,49 @@ export function createPromoRegistry({ ttlMs = PROMO_JOB_TTL_MS, maxJobs = MAX_JO
   }
 
   /**
+   * Work dirs under `root` that no job here owns and that have not changed for
+   * ttlMs: left by a process that died (a container restart keeps its tmp).
+   * A live or resumed job's dir is in `jobs`, so it is never touched.
+   */
+  function sweepLocal(now = Date.now()) {
+    let names = [];
+    try {
+      names = readdirSync(root);
+    } catch {
+      return 0;
+    }
+    let removed = 0;
+    for (const name of names) {
+      if (jobs.has(name) || !UUID.test(name)) continue;
+      const dir = path.join(root, name);
+      try {
+        if (now - statSync(dir).mtimeMs <= ttlMs) continue;
+        rmSync(dir, { recursive: true, force: true });
+        removed++;
+      } catch {}
+    }
+    return removed;
+  }
+
+  /**
    * Claim every pending job no live process is running and carry on with it
    * from its checkpoint. `runnerFor(record)` returns the `run(job)` to use.
-   * Expires old jobs at most once an hour. Resolves to the ids resumed.
+   * Claims no more than fit under `maxRunning` (counting what already runs
+   * here); the rest stay pending for a later pass. Expires old jobs (in the
+   * store and stray local work dirs) at most once an hour. Resolves to the
+   * ids resumed.
    */
-  async function resumeAll(runnerFor, { now = Date.now() } = {}) {
+  async function resumeAll(runnerFor, { now = Date.now(), maxRunning = Infinity } = {}) {
     const d = store();
-    if (!d?.enabled) return [];
     if (now - lastSweep > SWEEP_EVERY_MS) {
       lastSweep = now;
-      await d.sweep().catch((e) => console.warn(`[promo] sweep: ${e?.message ?? e}`));
+      sweepLocal(now);
+      if (d?.enabled) await d.sweep().catch((e) => console.warn(`[promo] sweep: ${e?.message ?? e}`));
     }
+    if (!d?.enabled) return [];
     const resumed = [];
     for (const id of await d.pending()) {
+      if (running() >= maxRunning) break;
       const mine = jobs.get(id);
       if (mine && !mine.remote) continue;
       if (!(await d.claim(id).catch(() => false))) continue;
@@ -231,7 +268,7 @@ export function createPromoRegistry({ ttlMs = PROMO_JOB_TTL_MS, maxJobs = MAX_JO
     return resumed;
   }
 
-  return { start, get, find, file, running, drop, resumeAll };
+  return { start, get, find, file, running, drop, resumeAll, sweepLocal };
 }
 
 // One registry per server process (globalThis survives Next's module reloads in dev).
@@ -240,7 +277,6 @@ g.__infernetPromoDurable ??= createDurableJobs({ kind: "promo", store: () => med
 g.__infernetPromoJobs ??= createPromoRegistry({ durable: g.__infernetPromoDurable });
 export const promoJobs = g.__infernetPromoJobs;
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isPromoId = (id) => UUID.test(String(id ?? ""));
 
 /** What a poll shows: never the dir or other server paths. */

@@ -7,7 +7,7 @@ import "server-only";
 import { streamChatCompletion, isNimConfigured } from "@infernetprotocol/nim-adapter";
 import { chargeImageJob } from "@/lib/data/interactive-billing";
 import { promoPriceMicro } from "@/lib/promo/request";
-import { promoJobs } from "@/lib/promo/jobs";
+import { promoJobs, promoMaxRunning } from "@/lib/promo/jobs";
 import { promoBrand } from "@/lib/promo/brand";
 import { promoGateway } from "@/lib/promo/gateway";
 import { runPromo } from "@/lib/promo/pipeline";
@@ -50,7 +50,10 @@ export function promoRunner(request, billing = {}) {
   };
 }
 
-/** Carry on with every promo a restarted (or dead) process left pending. */
+/**
+ * Carry on with the promos a restarted (or dead) process left pending, as
+ * many as PROMO_MAX_RUNNING allows; the rest wait for the next pass.
+ */
 export function resumePromos() {
-  return promoJobs.resumeAll((rec) => promoRunner(rec.request, rec.billing));
+  return promoJobs.resumeAll((rec) => promoRunner(rec.request, rec.billing), { maxRunning: promoMaxRunning() });
 }
