@@ -4,6 +4,7 @@ import { streamChatCompletion, isNimConfigured } from "@infernetprotocol/nim-ada
 import { clipText, durationFromBrief, MAX_MUSIC_SECONDS, MIN_MUSIC_SECONDS } from "./billing/music.js";
 import { DEFAULT_TRACK_SECONDS } from "./billing/album.js";
 import { writeMusicSpec } from "./music-brief-writer.js";
+import { parseLooseJson } from "./loose-json.js";
 
 /**
  * Plan an album from a free-form prompt: a band name, an album title, a
@@ -16,22 +17,25 @@ import { writeMusicSpec } from "./music-brief-writer.js";
 
 const PLAN_TIMEOUT_MS = 60_000;
 const PROMPT_CHARS = 6_000;
+const PLAN_ATTEMPTS = 3;
 
 export function albumPlannerSystem(count) {
   return [
     "You are an A&R person and songwriter planning an ORIGINAL album from a brief.",
     "Reply with one JSON object and nothing else:",
-    '{"band": string, "album": string, "genre": string, "sound": string, "concept": string, "tracks": [{"title": string, "theme": string, "vocals": boolean, "duration": number}]}',
+    '{"band": string, "album": string, "genre": string, "sound": string, "concept": string, "tracks": [{"title": string, "theme": string, "vocals": "yes" or "no", "duration": number}]}',
     "band: an original, memorable band or artist name (1 to 4 words) that fits the brief; use the name the brief gives if it gives one. Never a real, existing band.",
     "album: an original album title (1 to 6 words).",
     "genre: the main genre in a few words.",
     "sound: at most 400 characters of comma-separated style tags shared by every track: genres, instruments, vocal type and delivery, production, mood, tempo range.",
     "concept: one or two sentences on what the album is about.",
-    `tracks: exactly ${count} entries in running order. title: an original song title of 1 to 6 words, all different. theme: one sentence on what that song is about and how it feels (vary tempo and mood across the album: an opener, a single, a slow one, a closer). vocals: false only for instrumental interludes or when the brief asks for instrumental music. duration: seconds, ${MIN_MUSIC_SECONDS} to ${MAX_MUSIC_SECONDS}; ${DEFAULT_TRACK_SECONDS} unless the brief says otherwise.`
+    `tracks: exactly ${count} entries in running order. title: an original song title of 1 to 6 words, all different. theme: one sentence on what that song is about and how it feels (vary tempo and mood across the album: an opener, a single, a slow one, a closer). vocals: "no" only for instrumental interludes or when the brief asks for instrumental music, else "yes". duration: seconds, ${MIN_MUSIC_SECONDS} to ${MAX_MUSIC_SECONDS}; ${DEFAULT_TRACK_SECONDS} unless the brief says otherwise.`
   ].join("\n");
 }
 
 const str = (v, max) => (typeof v === "string" ? v.replace(/[\r\n"]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "");
+
+const NO_VOCALS = /^(no|false|none|instrumental)$/i;
 
 /** Parse and normalise the planner's reply to exactly `count` tracks, or null. */
 export function parseAlbumPlan(text, count, { duration = null } = {}) {
@@ -39,12 +43,8 @@ export function parseAlbumPlan(text, count, { duration = null } = {}) {
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
-  let obj;
-  try {
-    obj = JSON.parse(s.slice(start, end + 1));
-  } catch {
-    return null;
-  }
+  const obj = parseLooseJson(s.slice(start, end + 1));
+  if (!obj) return null;
   const band = str(obj?.band, 60);
   const album = str(obj?.album, 80);
   const raw = Array.isArray(obj?.tracks) ? obj.tracks : [];
@@ -62,7 +62,7 @@ export function parseAlbumPlan(text, count, { duration = null } = {}) {
       n: tracks.length + 1,
       title,
       theme: str(t?.theme, 400),
-      vocals: t?.vocals !== false,
+      vocals: !(t?.vocals === false || (typeof t?.vocals === "string" && NO_VOCALS.test(t.vocals.trim()))),
       duration: clampSeconds(duration ?? (Number.isFinite(d) ? d : DEFAULT_TRACK_SECONDS))
     });
   }
@@ -87,7 +87,7 @@ function clampSeconds(n) {
 export async function writeAlbumPlan({ prompt, tracks: count, duration = null }, { stream = streamChatCompletion, configured = isNimConfigured() } = {}) {
   if (!configured) throw Object.assign(new Error("Album writing is not configured (no writer model)"), { status: 503 });
   const perTrack = duration ?? durationFromBrief(prompt);
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= PLAN_ATTEMPTS; attempt++) {
     try {
       let text = "";
       for await (const ev of stream({
@@ -105,11 +105,11 @@ export async function writeAlbumPlan({ prompt, tracks: count, duration = null },
       }
       const plan = parseAlbumPlan(text, count, { duration: perTrack && perTrack <= MAX_MUSIC_SECONDS ? perTrack : null });
       if (plan) return plan;
-      console.warn(`[album-writer] attempt ${attempt}: unusable plan`);
+      console.warn(`[album-writer] attempt ${attempt}: unusable plan: ${text.replace(/\s+/g, " ").slice(0, 300)}`);
     } catch (e) {
       console.warn(`[album-writer] attempt ${attempt}:`, e?.message ?? e);
     }
-    if (attempt === 1) await new Promise((r) => setTimeout(r, 2000));
+    if (attempt < PLAN_ATTEMPTS) await new Promise((r) => setTimeout(r, 2000));
   }
   throw Object.assign(new Error("Could not write an album plan from that prompt — try again"), { status: 503 });
 }

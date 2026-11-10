@@ -1,6 +1,7 @@
 import "server-only";
 
 import { streamChatCompletion, isNimConfigured } from "@infernetprotocol/nim-adapter";
+import { parseLooseJson } from "./loose-json.js";
 import { MODEL_LYRICS_CHARS, clipText, durationFromBrief, MIN_MUSIC_SECONDS, MAX_MUSIC_SECONDS } from "./billing/music.js";
 
 /**
@@ -35,12 +36,8 @@ export function parseWriterReply(text) {
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
-  let obj;
-  try {
-    obj = JSON.parse(s.slice(start, end + 1));
-  } catch {
-    return null;
-  }
+  const obj = parseLooseJson(s.slice(start, end + 1));
+  if (!obj) return null;
   const caption = typeof obj?.caption === "string" ? obj.caption.replace(/\s+/g, " ").trim() : "";
   const lyrics = typeof obj?.lyrics === "string" ? obj.lyrics.replace(/\r/g, "").trim() : "";
   const duration = Number(obj?.duration);
