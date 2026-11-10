@@ -19,7 +19,10 @@ export async function GET(_request, { params }) {
   const status = job?.status ?? rec?.status;
   if (!status) return errorJson("This album expired or the server restarted — try again", 404);
   if (status === "failed") return errorJson(job?.error ?? rec?.error ?? "Album failed", job?.httpStatus || rec?.httpStatus || 502);
-  const meta = job?.meta ?? rec?.meta ?? {};
+  const meta = { ...(job?.meta ?? rec?.meta ?? {}) };
+  // A cover can land after the songs (the image queue is separate): once the
+  // album is done, look for it rather than trusting a record saved before.
+  if (status === "done" && meta.cover !== "ready" && (albumJobs.getCover(id) ?? (await albumJobs.storedCover(id)))) meta.cover = "ready";
   const createdAt = job?.createdAt ?? rec?.createdAt ?? Date.now();
   const body = {
     id,

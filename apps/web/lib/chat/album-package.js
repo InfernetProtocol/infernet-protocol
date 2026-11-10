@@ -18,6 +18,7 @@ import { createZip } from "@/lib/zip";
 import { ffmpegBin, run } from "@/lib/promo/assemble";
 import { musicJobs } from "@/lib/chat/music-jobs";
 import { albumJobs } from "@/lib/chat/album-jobs";
+import { fetchSpeechGateway } from "@/lib/chat/speech-service";
 
 const EXT = { "audio/mpeg": "mp3", "audio/wav": "wav", "audio/flac": "flac", "audio/ogg": "ogg" };
 
@@ -37,6 +38,27 @@ export async function pngToJpeg(png) {
   } finally {
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * The album cover PNG from wherever it is: this process, the media store, or
+ * the c0mpute gateway, which keeps a queued cover running across our
+ * restarts (a deploy kills the process that was waiting for it). One found
+ * on the gateway is kept, so the next look is local. Resolves to bytes or null.
+ */
+export async function albumCover(id) {
+  const local = albumJobs.getCover(id) ?? (await albumJobs.storedCover(id));
+  if (local) return local;
+  const res = await fetchSpeechGateway(`/v1/result/${id}-cover`, { signal: AbortSignal.timeout(30_000) }).catch(() => null);
+  if (res?.status === 200 && (res.headers.get("content-type") ?? "").startsWith("image/png")) {
+    const png = new Uint8Array(await res.arrayBuffer());
+    if (png.length > 8) {
+      albumJobs.setCover(id, png);
+      return png;
+    }
+  }
+  await res?.body?.cancel().catch(() => {});
+  return null;
 }
 
 /** One finished track's audio, from wherever it still is, or null. */
@@ -110,14 +132,16 @@ export async function buildAlbumZip(id, { albumJob = null, meta }) {
   const value = (async () => {
     const tracks = meta?.tracks ?? [];
     const audio = await Promise.all(tracks.map((t, i) => (t.status === "done" ? trackAudio(albumJob, i, t.id) : null)));
-    const coverPng = albumJobs.getCover(id) ?? (await albumJobs.storedCover(id));
+    const coverPng = await albumCover(id);
     const coverJpeg = coverPng ? await pngToJpeg(Buffer.from(coverPng)) : null;
     const { folder, entries } = albumEntries({ meta, audio, coverJpeg, coverPng: coverPng ? Buffer.from(coverPng) : null });
-    return { zip: createZip(entries), name: `${folder}.zip`, tracks: audio.filter(Boolean).length };
+    return { zip: createZip(entries), name: `${folder}.zip`, tracks: audio.filter(Boolean).length, cover: Boolean(coverPng) };
   })();
   cache.set(id, { at: now, value });
   // Keep at most two built zips (tens of MB each) in memory.
   while (cache.size > 2) cache.delete(cache.keys().next().value);
-  value.catch(() => cache.delete(id));
+  // The image queue can be slower than the songs: a zip built before the
+  // cover landed is not kept, so the next download picks the cover up.
+  value.then((v) => !v.cover && cache.delete(id), () => cache.delete(id));
   return value;
 }
