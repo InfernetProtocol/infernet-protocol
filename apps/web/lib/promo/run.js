@@ -21,7 +21,10 @@ export function videoConfig(env = process.env) {
     width: num("PROMO_VIDEO_WIDTH", 832),
     height: num("PROMO_VIDEO_HEIGHT", 480),
     steps: num("PROMO_VIDEO_STEPS", 20),
-    budgetMs: num("PROMO_MOTION_BUDGET_S", 20 * 60) * 1000
+    budgetMs: num("PROMO_MOTION_BUDGET_S", 20 * 60) * 1000,
+    // The first clip only asks whether a video worker is there at all: a free one
+    // takes it within seconds, so no answer in 3 min means Ken Burns, not a slot held 20 min.
+    probeMs: num("PROMO_VIDEO_PROBE_S", 3 * 60) * 1000
   };
 }
 
