@@ -96,6 +96,35 @@ async function fetchSpeechWithRetry(url, init) {
   }
 }
 
+// A deploy restarts the app several times an hour; promo, song and album jobs
+// carry on (lib/chat/durable-jobs.js), but a poll in that window gets a
+// dropped connection or the proxy's 502/503/504 page. Those are retried for
+// up to `graceMs`; a JSON error from the app itself (a failed job) is returned.
+async function pollThroughRestarts(url, signal, { graceMs = 5 * 60 * 1000, waitMs = 4000 } = {}) {
+  let since = 0;
+  for (;;) {
+    let res = null;
+    try {
+      res = await fetch(url, { cache: "no-store", signal });
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+    }
+    if (res && ![502, 503, 504].includes(res.status)) return res;
+    if (res) {
+      const body = await res.clone().json().catch(() => null);
+      if (body && typeof body === "object" && (body.error || body.status === "failed")) return res;
+      await res.body?.cancel().catch(() => {});
+    }
+    since ||= Date.now();
+    if (Date.now() - since > graceMs) {
+      if (res) return res;
+      throw new Error("Lost contact with the server; the job may still finish, try again in a few minutes");
+    }
+    if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+}
+
 const EXAMPLE_PROMPTS = [
   "Explain how Infernet's P2P GPU network scales compared to a centralized data center.",
   "Write a Python function that streams tokens from a local llama.cpp server.",
@@ -653,7 +682,7 @@ export default function ChatView({ initialModels = [] }) {
         if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
         if (Date.now() > deadline) throw new Error("Music generation timed out");
         await new Promise((r) => setTimeout(r, 5000));
-        const poll = await fetch(started202.poll, { cache: "no-store", signal });
+        const poll = await pollThroughRestarts(started202.poll, signal);
         if (poll.status === 202) {
           const p = await poll.json().catch(() => null);
           const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
@@ -758,7 +787,7 @@ export default function ChatView({ initialModels = [] }) {
         if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
         if (Date.now() > deadline) throw new Error("The album timed out");
         await new Promise((r) => setTimeout(r, 5000));
-        const poll = await fetch(start.poll, { cache: "no-store", signal });
+        const poll = await pollThroughRestarts(start.poll, signal);
         p = await poll.json().catch(() => null);
         if (poll.status !== 202 && poll.status !== 200) throw new Error(p?.error ?? `The album failed (${poll.status})`);
         for (const t of p?.tracks ?? []) {
@@ -849,7 +878,7 @@ export default function ChatView({ initialModels = [] }) {
         if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
         if (Date.now() > deadline) throw new Error("The promo timed out");
         await new Promise((r) => setTimeout(r, 4000));
-        const poll = await fetch(base, { cache: "no-store", signal });
+        const poll = await pollThroughRestarts(base, signal);
         p = await poll.json().catch(() => null);
         if (poll.status === 202 || poll.status === 200) {
           const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
