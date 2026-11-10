@@ -113,11 +113,13 @@ export async function buildAlbumZip(id, { albumJob = null, meta }) {
     const coverPng = albumJobs.getCover(id) ?? (await albumJobs.storedCover(id));
     const coverJpeg = coverPng ? await pngToJpeg(Buffer.from(coverPng)) : null;
     const { folder, entries } = albumEntries({ meta, audio, coverJpeg, coverPng: coverPng ? Buffer.from(coverPng) : null });
-    return { zip: createZip(entries), name: `${folder}.zip`, tracks: audio.filter(Boolean).length };
+    return { zip: createZip(entries), name: `${folder}.zip`, tracks: audio.filter(Boolean).length, cover: Boolean(coverPng) };
   })();
   cache.set(id, { at: now, value });
   // Keep at most two built zips (tens of MB each) in memory.
   while (cache.size > 2) cache.delete(cache.keys().next().value);
-  value.catch(() => cache.delete(id));
+  // The image queue can be slower than the songs: a zip built before the
+  // cover landed is not kept, so the next download picks the cover up.
+  value.then((v) => !v.cover && cache.delete(id), () => cache.delete(id));
   return value;
 }

@@ -786,6 +786,23 @@ export default function ChatView({ initialModels = [] }) {
         provider: { name: "c0mpute", model: "album · ace-step-1.5" }
       })));
       submittedTextRef.current = "";
+      // The cover queues on the image workers separately and can land after
+      // the songs: keep looking (up to 2 h), then show it. The zip picks it
+      // up on the next download.
+      if (!p?.coverUrl) {
+        const poll = start.poll;
+        (async () => {
+          const until = Date.now() + 2 * 60 * 60 * 1000;
+          while (Date.now() < until) {
+            await new Promise((r) => setTimeout(r, 30_000));
+            const c = await fetch(`${poll}/cover`, { cache: "no-store" }).catch(() => null);
+            if (!c?.ok) continue;
+            await c.body?.cancel().catch(() => {});
+            setMessages((prev) => prev.map((m) => (m.album?.base === poll ? { ...m, album: { ...m.album, cover: `${poll}/cover` } } : m)));
+            return;
+          }
+        })();
+      }
     } catch (err) {
       if (err?.name === "AbortError") return;
       const message = err?.message ?? "Album failed";
