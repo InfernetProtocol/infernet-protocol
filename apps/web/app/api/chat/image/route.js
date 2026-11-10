@@ -7,6 +7,7 @@ import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
 import { IMAGE_MODEL, imagePriceMicro, validateImageRequest } from "@/lib/billing/image";
 import { startImageJob } from "@/lib/chat/image-jobs";
+import { adultRefusal, passthroughStatus } from "@/lib/billing/video";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,6 +46,11 @@ export async function POST(request) {
   if (billing.mode === "insufficient") {
     return errorJson("Out of compute balance", 402, `spendable ${billing.spendable_usd} USD`);
   }
+  // Adult (18+) images: trusted client (verified 18+ account) on a paid
+  // balance only. The gateway and worker apply the child-safety guard again.
+  const adult = adultRefusal({ adult: body?.adult, trusted, billingMode: billing.mode });
+  if (adult) return errorJson(adult.error, adult.status);
+  if (body?.adult === true) parsed.spec.adult = true;
   if (billing.mode === "balance") {
     const pr = paidLimit.check(`paid:${payer.userId}`);
     if (!pr.ok) return errorJson("Rate limit exceeded — try again later", 429);
@@ -86,7 +92,8 @@ export async function POST(request) {
     if (response.status !== 200) {
       // 503 now means the gateway's whole queue wait ran out with no worker.
       const why = gatewayError(response);
-      throw Object.assign(new Error(why || "Image generation failed"), { status: response.status === 503 ? 503 : 502 });
+      // Content-policy refusals (403/422) keep their status and message.
+      throw Object.assign(new Error(why || "Image generation failed"), { status: passthroughStatus(response.status) });
     }
     const png = new Uint8Array(response.body);
     const header = (name) => {
