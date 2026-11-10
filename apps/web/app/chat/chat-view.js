@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { parseImageCommand } from "@/lib/billing/image";
 import { describeNodeProgress, parseMusicCommand } from "@/lib/billing/music";
+import { describeAlbumStage, parseAlbumCommand, trackFileBase } from "@/lib/billing/album";
 import { describePromoProgress, detectPromoRequest, parsePromoCommand, PROMO_STYLES } from "@/lib/promo/request";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -724,6 +725,81 @@ export default function ChatView({ initialModels = [] }) {
     }
   }
 
+  // `/album <prompt>` names a band, an album and 8 songs (or as many as the
+  // prompt asks for, up to 12), writes their lyrics, draws a cover and
+  // renders every track on c0mpute workers. Tracks play as they land; the
+  // whole album downloads as one zip at the end.
+  async function generateAlbum(text, { prompt }) {
+    const started = Date.now();
+    const controller = new AbortController();
+    sendControllerRef.current = controller;
+    const signal = controller.signal;
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: text, imageTurn: true },
+      { role: "assistant", content: "", pending: true, imageTurn: true, status: "Naming the band and writing the album…" }
+    ]);
+    setStreaming(true);
+    // Track audio is handed out once per song job: fetch each one once.
+    const audio = new Map();
+    try {
+      const res = await fetch("/api/chat/album", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await fingerprintHeader()) },
+        body: JSON.stringify({ prompt }),
+        signal
+      });
+      const start = await res.json().catch(() => null);
+      if (res.status !== 202 || !start?.poll) throw new Error(start?.error ?? `The album failed to start (${res.status})`);
+      const note = start.limited ? `Only ${start.tracks} free songs left today, so this album has ${start.tracks} tracks.` : null;
+      const deadline = Date.now() + 8 * 60 * 60 * 1000;
+      let p = null;
+      while (true) {
+        if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+        if (Date.now() > deadline) throw new Error("The album timed out");
+        await new Promise((r) => setTimeout(r, 5000));
+        const poll = await fetch(start.poll, { cache: "no-store", signal });
+        p = await poll.json().catch(() => null);
+        if (poll.status !== 202 && poll.status !== 200) throw new Error(p?.error ?? `The album failed (${poll.status})`);
+        for (const t of p?.tracks ?? []) {
+          if (t.status !== "done" || !t.id || audio.has(t.id)) continue;
+          audio.set(t.id, null);
+          const a = await fetch(`/api/chat/music/${t.id}`, { cache: "no-store", signal }).catch(() => null);
+          if (a?.ok) {
+            const blob = await a.blob();
+            audio.set(t.id, { url: URL.createObjectURL(blob), type: blob.type || "audio/mpeg" });
+          } else audio.delete(t.id);
+        }
+        const secs = p?.seconds ?? Math.round((Date.now() - started) / 1000);
+        const album = albumView(p, start.poll, audio, secs);
+        setMessages((prev) => updateLastAssistant(prev, (m) => ({
+          ...m,
+          status: poll.status === 202 ? `${describeAlbumStage(p)} · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}${note ? `\n${note}` : ""}` : null,
+          album
+        })));
+        if (poll.status === 200) break;
+      }
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({
+        ...m,
+        pending: false,
+        status: null,
+        provider: { name: "c0mpute", model: "album · ace-step-1.5" }
+      })));
+      submittedTextRef.current = "";
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      const message = err?.message ?? "Album failed";
+      const submittedText = submittedTextRef.current;
+      if (submittedText) setInput((previous) => previous || submittedText);
+      submittedTextRef.current = "";
+      setError(message);
+      setMessages((prev) => updateLastAssistant(prev, (m) => ({ ...m, pending: false, status: null, failed: true, content: message })));
+    } finally {
+      if (sendControllerRef.current === controller) sendControllerRef.current = null;
+      setStreaming(false);
+    }
+  }
+
   // `/promo <url> [style] [vertical]` (or "make a pixar promo video for
   // <url>") makes a 20-40 s cartoon promo: brand read from the site, a
   // storyboard, keyframes, narration and a soundtrack on c0mpute workers, cut
@@ -824,6 +900,11 @@ export default function ChatView({ initialModels = [] }) {
     const promo = parsePromoCommand(text) ?? (musicMode || imageMode ? null : detectPromoRequest(text));
     if (promo) {
       await generatePromo(text, promo);
+      return;
+    }
+    const albumCmd = parseAlbumCommand(text);
+    if (albumCmd) {
+      await generateAlbum(text, albumCmd);
       return;
     }
     const music = parseMusicCommand(text) ?? (musicMode ? parseMusicCommand(`/music ${text}`) : null);
@@ -1462,7 +1543,7 @@ export default function ChatView({ initialModels = [] }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onComposerKey}
-            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : musicMode ? "Describe the music (genre, instruments, mood). For vocals add a line 'lyrics:' then the words." : "Ask anything, /image a prompt, /music a style, or /promo a URL. Shift+Enter for a newline."}
+            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : musicMode ? "Describe the music (genre, instruments, mood). For vocals add a line 'lyrics:' then the words." : "Ask anything, /image a prompt, /music a style, /album an idea, or /promo a URL. Shift+Enter for a newline."}
             rows={2}
             disabled={streaming}
             className="w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel-strong)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--muted)]/70 disabled:opacity-60"
@@ -1975,6 +2056,91 @@ function Readm3Button({ text }) {
   );
 }
 
+/** What the album card shows, from a poll of /api/chat/album/<id>. */
+function albumView(p, base, audio, seconds) {
+  return {
+    base,
+    band: p?.band ?? null,
+    album: p?.album ?? null,
+    genre: p?.genre ?? null,
+    concept: p?.concept ?? null,
+    cover: p?.coverUrl ?? null,
+    zip: p?.zip ?? null,
+    seconds,
+    tracks: (p?.tracks ?? []).map((t) => ({
+      n: t.n,
+      title: t.title,
+      duration: t.duration,
+      status: t.status,
+      error: t.error ?? null,
+      lyrics: t.lyrics && !/^\s*\[instrumental\]\s*$/i.test(t.lyrics) ? t.lyrics : null,
+      node: t.node ?? null,
+      audio: (t.id && audio.get(t.id)) || null
+    }))
+  };
+}
+
+const TRACK_STATUS = { planned: "planned", written: "lyrics written", pending: "recording", done: "", failed: "failed" };
+
+function AlbumCard({ album }) {
+  const mmss = (s) => (Number.isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "");
+  return (
+    <div className="mt-1 mb-2 max-w-[640px]">
+      <div className="flex flex-wrap items-start gap-4">
+        {album.cover ? (
+          // eslint-disable-next-line @next/next/no-img-element -- same-origin cover served by the album route
+          <img src={album.cover} alt={album.album ? `Cover art: ${album.album}` : "Album cover"} className="aspect-square w-40 rounded-xl border border-white/10 object-cover shadow-lg" />
+        ) : (
+          <div className="flex aspect-square w-40 items-center justify-center rounded-xl border border-dashed border-white/15 text-xs text-[var(--muted)]">cover…</div>
+        )}
+        <div className="min-w-0 flex-1">
+          {album.album ? <p className="text-base font-semibold text-white">{album.album}</p> : null}
+          {album.band ? <p className="text-sm text-[var(--accent)]">{album.band}</p> : null}
+          {album.genre ? <p className="text-xs text-[var(--muted)]">{album.genre}</p> : null}
+          {album.concept ? <p className="mt-2 text-xs text-[var(--muted)]">{album.concept}</p> : null}
+          {album.zip ? (
+            <a href={album.zip} download className="mt-3 inline-block rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] hover:bg-white/5">
+              Download album (.zip: mp3s, lyrics, cover)
+            </a>
+          ) : null}
+        </div>
+      </div>
+      {album.tracks.length ? (
+        <ol className="mt-3 space-y-2">
+          {album.tracks.map((t) => (
+            <li key={t.n} className="rounded-lg border border-white/10 px-3 py-2">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="truncate text-white">
+                  {String(t.n).padStart(2, "0")}. {t.title}
+                  {t.duration ? <span className="text-[var(--muted)]"> · {mmss(t.duration)}</span> : null}
+                </span>
+                <span className={t.status === "failed" ? "text-[var(--warn)]" : "text-[var(--muted)]"}>
+                  {t.status === "pending" && t.node ? describeNodeProgress(t.node) : TRACK_STATUS[t.status] ?? t.status}
+                </span>
+              </div>
+              {t.audio ? (
+                <div className="mt-1 flex items-center gap-3">
+                  <audio controls preload="none" src={t.audio.url} className="h-8 w-full" />
+                  <a href={t.audio.url} download={`${trackFileBase(t.n, t.title)}.${t.audio.type === "audio/wav" ? "wav" : t.audio.type === "audio/flac" ? "flac" : "mp3"}`} className="shrink-0 text-xs text-[var(--accent)] hover:underline">
+                    mp3
+                  </a>
+                </div>
+              ) : null}
+              {t.error ? <p className="mt-1 text-xs text-[var(--warn)]">{t.error}</p> : null}
+              {t.lyrics ? (
+                <details className="mt-1 text-xs text-[var(--muted)]">
+                  <summary className="cursor-pointer">Lyrics</summary>
+                  <p className="mt-1 whitespace-pre-wrap">{t.lyrics}</p>
+                </details>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </div>
+  );
+}
+
 function PromoCard({ promo }) {
   const frames = (promo.scenes ?? []).map((s, i) => (s.frame ? i : null)).filter((i) => i !== null);
   return (
@@ -2023,7 +2189,7 @@ function PromoCard({ promo }) {
 }
 
 function Bubble({ message }) {
-  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image, audio, cover, promo } = message;
+  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image, audio, cover, promo, album } = message;
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -2071,6 +2237,7 @@ function Bubble({ message }) {
           </figure>
         ) : null}
         {!isUser && promo ? <PromoCard promo={promo} /> : null}
+        {!isUser && album ? <AlbumCard album={album} /> : null}
         {!isUser && audio ? (
           <figure className="mt-1">
             <audio controls src={audio.url} className="w-full max-w-[640px]" />
