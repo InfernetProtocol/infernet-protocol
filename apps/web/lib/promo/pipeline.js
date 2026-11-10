@@ -21,6 +21,21 @@ import { END_CARD_SECONDS, XFADE, buildTimeline, dimensions, wavSeconds } from "
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// When one promo finds no video worker, the others running or starting in the
+// next half hour skip img2vid at once instead of each waiting out a probe:
+// every one of them holds a promo slot while it waits.
+const NO_VIDEO_MS = 30 * 60 * 1000;
+let noVideoUntil = 0;
+export function videoWorkersMissing(now = Date.now()) {
+  return now < noVideoUntil;
+}
+export function markNoVideoWorker(now = Date.now()) {
+  noVideoUntil = now + NO_VIDEO_MS;
+}
+export function resetVideoWorkerState() {
+  noVideoUntil = 0;
+}
+
 /** Run `fn` over items with at most `n` at once. */
 export async function mapLimit(items, n, fn) {
   const out = new Array(items.length);
@@ -123,15 +138,25 @@ export async function runPromo(job, request, deps) {
 
   async function animate(i) {
     if (videoState === "no" || videoState === "off") return;
+    if (videoState === "unknown" && videoWorkersMissing()) {
+      videoState = "no";
+      ck.videoState = videoState;
+      checkpoint();
+      set("motion", "skipped", "no video worker free: Ken Burns camera moves");
+      return;
+    }
     if (videoState === "unknown") {
       // The first frame probes whether any video worker answers; the rest wait for it.
       if (!videoProbe) {
         set("motion", "running", `img2vid scene ${i + 1}`);
-        videoProbe = tryClip(i).then((ok) => {
+        videoProbe = tryClip(i, videoCfg.probeMs ?? videoCfg.budgetMs).then((ok) => {
           videoState = ok ? "yes" : "no";
           ck.videoState = videoState;
           checkpoint();
-          if (!ok) set("motion", "skipped", "no video worker free: Ken Burns camera moves");
+          if (!ok) {
+            markNoVideoWorker();
+            set("motion", "skipped", "no video worker free: Ken Burns camera moves");
+          }
           return ok;
         });
         return videoProbe;
@@ -142,7 +167,7 @@ export async function runPromo(job, request, deps) {
     return tryClip(i);
   }
 
-  async function tryClip(i) {
+  async function tryClip(i, waitMs = videoCfg.budgetMs ?? 20 * 60 * 1000) {
     const sc = scenes[i];
     if (sc.clip) return true;
     const fps = 16;
@@ -160,7 +185,7 @@ export async function runPromo(job, request, deps) {
         seed,
         image_format: "png",
         image_base64: sc.frameBytes.toString("base64")
-      }, { maxWaitS: (videoCfg.budgetMs ?? 20 * 60 * 1000) / 1000 });
+      }, { maxWaitS: Math.max(1, Math.round(waitMs / 1000)) });
       if (!bytes || bytes.length < 1000) return false;
       const name = `clip-${i}.mp4`;
       const file = path.join(job.dir, name);

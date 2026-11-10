@@ -252,3 +252,55 @@ describe("brand reading and the SSRF guard", () => {
     expect(sniffImage(Buffer.from("<html><body>not an image</body></html>"))).toBeNull();
   });
 });
+
+describe("no video worker does not hold promo slots", () => {
+  const wav = () => {
+    const data = Buffer.alloc(16000);
+    const head = Buffer.alloc(44);
+    head.write("RIFF", 0, "latin1"); head.writeUInt32LE(36 + data.length, 4); head.write("WAVE", 8, "latin1");
+    head.write("fmt ", 12, "latin1"); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
+    head.writeUInt32LE(8000, 24); head.writeUInt32LE(16000, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
+    head.write("data", 36, "latin1"); head.writeUInt32LE(data.length, 40);
+    return Buffer.concat([head, data]);
+  };
+
+  it("probes briefly once, then every promo for half an hour skips img2vid at once", async () => {
+    const { runPromo, resetVideoWorkerState, videoWorkersMissing } = await import("@/lib/promo/pipeline");
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    resetVideoWorkerState();
+    const waits = [];
+    const deps = {
+      brand: async (url) => ({ name: "Killer Cloud", tagline: "Hosting", host: "cloud.killer.pit.world", url, colors: { primary: "#112233", secondary: "#445566", accent: "#778899" }, copy: [] }),
+      configured: false,
+      gateway: {
+        image: async () => Buffer.alloc(64, 1),
+        tts: async () => wav(),
+        music: async () => null,
+        video: async (_spec, { maxWaitS }) => {
+          waits.push(maxWaitS);
+          throw Object.assign(new Error("img2vid failed (gateway HTTP 503): no worker for video.img2vid within 3 min"), { status: 503 });
+        }
+      },
+      video: { enabled: true, model: "wan2.2-ti2v-5b", width: 832, height: 480, budgetMs: 20 * 60 * 1000, probeMs: 180 * 1000 },
+      render: async ({ dir }) => ({ video: `${dir}/promo.mp4`, srt: `${dir}/promo.srt`, duration: 30, bytes: 1 })
+    };
+    const run = async () => {
+      const dir = await mkdtemp(join(tmpdir(), "promo-test-"));
+      try {
+        const job = { id: "j", dir, meta: {} };
+        await runPromo(job, { url: "https://cloud.killer.pit.world", music: false }, deps);
+        return job.meta.stages.motion;
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    };
+    expect((await run()).state).toBe("skipped");
+    expect(waits).toEqual([180]);
+    expect(videoWorkersMissing()).toBe(true);
+    expect((await run()).state).toBe("skipped");
+    expect(waits).toEqual([180]);
+    resetVideoWorkerState();
+  }, 30_000);
+});
