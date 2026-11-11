@@ -208,6 +208,9 @@ importers:
       '@profullstack/browser-fingerprint':
         specifier: ^0.1.0
         version: 0.1.0
+      '@profullstack/chat-plugins':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@profullstack/coinpay-onboard':
         specifier: 0.3.1
         version: 0.3.1
@@ -1114,7 +1117,7 @@ packages:
 
   '@expo/bunyan@4.0.1':
     resolution: {integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==}
-    engines: {'0': node >=0.10.0}
+    engines: {node: '>=0.10.0'}
 
   '@expo/cli@0.17.13':
     resolution: {integrity: sha512-n13yxOmI3I0JidzMdFCH68tYKGDtK4XlDFk1vysZX7AIRKeDVRsSbHhma5jCla2bDt25RKmJBHA9KtzielwzAA==}
@@ -1633,6 +1636,10 @@ packages:
 
   '@profullstack/browser-fingerprint@0.1.0':
     resolution: {integrity: sha512-gTOPS+Gm9fJ99EvvppXq6hS3FU/N9V5lPC5z81z+8lhCDahfekKwd0OdRN4WU61FNjgQWPb4wdzrYSWp4jCsjQ==}
+    engines: {node: '>=20'}
+
+  '@profullstack/chat-plugins@0.1.0':
+    resolution: {integrity: sha512-V6KwXpevLQFExiGwl3PlvX82s0GWae4VnajVOAeTF7+rl/ODfS+Yawmcf10VtjOdnK+JM45NRy0l95t8kX9jsg==}
     engines: {node: '>=20'}
 
   '@profullstack/cli@0.2.0':
@@ -4894,6 +4901,7 @@ packages:
 
   node-abort-controller@3.1.1:
     resolution: {integrity: sha512-AGK2yQKIjRuqnc6VkX2Xj5d+QW8xZ87pa1UK6yA6ouUyuxfHuMP6umE5QK7UmTeOAymo+Zx1Fxiuw9rVx8taHQ==}
+    deprecated: This package is no longer needed on supported Node.js versions. Node.js 16+ includes AbortController and AbortSignal as built-in globals. All Node.js versions requiring this polyfill are end-of-life. Use the built-in globals instead.
 
   node-api-version@0.2.1:
     resolution: {integrity: sha512-2xP/IGGMmmSQpI1+O/k72jF/ykvZ89JeuKX3TLJAYPDVLUalrshrLHkeVcCCZqG/eEa635cr8IBYzgnDvM2O8Q==}
@@ -8365,6 +8373,8 @@ snapshots:
       - react
 
   '@profullstack/browser-fingerprint@0.1.0': {}
+
+  '@profullstack/chat-plugins@0.1.0': {}
 
   '@profullstack/cli@0.2.0': {}
 

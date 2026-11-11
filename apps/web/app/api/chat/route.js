@@ -7,6 +7,8 @@ import { resolveBillingCaller, authorizeInteractive } from "@/lib/data/interacti
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
 import { consumeChatRetryToken } from "@/lib/chat/retry-token";
+import { requestUser } from "@/lib/auth/request-user";
+import { pluginChatResponse } from "@/lib/plugins/chat-loop";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +21,10 @@ function err(status, error, detail) {
   const body = { error };
   if (detail !== undefined) body.detail = detail;
   return NextResponse.json(body, { status });
+}
+
+function hasEncryptedPayload(payload) {
+  return typeof payload?.encryptedMessages === "string" && payload.encryptedMessages.length > 0;
 }
 
 export async function POST(request) {
@@ -100,6 +106,18 @@ export async function POST(request) {
         resetAt: new Date(r.resetAt).toISOString()
       });
     }
+  }
+
+  // Plugins (remote MCP servers the person added): the server runs the tool
+  // loop and streams events as SSE. `plugins: true` opts in; `resume` answers
+  // an approval card. Plaintext only: the server must read the turn to run tools.
+  if (payload?.plugins === true || payload?.resume) {
+    let me = null;
+    try { me = await requestUser(request); } catch { /* anonymous */ }
+    const userId = me?.id ?? payer.userId ?? null;
+    if (!userId) return err(401, "Sign in to use plugins");
+    if (hasEncryptedPayload(payload)) return err(400, "Plugin turns are sent in plaintext (the server runs the tools); do not send encryptedMessages");
+    return pluginChatResponse({ request, payload, userId, billing, payer, ip });
   }
 
   // IPIP-0026 §2.2 — accept either camelCase or snake_case from clients.

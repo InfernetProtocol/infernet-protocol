@@ -427,6 +427,29 @@ in the payout path reads it, and it can never be withdrawn.
   `credits_redeem`, `invites_list`, `invite_create`.
 - Credits are not spent on anything yet (jobs are free and IP-limited, or paid per job through CoinPay).
 
+### Chat plugins (remote MCP servers)
+
+A signed-in account can add **plugins**: remote MCP servers whose tools the chat model may call. Add one by
+clicking it in the `/chat` Plugins panel, with `/plugin add <url|name>` in chat, `infernet plugins add <url|name>`,
+or the `plugins_add` MCP tool. If it wants sign-in, its own sign-in page opens (OAuth 2.1 with dynamic client
+registration and PKCE, done by the server); there are no client ids or forms. Built on
+[`@profullstack/chat-plugins`](https://www.npmjs.com/package/@profullstack/chat-plugins); the catalog starts with
+c0mpute hosting and ThreatCrush.
+
+- With a plugin on, `/api/chat` (`plugins: true`) runs the tool loop on the server and streams SSE events
+  (`step`, `token`, `tool_call`, `tool_result`, `approval_needed`, `text`, `done`). Nodes have no native tool
+  calling, so tools are offered through a prompt protocol (one fenced `tool_call` block per step). Every model
+  call is an ordinary chat job and is billed or counted like one.
+- Tools marked destructive ask first: an approval card in `/chat`, a y/N prompt in `infernet chat` (`--yes` to
+  allow). Answer with `POST /api/chat { plugins: true, resume: { approvalId, decision } }`.
+- Plugin turns are plaintext (the server reads them to run the tools), not end-to-end encrypted; the page says so.
+- Tokens are sealed with AES-256-GCM under a key derived from `INFERNET_DB_ENCRYPTION_KEY`. Plugin URLs must be
+  https and public (private, loopback and link-local addresses are refused after DNS resolution), and a token is
+  only ever sent to its own plugin's host.
+- API: `GET|POST /api/v1/plugins`, `DELETE /api/v1/plugins/{slug}`, `POST /api/v1/plugins/{slug}/toggle`,
+  `GET /api/v1/plugins/{slug}/connect` (to the plugin's sign-in), `GET /api/v1/plugins/callback` (redirect URI).
+  CLI: `infernet plugins add|ls|rm|on|off|connect`. MCP: `plugins_list`, `plugins_add`, `plugins_remove`.
+
 ---
 
 ## Project layout (monorepo)
