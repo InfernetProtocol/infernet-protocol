@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 const limit = rateLimit({ windowMs: 60 * 60 * 1000, max: 2 });
 
 /**
- * POST /api/chat/album  { prompt, tracks?: 2..12 (default 8), duration?: 10..180 }
+ * POST /api/chat/album  { prompt, tracks?: 2..12 (default 8), duration?: 10..600 }
  * → 202 { id, poll }. The server names a band, an album and its songs,
  * writes every song's lyrics, draws a cover, then renders each track as a
  * /music song on c0mpute workers. Poll GET /api/chat/album/<id> for the plan

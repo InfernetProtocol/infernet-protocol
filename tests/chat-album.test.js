@@ -100,7 +100,7 @@ describe("album commands and requests", () => {
     expect(validateAlbumRequest({ prompt: "punk", tracks: 3, duration: 90 }).request).toEqual({ prompt: "punk", tracks: 3, duration: 90 });
     expect(validateAlbumRequest({ prompt: "punk", tracks: 1 }).ok).toBe(false);
     expect(validateAlbumRequest({ prompt: "punk", tracks: 13 }).ok).toBe(false);
-    expect(validateAlbumRequest({ prompt: "punk", duration: 500 }).ok).toBe(false);
+    expect(validateAlbumRequest({ prompt: "punk", duration: 601 }).ok).toBe(false);
     expect(validateAlbumRequest({ prompt: " " }).ok).toBe(false);
   });
 
@@ -151,9 +151,11 @@ describe("album plan parsing", () => {
     const plan = parseAlbumPlan(`Sure! ${reply}`, 3);
     expect(plan.band).toBe("Glass Harbor");
     expect(plan.tracks.map((t) => t.title)).toEqual(["Harbor", "harbor (II)", "Third"]);
-    expect(plan.tracks.map((t) => t.duration)).toEqual([180, 120, 90]);
+    expect(plan.tracks.map((t) => t.duration)).toEqual([500, 120, 90]);
     expect(plan.tracks[1].vocals).toBe(false);
     expect(parseAlbumPlan(reply, 2, { duration: 45 }).tracks.map((t) => t.duration)).toEqual([45, 45]);
+    // A range bounds each track: 500 stays, 90 rises to the floor, the ones with no length take the middle.
+    expect(parseAlbumPlan(reply, 4, { range: { min: 150, max: 600 } }).tracks.map((t) => t.duration)).toEqual([500, 375, 150, 375]);
     expect(parseAlbumPlan("no json", 3)).toBeNull();
     expect(parseAlbumPlan('{"band":"x","tracks":[]}', 3)).toBeNull();
   });

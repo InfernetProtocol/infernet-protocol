@@ -1,7 +1,7 @@
 import "server-only";
 
 import { streamChatCompletion, isNimConfigured } from "@infernetprotocol/nim-adapter";
-import { clipText, durationFromBrief, MAX_MUSIC_SECONDS, MIN_MUSIC_SECONDS } from "./billing/music.js";
+import { clipText, durationFromBrief, durationRangeFromBrief, MAX_MUSIC_SECONDS, MIN_MUSIC_SECONDS } from "./billing/music.js";
 import { DEFAULT_TRACK_SECONDS } from "./billing/album.js";
 import { writeMusicSpec } from "./music-brief-writer.js";
 import { parseLooseJson } from "./loose-json.js";
@@ -19,7 +19,7 @@ const PLAN_TIMEOUT_MS = 60_000;
 const PROMPT_CHARS = 6_000;
 const PLAN_ATTEMPTS = 3;
 
-export function albumPlannerSystem(count) {
+export function albumPlannerSystem(count, range = null) {
   return [
     "You are an A&R person and songwriter planning an ORIGINAL album from a brief.",
     "Reply with one JSON object and nothing else:",
@@ -29,7 +29,9 @@ export function albumPlannerSystem(count) {
     "genre: the main genre in a few words.",
     "sound: at most 400 characters of comma-separated style tags shared by every track: genres, instruments, vocal type and delivery, production, mood, tempo range.",
     "concept: one or two sentences on what the album is about.",
-    `tracks: exactly ${count} entries in running order. title: an original song title of 1 to 6 words, all different. theme: one sentence on what that song is about and how it feels (vary tempo and mood across the album: an opener, a single, a slow one, a closer). vocals: "no" only for instrumental interludes or when the brief asks for instrumental music, else "yes". duration: seconds, ${MIN_MUSIC_SECONDS} to ${MAX_MUSIC_SECONDS}; ${DEFAULT_TRACK_SECONDS} unless the brief says otherwise.`
+    `tracks: exactly ${count} entries in running order. title: an original song title of 1 to 6 words, all different. theme: one sentence on what that song is about and how it feels (vary tempo and mood across the album: an opener, a single, a slow one, a closer). vocals: "no" only for instrumental interludes or when the brief asks for instrumental music, else "yes". duration: seconds, ${range
+      ? `${range.min} to ${range.max} as the brief asks; spread the tracks across that range to suit each song (an interlude near the bottom, the epics near the top)`
+      : `${MIN_MUSIC_SECONDS} to ${MAX_MUSIC_SECONDS}; ${DEFAULT_TRACK_SECONDS} unless the brief says otherwise`}.`
   ].join("\n");
 }
 
@@ -38,7 +40,7 @@ const str = (v, max) => (typeof v === "string" ? v.replace(/[\r\n"]+/g, " ").rep
 const NO_VOCALS = /^(no|false|none|instrumental)$/i;
 
 /** Parse and normalise the planner's reply to exactly `count` tracks, or null. */
-export function parseAlbumPlan(text, count, { duration = null } = {}) {
+export function parseAlbumPlan(text, count, { duration = null, range = null } = {}) {
   const s = String(text ?? "");
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
@@ -63,7 +65,7 @@ export function parseAlbumPlan(text, count, { duration = null } = {}) {
       title,
       theme: str(t?.theme, 400),
       vocals: !(t?.vocals === false || (typeof t?.vocals === "string" && NO_VOCALS.test(t.vocals.trim()))),
-      duration: clampSeconds(duration ?? (Number.isFinite(d) ? d : DEFAULT_TRACK_SECONDS))
+      duration: clampSeconds(duration ?? (Number.isFinite(d) ? d : range ? Math.round((range.min + range.max) / 2) : DEFAULT_TRACK_SECONDS), range)
     });
   }
   return {
@@ -76,8 +78,10 @@ export function parseAlbumPlan(text, count, { duration = null } = {}) {
   };
 }
 
-function clampSeconds(n) {
-  return Math.min(MAX_MUSIC_SECONDS, Math.max(MIN_MUSIC_SECONDS, Math.round(n)));
+function clampSeconds(n, range = null) {
+  const lo = range?.min ?? MIN_MUSIC_SECONDS;
+  const hi = range?.max ?? MAX_MUSIC_SECONDS;
+  return Math.min(hi, Math.max(lo, Math.round(n)));
 }
 
 /**
@@ -86,13 +90,15 @@ function clampSeconds(n) {
  */
 export async function writeAlbumPlan({ prompt, tracks: count, duration = null }, { stream = streamChatCompletion, configured = isNimConfigured() } = {}) {
   if (!configured) throw Object.assign(new Error("Album writing is not configured (no writer model)"), { status: 503 });
-  const perTrack = duration ?? durationFromBrief(prompt);
+  // A range ("3 to 10 minutes") bounds each track; one length sets them all.
+  const range = duration ? null : durationRangeFromBrief(prompt);
+  const perTrack = duration ?? (range ? null : durationFromBrief(prompt));
   for (let attempt = 1; attempt <= PLAN_ATTEMPTS; attempt++) {
     try {
       let text = "";
       for await (const ev of stream({
         messages: [
-          { role: "system", content: albumPlannerSystem(count) },
+          { role: "system", content: albumPlannerSystem(count, range) },
           { role: "user", content: `ALBUM BRIEF:\n${clipText(prompt, PROMPT_CHARS)}` }
         ],
         maxTokens: 2000,
@@ -103,7 +109,7 @@ export async function writeAlbumPlan({ prompt, tracks: count, duration = null },
         else if (ev.type === "done") text = ev.data?.text ?? text;
         else if (ev.type === "error") throw new Error(ev.data?.message ?? "planner failed");
       }
-      const plan = parseAlbumPlan(text, count, { duration: perTrack && perTrack <= MAX_MUSIC_SECONDS ? perTrack : null });
+      const plan = parseAlbumPlan(text, count, { duration: perTrack && perTrack <= MAX_MUSIC_SECONDS ? perTrack : null, range });
       if (plan) return plan;
       console.warn(`[album-writer] attempt ${attempt}: unusable plan: ${text.replace(/\s+/g, " ").slice(0, 300)}`);
     } catch (e) {
