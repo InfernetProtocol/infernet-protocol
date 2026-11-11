@@ -1,6 +1,7 @@
 import "server-only";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { microToUsd } from "@/lib/billing/core";
+import { isAdminUser } from "@/lib/auth/admin";
 import {
     INTERACTIVE_SETTINGS_KEY,
     resolveInteractiveConfig,
@@ -69,6 +70,11 @@ export async function authorizeInteractive({ userId, model, signedIn = Boolean(u
     const free = (reason) => ({ mode: "free", reason, spendable_micro: 0, spendable_usd: "0.000000" });
     try {
         const config = await getInteractiveConfig();
+        // Admins (INFERNET_ADMIN_USER_IDS) are unmetered: never charged, never
+        // drawing the free allowance, and treated as paid for adult mode.
+        if (userId && isAdminUser({ id: userId })) {
+            return { mode: "admin", reason: "admin", spendable_micro: 0, spendable_usd: "0.000000", config };
+        }
         if (!config.enabled || !userId) return { ...free(config.enabled ? "anonymous" : "metering_off"), config };
 
         const { getInferencePricing, fundingPreview } = await import("@/lib/data/billing");

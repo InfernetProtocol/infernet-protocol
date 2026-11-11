@@ -46,7 +46,7 @@ export async function POST(request) {
   if (billing.mode === "insufficient") {
     return errorJson("Out of compute balance", 402, `spendable ${billing.spendable_usd} USD`);
   }
-  if (billing.mode === "balance") {
+  if (billing.mode === "balance" || billing.mode === "admin") {
     const pr = paidLimit.check(`paid:${payer.userId}`);
     if (!pr.ok) return errorJson("Rate limit exceeded — try again later", 429);
   } else {

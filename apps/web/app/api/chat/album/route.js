@@ -51,11 +51,11 @@ export async function POST(request) {
     return errorJson("Out of compute balance", 402, `spendable ${billing.spendable_usd} USD`);
   }
   let limited = false;
-  if (billing.mode === "balance") {
+  if (billing.mode === "balance" || billing.mode === "admin") {
     const pr = paidLimit.check(`paid:${payer.userId}`);
     if (!pr.ok) return errorJson("Rate limit exceeded — try again later", 429);
     const need = albumRequest.tracks * musicPriceMicro();
-    if (Number.isFinite(billing.spendable_micro) && billing.spendable_micro < need) {
+    if (billing.mode === "balance" && Number.isFinite(billing.spendable_micro) && billing.spendable_micro < need) {
       return errorJson("Out of compute balance", 402, `an album of ${albumRequest.tracks} tracks needs ${(need / 1e6).toFixed(6)} USD, spendable ${billing.spendable_usd} USD`);
     }
   } else {
