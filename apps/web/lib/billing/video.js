@@ -50,14 +50,15 @@ export function validateVideoRequest(body) {
 /**
  * Adult (18+) jobs: only from a trusted client (which verified the person's
  * 18+ attestation, e.g. c0mpute.com) and only on a paid balance, never the
- * free tier or an anonymous caller. The c0mpute gateway and the worker still
+ * free tier or an anonymous caller (admins are unmetered and count as paid). The c0mpute gateway and the worker still
  * apply the child-safety guard and refuse unless they opted in.
  * Returns null when allowed, else { status, error }.
  */
 export function adultRefusal({ adult, trusted, billingMode }) {
   if (adult !== true) return null;
   if (!trusted) return { status: 403, error: "Adult mode is only available through a verified 18+ account (c0mpute.com)" };
-  if (billingMode !== "balance") return { status: 402, error: "Adult mode needs a paid compute balance" };
+  // An admin account is unmetered and counts as paid.
+  if (billingMode !== "balance" && billingMode !== "admin") return { status: 402, error: "Adult mode needs a paid compute balance" };
   return null;
 }
 

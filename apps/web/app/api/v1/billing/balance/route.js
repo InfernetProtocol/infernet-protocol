@@ -4,6 +4,7 @@ import { getBalance } from "@/lib/data/billing";
 import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor, billedSubjectFrom } from "@/lib/trusted-clients";
 import { userIdForCoinpaySubject } from "@/lib/data/interactive-billing";
+import { isAdminUser } from "@/lib/auth/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +39,9 @@ export async function GET(request) {
                     note: "no Infernet account is linked to this CoinPay identity yet"
                 });
             }
-            return ok({ linked: true, ...(await getBalance({ id: userId })) });
+            // `admin: true` tells the client this account is unmetered, so
+            // paid-only features (adult mode) are open even at a 0 balance.
+            return ok({ linked: true, admin: isAdminUser({ id: userId }), ...(await getBalance({ id: userId })) });
         } catch (e) {
             return failFrom(e);
         }

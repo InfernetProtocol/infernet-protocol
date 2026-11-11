@@ -45,7 +45,7 @@ export async function POST(request) {
   const adult = adultRefusal({ adult: body?.adult, trusted, billingMode: billing.mode });
   if (adult) return errorJson(adult.error, adult.status);
   if (body?.adult === true) parsed.spec.adult = true;
-  if (billing.mode === "balance") {
+  if (billing.mode === "balance" || billing.mode === "admin") {
     const pr = paidLimit.check(`paid:${payer.userId}`);
     if (!pr.ok) return errorJson("Rate limit exceeded — try again later", 429);
   } else {

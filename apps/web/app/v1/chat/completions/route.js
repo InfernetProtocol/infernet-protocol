@@ -95,7 +95,7 @@ export async function POST(request) {
             top_up: "POST /api/v1/billing/topup, or POST /api/v1/billing/fund-from-earnings"
         });
     }
-    if (billing.mode === "balance") {
+    if (billing.mode === "balance" || billing.mode === "admin") {
         const pr = paidLimit.check(`paid:${payer.userId}`);
         if (!pr.ok) return err(429, "Rate limit exceeded — try again later");
     } else {

@@ -34,6 +34,9 @@ describe("chat video helpers", () => {
     expect(adultRefusal({ adult: true, trusted: null, billingMode: "balance" }).status).toBe(403);
     expect(adultRefusal({ adult: true, trusted: { id: "c0mpute" }, billingMode: "free" }).status).toBe(402);
     expect(adultRefusal({ adult: true, trusted: { id: "c0mpute" }, billingMode: "balance" })).toBeNull();
+    // Admin accounts are unmetered and count as paid; still trusted-client only.
+    expect(adultRefusal({ adult: true, trusted: { id: "c0mpute" }, billingMode: "admin" })).toBeNull();
+    expect(adultRefusal({ adult: true, trusted: null, billingMode: "admin" }).status).toBe(403);
   });
 
   it("keeps policy refusal statuses from the gateway", () => {

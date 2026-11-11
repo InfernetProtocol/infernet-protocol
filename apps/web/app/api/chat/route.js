@@ -63,7 +63,7 @@ export async function POST(request) {
   }
 
   let freeLeft;
-  if (billing.mode === "balance") {
+  if (billing.mode === "balance" || billing.mode === "admin") {
     const pr = paidLimit.check(`paid:${payer.userId}`);
     if (!pr.ok) {
       return err(429, "Rate limit exceeded — try again later", {
