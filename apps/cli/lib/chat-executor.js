@@ -133,6 +133,18 @@ function buildEngine(cacheKey, opts) {
     return engineCache.get(cacheKey);
 }
 
+/**
+ * The stub backend answers with canned text. That is fine when an operator
+ * asked for it (`--backend stub`, INFERNET_ENGINE_BACKEND=stub) and wrong
+ * everywhere else: auto-select falls back to it whenever no engine answers
+ * its probe, e.g. Ollama busy for a moment, and the daemon then served
+ * "This is a stub response ..." to real chat users for the rest of its life
+ * (seen on c0mpute.com chat 2026-11-11). Exported for tests.
+ */
+export function stubExplicitlyChosen(config = {}, env = process.env) {
+    return env.INFERNET_ENGINE_BACKEND === 'stub' || config?.engine?.backend === 'stub';
+}
+
 async function defaultEngine() {
     const config = (await loadConfig()) ?? {};
     const eng = config.engine ?? {};
@@ -145,7 +157,15 @@ async function defaultEngine() {
     if (Number.isFinite(eng.ollama_num_thread) && eng.ollama_num_thread > 0) {
         opts.numThread = eng.ollama_num_thread;
     }
-    return buildEngine(`default:${eng.backend ?? 'auto'}`, opts);
+    const cacheKey = `default:${eng.backend ?? 'auto'}`;
+    const engine = await buildEngine(cacheKey, opts);
+    if (engine.kind === 'stub' && !stubExplicitlyChosen(config)) {
+        // Do not keep it: the next job probes the real engines again.
+        engineCache.delete(cacheKey);
+        try { engine.shutdown?.(); } catch { /* best-effort */ }
+        throw new Error('no inference engine reachable on this node (Ollama/vLLM/llama.cpp did not answer); refusing to serve stub output');
+    }
+    return engine;
 }
 
 /** Best-effort: does Ollama (at host) currently serve this exact tag? */
