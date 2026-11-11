@@ -129,7 +129,10 @@ export async function awaitGatewayResult(requestId, { timeoutMs = 30 * 60 * 1000
  * allow at least this, or it fails a job the gateway is still going to serve.
  */
 export const GATEWAY_QUEUE_WAIT_MS = Number(process.env.C0MPUTE_QUEUE_WAIT_MS) || 2 * 60 * 60 * 1000;
-export const GATEWAY_JOB_LIMIT_MS = GATEWAY_QUEUE_WAIT_MS + 45 * 60 * 1000;
+// A clip may render for up to 2 h once a worker takes it (c0mpute
+// video::JOB_TIMEOUT, counted from the award, not from the queue).
+export const GATEWAY_RENDER_LIMIT_MS = 2 * 60 * 60 * 1000;
+export const GATEWAY_JOB_LIMIT_MS = GATEWAY_QUEUE_WAIT_MS + GATEWAY_RENDER_LIMIT_MS + 10 * 60 * 1000;
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 
