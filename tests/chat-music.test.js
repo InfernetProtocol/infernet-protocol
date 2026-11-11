@@ -32,7 +32,7 @@ describe("chat music helpers", () => {
   it("checks duration, lyrics, seed and junk", () => {
     expect(validateMusicRequest({ prompt: "x", duration: 60, seed: 7, lyrics: "hi" }).spec).toMatchObject({ duration: 60, seed: 7, lyrics: "hi" });
     expect(validateMusicRequest({ prompt: "x", duration: 5 }).ok).toBe(false);
-    expect(validateMusicRequest({ prompt: "x", duration: 181 }).ok).toBe(false);
+    expect(validateMusicRequest({ prompt: "x", duration: 601 }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "x", duration: 30.5 }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "x", lyrics: "y".repeat(100_001) }).ok).toBe(false);
     expect(validateMusicRequest({ prompt: "x".repeat(100_001) }).ok).toBe(false);
@@ -60,7 +60,7 @@ describe("chat music helpers", () => {
   });
 });
 
-import { durationFromBrief, toGatewaySpec } from "@/lib/billing/music";
+import { durationFromBrief, durationRangeFromBrief, toGatewaySpec } from "@/lib/billing/music";
 import { parseWriterReply, writeMusicSpec } from "@/lib/music-brief-writer";
 
 const BRIEF =
@@ -71,6 +71,8 @@ describe("music briefs", () => {
   it("reads the length a brief asks for", () => {
     expect(durationFromBrief(BRIEF)).toBe(150);
     expect(durationFromBrief("a ballad, 2-3 minutes")).toBe(180);
+    expect(durationRangeFromBrief("12 songs, 3 to 12 minutes each")).toEqual({ min: 180, max: 600 });
+    expect(durationRangeFromBrief("a 4 minute song")).toBeNull();
     expect(durationFromBrief("2.5 min of ambient")).toBe(150);
     expect(durationFromBrief("90 sec jingle")).toBe(90);
     expect(durationFromBrief("104 BPM in 4/4")).toBeNull();
@@ -82,7 +84,8 @@ describe("music briefs", () => {
     expect(r.request.prompt).toBe(long);
     expect(r.request.duration).toBeNull();
     expect(r.spec.prompt.length).toBeLessThanOrEqual(1000);
-    expect(toGatewaySpec({ prompt: "p", lyrics: "", duration: 500 }).duration).toBe(180);
+    expect(toGatewaySpec({ prompt: "p", lyrics: "", duration: 900 }).duration).toBe(600);
+    expect(toGatewaySpec({ prompt: "p", lyrics: "", duration: 500 }).duration).toBe(500);
   });
 
   it("parses the writer's JSON, tolerating chatter around it", () => {

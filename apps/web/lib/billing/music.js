@@ -22,8 +22,9 @@ export function clipText(text, max) {
   return (cut > head.length * 0.8 ? head.slice(0, cut) : head).trim();
 }
 export const MIN_MUSIC_SECONDS = 10;
-// c0mpute gateway >= 0.2.84 takes up to 180 s.
-export const MAX_MUSIC_SECONDS = 180;
+// ACE-Step 1.5 renders up to 10 minutes; c0mpute takes up to 600 s since
+// profullstack/c0mpute#294.
+export const MAX_MUSIC_SECONDS = 600;
 export const DEFAULT_MUSIC_SECONDS = 30;
 
 /**
@@ -108,6 +109,21 @@ export function toGatewaySpec({ prompt, lyrics, duration, seed }) {
  * A song length the brief states, in seconds, or null: "150-second song",
  * "90 sec", "2-3 minutes" (the upper end), "2.5 min", "2:30".
  */
+/**
+ * A length range a brief asks for ("3 to 10 minutes", "3-8 min songs"), as
+ * { min, max } in seconds clamped to what the model renders, or null. An
+ * album spreads its tracks across it; one song takes the top (durationFromBrief).
+ */
+export function durationRangeFromBrief(text) {
+  const s = String(text ?? "").toLowerCase();
+  const m = /\b(\d+(?:\.\d+)?)\s*(?:[-–—]|to)\s*(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?)\b/.exec(s);
+  if (!m) return null;
+  const clamp = (n) => Math.min(MAX_MUSIC_SECONDS, Math.max(MIN_MUSIC_SECONDS, Math.round(n)));
+  const a = clamp(Number(m[1]) * 60);
+  const b = clamp(Number(m[2]) * 60);
+  return a < b ? { min: a, max: b } : null;
+}
+
 export function durationFromBrief(text) {
   const s = String(text ?? "").toLowerCase();
   let m = /\b(\d{1,2}):([0-5]\d)\b(?!\s*(?:am|pm))/.exec(s);
