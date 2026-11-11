@@ -21,6 +21,8 @@
 import { createEngine, MSG } from "@infernetprotocol/engine";
 import { loadConfig } from "../lib/config.js";
 import { submitChatJob, streamChatEvents } from "../lib/remote-chat.js";
+import { createPluginsClient, readSse } from "../lib/plugins-client.js";
+import { createInterface } from "node:readline/promises";
 
 const HELP = `infernet chat — run a chat inference (P2P network or local)
 
@@ -44,6 +46,12 @@ Common flags:
 
 Network-only flags:
   --url <url>            Control-plane URL override (default: config.controlPlane.url).
+  --no-plugins           Do not use your plugins for this message (see \`infernet plugins\`).
+  --yes                  Allow plugin tools that change things without asking.
+
+Plugins: when you are signed in (\`infernet login\`) and have plugins on, the
+network turn runs with them: the model can call their tools, and tools that
+change or delete things ask first. Plugin turns are sent in plaintext.
 
 Local-only flags:
   --backend <kind>       ollama | mojo | stub. Default: auto.
@@ -126,6 +134,74 @@ async function runRemote({ baseUrl, messages, model, temperature, maxTokens, jso
     return exitCode;
 }
 
+async function askApproval(call) {
+    if (!process.stdin.isTTY || !process.stderr.isTTY) return "deny";
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    try {
+        const args = JSON.stringify(call.arguments ?? {});
+        const a = await rl.question(`\n[plugin] allow ${call.pluginName || call.plugin} to run ${call.title || call.tool} ${args}? [y/N] `);
+        return /^y(es)?$/i.test(a.trim()) ? "allow" : "deny";
+    } finally {
+        rl.close();
+    }
+}
+
+/** A network turn with your plugins: the server runs the tool loop, we render its events. */
+async function runPluginChat({ baseUrl, token, messages, model, maxTokens, jsonMode, autoYes }) {
+    let body = { messages, plugins: true, ...(model ? { modelName: model } : {}), ...(typeof maxTokens === "number" ? { maxTokens } : {}) };
+    const tty = process.stdout.isTTY && !jsonMode;
+    for (let round = 0; round < 6; round++) {
+        const res = await fetch(new URL("/api/chat", baseUrl), {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "text/event-stream", authorization: `Bearer ${token}` },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok || !(res.headers.get("content-type") ?? "").includes("text/event-stream")) {
+            const t = await res.text().catch(() => "");
+            let msg = t.slice(0, 300);
+            try { msg = JSON.parse(t).error ?? msg; } catch { /* text */ }
+            process.stderr.write(`error: ${msg || `HTTP ${res.status}`}\n`);
+            return 1;
+        }
+        let draft = "";
+        let printed = 0;
+        let pending = null;
+        let failed = false;
+        for await (const ev of readSse(res)) {
+            if (jsonMode) { emitJson(ev); }
+            if (ev.type === "step") { draft = ""; printed = 0; }
+            else if (ev.type === "token" && !jsonMode) {
+                draft += ev.text;
+                // Hold back a tool_call block; print prose as it streams.
+                const cut = draft.search(/```[ \t]*tool|<tool_call/i);
+                const shown = cut === -1 ? draft.replace(/`{1,3}$/, "") : draft.slice(0, cut);
+                if (shown.length > printed) { process.stdout.write(shown.slice(printed)); printed = shown.length; }
+            } else if (ev.type === "tool_call" && !jsonMode) {
+                if (printed) process.stdout.write("\n");
+                process.stderr.write(`[plugin] ${ev.plugin} · ${ev.title || ev.tool} ${JSON.stringify(ev.arguments ?? {})}\n`);
+            } else if (ev.type === "tool_result" && !jsonMode) {
+                const first = String(ev.text ?? "").split("\n").slice(0, 3).join(" ").slice(0, 200);
+                process.stderr.write(`[plugin] ${ev.denied ? "declined" : ev.isError ? "error" : "ok"}: ${first}\n`);
+            } else if (ev.type === "plugins_skipped" && !jsonMode) {
+                process.stderr.write(`[plugin] not used (sign in: infernet plugins connect <slug>): ${ev.skipped.map((s) => s.slug).join(", ")}\n`);
+            } else if (ev.type === "text" && !jsonMode) {
+                if (ev.text.length > printed) process.stdout.write(ev.text.slice(printed));
+                if (tty) process.stdout.write("\n");
+            } else if (ev.type === "approval_needed") {
+                pending = ev;
+            } else if (ev.type === "error") {
+                if (!jsonMode) process.stderr.write(`\nerror: ${ev.message}\n`);
+                failed = true;
+            }
+        }
+        if (failed) return 1;
+        if (!pending) return 0;
+        const decision = autoYes ? "allow" : await askApproval(pending.call);
+        body = { plugins: true, resume: { approvalId: pending.approvalId, decision }, ...(model ? { modelName: model } : {}) };
+    }
+    return 0;
+}
+
 async function runLocal({ engineOpts, messages, model, temperature, maxTokens, jsonMode }) {
     let engine;
     try {
@@ -185,7 +261,7 @@ export default async function chat(args) {
 
     // Reclaim values eaten by the greedy parser for known-boolean flags.
     const reclaimed = [];
-    for (const name of ["json", "remote", "local"]) {
+    for (const name of ["json", "remote", "local", "no-plugins", "yes"]) {
         const v = args.get(name);
         if (typeof v === "string") reclaimed.push(v);
     }
@@ -236,6 +312,19 @@ export default async function chat(args) {
                 "       set one with `infernet init` or pass --url <https://...>\n"
             );
             return 2;
+        }
+        // Signed in with plugins on: the turn runs with them.
+        const token = config.auth?.bearerToken ?? null;
+        if (token && !args.has("no-plugins")) {
+            try {
+                const d = await createPluginsClient({ baseUrl: remoteUrl.replace(/\/+$/, ""), token }).list();
+                const usable = (d.plugins ?? []).filter((p) => p.enabled && !p.needs_sign_in);
+                if (usable.length) {
+                    return runPluginChat({ baseUrl: remoteUrl, token, messages, model, maxTokens, jsonMode, autoYes: args.has("yes") });
+                }
+            } catch {
+                /* plugins unavailable: plain network turn */
+            }
         }
         return runRemote({
             baseUrl: remoteUrl,

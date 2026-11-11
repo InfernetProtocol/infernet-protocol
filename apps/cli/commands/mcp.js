@@ -15,6 +15,7 @@ import { resolveClientOptions, createReservationsClient } from '../lib/reservati
 import { createOrdersClient, x402KeyFrom, DEFAULT_MAX_USD } from '../lib/orders-client.js';
 import { resolveCreditsOptions, createCreditsClient } from '../lib/credits-client.js';
 import { resolveBatchOptions, createBatchClient } from '../lib/batch-client.js';
+import { resolvePluginsOptions, createPluginsClient } from '../lib/plugins-client.js';
 import { CURRENT_VERSION } from '../lib/version.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -186,7 +187,29 @@ export const TOOLS = [
     },
     { name: 'batch_status', description: 'A batch: status, item counts, cost so far, funding, and outputs once finished.', inputSchema: { type: 'object', required: ['id'], properties: { id: batchId } }, run: (c, a) => c.batch.status(a.id) },
     { name: 'batch_results', description: 'A batch\'s results as JSONL: custom_id, status, output, estimated tokens, cost.', inputSchema: { type: 'object', required: ['id'], properties: { id: batchId } }, run: (c, a) => c.batch.results(a.id) },
-    { name: 'billing_balance', description: 'Your compute balance: earned (node earnings) spendable, prepaid available, holds, funding order.', inputSchema: { type: 'object', properties: {} }, run: (c) => c.batch.balance() }
+    { name: 'billing_balance', description: 'Your compute balance: earned (node earnings) spendable, prepaid available, holds, funding order.', inputSchema: { type: 'object', properties: {} }, run: (c) => c.batch.balance() },
+    // Chat plugins (remote MCP servers on the signed-in account) used by /chat,
+    // `infernet chat` and the desktop app.
+    {
+        name: 'plugins_list',
+        description: 'Your chat plugins (remote MCP servers the Infernet chat model can use) with on/off and sign-in state, plus the catalog of one-click plugins.',
+        inputSchema: { type: 'object', properties: {} },
+        annotations: { readOnlyHint: true },
+        run: (c) => c.plugins.list()
+    },
+    {
+        name: 'plugins_add',
+        description: 'Add a chat plugin by URL (https://.../mcp) or catalog name (c0mpute, threatcrush). When it needs sign-in the result has connect_url: give that link to the person to open in a browser (valid 15 minutes). No client id or secret is needed.',
+        inputSchema: { type: 'object', required: ['url'], properties: { url: { type: 'string', description: 'plugin URL or catalog name' } } },
+        run: (c, a) => c.plugins.add(a.url)
+    },
+    {
+        name: 'plugins_remove',
+        description: 'Remove a chat plugin and its stored tokens.',
+        inputSchema: { type: 'object', required: ['slug'], properties: { slug: { type: 'string' } } },
+        annotations: { destructiveHint: true },
+        run: (c, a) => c.plugins.remove(a.slug)
+    }
 ];
 
 /** Handle one JSON-RPC message; returns the response object or null for notifications. */
@@ -222,13 +245,14 @@ export async function handleMessage(msg, client) {
 
 export default async function mcp(args) {
     if (args.has('help') || args.has('h')) {
-        process.stdout.write('infernet mcp — MCP server (stdio): self-serve orders, managed-endpoint reservations, credits, invites and paid batch inference\n\n  claude mcp add infernet -- infernet mcp\n');
+        process.stdout.write('infernet mcp — MCP server (stdio): self-serve orders, managed-endpoint reservations, credits, invites, paid batch inference and chat plugins\n\n  claude mcp add infernet -- infernet mcp\n');
         return 0;
     }
     const client = createReservationsClient(await resolveClientOptions({ url: args.get('url'), token: args.get('token'), buyerToken: args.get('buyer-token') }));
     client.orders = createOrdersClient({ baseUrl: (await resolveClientOptions({ url: args.get('url') })).baseUrl });
     client.credits = createCreditsClient(await resolveCreditsOptions({ url: args.get('url'), token: args.get('token') }));
     client.batch = createBatchClient(await resolveBatchOptions({ url: args.get('url'), key: args.get('key'), token: args.get('token') }));
+    client.plugins = createPluginsClient(await resolvePluginsOptions({ url: args.get('url'), token: args.get('token') }));
     const rl = createInterface({ input: process.stdin });
     for await (const line of rl) {
         if (!line.trim()) continue;

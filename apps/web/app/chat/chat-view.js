@@ -12,6 +12,7 @@ import { unified } from "unified";
 import { getConversationKey, encrypt, decrypt } from "@/lib/nip44";
 import { CATALOG } from "@/lib/model-catalog";
 import { findDocumentUrls } from "@/lib/doc-urls";
+import { ApprovalCard, PluginsPanel, ToolCallCard, describePlugins, parsePluginCommand, readEventStream, usePlugins } from "./plugins-panel";
 
 // served_models carries raw ids (ollama tags like `dolphin3:8b`, or the full
 // `hf:org/repo` pull name for vLLM). Map those to the catalog's friendly names
@@ -190,6 +191,9 @@ export default function ChatView({ initialModels = [] }) {
   // worker (a "lyrics:" line adds vocals). `/music <style>` does one message.
   const [musicMode, setMusicMode] = useState(false);
   const [error, setError] = useState(null);
+  // Plugins (remote MCP servers): see plugins-panel.js and lib/plugins/.
+  const pluginState = usePlugins();
+  const [showPlugins, setShowPlugins] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [voiceCatalog, setVoiceCatalog] = useState(null);
   const [voiceEngine, setVoiceEngine] = useState("kokoro");
@@ -928,9 +932,151 @@ export default function ChatView({ initialModels = [] }) {
     }
   }
 
+  function addLocalTurn(userText, assistantText) {
+    setMessages((prev) => [...prev, { role: "user", content: userText, local: true }, { role: "assistant", content: assistantText, done: true, local: true }]);
+  }
+
+  // `/plugin ...` and `/plugins`: answered here, never sent to a model.
+  async function runPluginCommand(text, cmd) {
+    setInput("");
+    submittedTextRef.current = "";
+    if (cmd.action === "panel") {
+      setShowPlugins(true);
+      return;
+    }
+    if (pluginState.signedIn === false) {
+      addLocalTurn(text, "Sign in to use plugins: [sign in](/auth/login?next=/chat).");
+      return;
+    }
+    try {
+      if (cmd.action === "ls") {
+        const list = (await pluginState.refresh()) ?? pluginState.plugins;
+        addLocalTurn(text, describePlugins(list));
+      } else if (cmd.action === "add") {
+        if (!cmd.arg) return addLocalTurn(text, "Usage: `/plugin add <url or catalog name>`, for example `/plugin add c0mpute`.");
+        const r = await pluginState.add(cmd.arg);
+        const p = r.plugin;
+        addLocalTurn(text, r.already
+          ? `**${p.name}** is already added (\`${p.slug}\`).${p.needs_sign_in ? " A sign-in window is open." : ""}`
+          : p.needs_sign_in
+            ? `Added **${p.name}** (\`${p.slug}\`). Finish signing in in the window that opened; its tools are used as soon as you do.`
+            : `Added **${p.name}** (\`${p.slug}\`) with ${p.tools.length} tool${p.tools.length === 1 ? "" : "s"}. The model can use it from your next message.${p.can_sign_in ? " It also offers sign-in for more: open Plugins." : ""}`);
+      } else if (cmd.action === "rm") {
+        if (!cmd.arg) return addLocalTurn(text, "Usage: `/plugin rm <slug>` (see `/plugin ls`).");
+        await pluginState.remove(cmd.arg);
+        addLocalTurn(text, `Removed \`${cmd.arg}\`.`);
+      } else if (cmd.action === "on" || cmd.action === "off") {
+        if (!cmd.arg) return addLocalTurn(text, `Usage: \`/plugin ${cmd.action} <slug>\`.`);
+        await pluginState.toggle(cmd.arg, cmd.action === "on");
+        addLocalTurn(text, `\`${cmd.arg}\` is ${cmd.action}.`);
+      } else if (cmd.action === "connect") {
+        pluginState.openSignIn(cmd.arg);
+        addLocalTurn(text, `Opened sign-in for \`${cmd.arg}\`.`);
+      }
+    } catch (e) {
+      addLocalTurn(text, `⚠️ ${e?.message ?? e}`);
+    }
+  }
+
+  // A plugin turn: the server runs the tool loop and streams events (SSE).
+  async function runPluginTurn(body, signal) {
+    const upd = (fn) => setMessages((prev) => updateLastAssistant(prev, fn));
+    let draft = "";
+    const visible = (t) => t.split(/```[ \t]*tool|<tool_call/i)[0].trimEnd();
+    let finished = false;
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await fingerprintHeader()) },
+        body: JSON.stringify(body),
+        signal
+      });
+      if (!res.ok || !(res.headers.get("content-type") ?? "").includes("text/event-stream")) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b?.error ?? `Server returned ${res.status}`);
+      }
+      upd((m) => ({ ...m, pluginTurn: true, status: "Thinking with plugins…" }));
+      let streamError = null;
+      await readEventStream(res, (ev) => {
+        if (ev.type === "step") {
+          draft = "";
+          upd((m) => ({
+            ...m,
+            provider: ev.provider ? { name: ev.provider.name, model: ev.provider.model } : m.provider,
+            status: m.toolCalls?.length ? "Reading the results…" : "Thinking…"
+          }));
+        } else if (ev.type === "token") {
+          draft += ev.text;
+          const shown = visible(draft);
+          upd((m) => ({ ...m, content: shown, status: shown === draft.trimEnd() ? null : "Choosing a tool…" }));
+        } else if (ev.type === "tool_call") {
+          draft = "";
+          upd((m) => ({
+            ...m,
+            content: "",
+            status: `Running ${ev.title || ev.tool} on ${ev.plugin}…`,
+            toolCalls: [...(m.toolCalls ?? []), { id: ev.id, name: ev.name, title: ev.title, tool: ev.tool, plugin: ev.plugin, arguments: ev.arguments, status: "running" }]
+          }));
+        } else if (ev.type === "tool_result") {
+          upd((m) => ({
+            ...m,
+            toolCalls: (m.toolCalls ?? []).map((c) => (c.id === ev.id ? { ...c, status: "done", text: ev.text, isError: ev.isError, denied: ev.denied } : c))
+          }));
+        } else if (ev.type === "approval_needed") {
+          upd((m) => ({
+            ...m,
+            status: null,
+            approval: { approvalId: ev.approvalId, call: ev.call, answered: null },
+            toolCalls: (m.toolCalls ?? []).filter((c) => c.id !== ev.call.id)
+          }));
+        } else if (ev.type === "plugins_skipped") {
+          const names = ev.skipped.map((s) => s.name).join(", ");
+          upd((m) => ({ ...m, webNote: `Not used this turn (sign in from Plugins): ${names}` }));
+        } else if (ev.type === "text") {
+          upd((m) => ({ ...m, content: ev.text }));
+        } else if (ev.type === "error") {
+          streamError = ev.message;
+        } else if (ev.type === "done") {
+          finished = true;
+          upd((m) => ({ ...m, pending: false, done: ev.status === "done", status: null }));
+        }
+      }, signal);
+      if (streamError) throw new Error(streamError);
+      if (!finished) throw new Error("The plugin turn ended early. Try again.");
+      submittedTextRef.current = "";
+      setStreaming(false);
+      sendControllerRef.current = null;
+    } catch (e) {
+      if (signal?.aborted) return;
+      failPending(e?.message ?? String(e));
+    }
+  }
+
+  async function answerApproval(decision) {
+    const last = [...messages].reverse().find((m) => m.role === "assistant");
+    const approval = last?.approval;
+    if (!approval || approval.answered || streaming) return;
+    setMessages((prev) => updateLastAssistant(prev, (m) => ({
+      ...m,
+      approval: { ...m.approval, answered: decision },
+      pending: true,
+      done: false,
+      status: decision === "allow" ? `Running ${approval.call.title || approval.call.tool}…` : "Continuing without it…"
+    })));
+    const controller = new AbortController();
+    sendControllerRef.current = controller;
+    setStreaming(true);
+    await runPluginTurn({ plugins: true, modelName, resume: { approvalId: approval.approvalId, decision } }, controller.signal);
+  }
+
   async function sendMessage() {
     const text = input.trim();
     if (!text || streaming) return;
+    const pluginCmd = parsePluginCommand(text);
+    if (pluginCmd) {
+      await runPluginCommand(text, pluginCmd);
+      return;
+    }
 
     setError(null);
     submittedTextRef.current = text;
@@ -1029,7 +1175,7 @@ export default function ChatView({ initialModels = [] }) {
 
     // Image turns are not conversation the model can read: leave them out.
     const history = [...messages, nextUser]
-      .filter((m) => !m.imageTurn)
+      .filter((m) => !m.imageTurn && !m.local)
       .map((m) => ({ role: m.role, content: m.content }));
     // Web results, linked documents and the selected OpenProfile persona apply to this turn only.
     const turnContext = [];
@@ -1046,6 +1192,12 @@ export default function ChatView({ initialModels = [] }) {
       ...turnContext,
       history[history.length - 1]
     ];
+
+    // Plugins on: the server runs the tool loop with this conversation (plaintext).
+    if (pluginState.signedIn && pluginState.enabledCount > 0) {
+      await runPluginTurn({ messages: outgoingMessages, modelName: modelName || undefined, plugins: true, maxTokens: 2048 }, signal);
+      return;
+    }
 
     const seenProviderIds = new Set();
     let automaticRetries = 0;
@@ -1503,6 +1655,14 @@ export default function ChatView({ initialModels = [] }) {
               onChange={(v) => setDistributed(v)}
               census={rpcCensus}
             />
+            <button
+              type="button"
+              onClick={() => setShowPlugins((v) => !v)}
+              className="rounded-full border border-[var(--line)] px-3 py-1 text-xs text-[var(--muted)] hover:text-white"
+              title="Let the model use tools from MCP servers you add (c0mpute hosting, ThreatCrush, any URL). Also: /plugin add <url>."
+            >
+              Plugins{pluginState.enabledCount ? ` (${pluginState.enabledCount} on)` : ""}
+            </button>
             <label
               className="flex items-center gap-2 text-xs text-[var(--muted)]"
               title="Searches the web and reads the top pages with TronBrowser, then gives the results to the model with numbered sources. Only your question is sent to the search, never the rest of the chat."
@@ -1551,6 +1711,14 @@ export default function ChatView({ initialModels = [] }) {
           </div>
         </header>
 
+        {showPlugins ? <PluginsPanel state={pluginState} onClose={() => setShowPlugins(false)} /> : null}
+
+        {pluginState.enabledCount > 0 ? (
+          <p className="px-2 text-xs text-[var(--muted)]">
+            Plugins on ({pluginState.plugins.filter((p) => p.enabled && !p.needs_sign_in).map((p) => p.name).join(", ")}): messages go to the server in plaintext so it can run the tools, not end-to-end encrypted.
+          </p>
+        ) : null}
+
         <section
           ref={scrollRef}
           className="flex-1 min-h-[50vh] max-h-[65vh] overflow-y-auto rounded-[2rem] border border-white/10 bg-[var(--panel)] p-6 shadow-inner"
@@ -1560,7 +1728,7 @@ export default function ChatView({ initialModels = [] }) {
           ) : (
             <div className="flex flex-col gap-5">
               {messages.map((m, i) => (
-                <Bubble key={i} message={m} />
+                <Bubble key={i} message={m} onApprove={i === messages.length - 1 ? answerApproval : undefined} />
               ))}
             </div>
           )}
@@ -1589,7 +1757,7 @@ export default function ChatView({ initialModels = [] }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onComposerKey}
-            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : musicMode ? "Describe the music (genre, instruments, mood). For vocals add a line 'lyrics:' then the words." : "Ask anything, /image a prompt, /music a style, /album an idea, or /promo a URL. Shift+Enter for a newline."}
+            placeholder={streaming ? "Working on it…" : imageMode ? "Describe the image to draw." : musicMode ? "Describe the music (genre, instruments, mood). For vocals add a line 'lyrics:' then the words." : "Ask anything, /image a prompt, /music a style, /album an idea, /promo a URL, or /plugin add a tool server. Shift+Enter for a newline."}
             rows={2}
             disabled={streaming}
             className="w-full resize-none rounded-xl border border-[var(--line)] bg-[var(--panel-strong)] px-4 py-3 text-sm text-white outline-none placeholder:text-[var(--muted)]/70 disabled:opacity-60"
@@ -2234,8 +2402,8 @@ function PromoCard({ promo }) {
   );
 }
 
-function Bubble({ message }) {
-  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image, audio, cover, promo, album } = message;
+function Bubble({ message, onApprove }) {
+  const { role, content, provider, pending, failed, status, sources, documents, webNote, finishReason, image, audio, cover, promo, album, toolCalls, approval } = message;
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -2281,6 +2449,10 @@ function Bubble({ message }) {
               </a>
             </figcaption>
           </figure>
+        ) : null}
+        {!isUser && toolCalls?.length ? toolCalls.map((c) => <ToolCallCard key={c.id} call={c} />) : null}
+        {!isUser && approval ? (
+          <ApprovalCard approval={approval} onDecide={(d) => (onApprove ? onApprove(d) : null)} />
         ) : null}
         {!isUser && promo ? <PromoCard promo={promo} /> : null}
         {!isUser && album ? <AlbumCard album={album} /> : null}

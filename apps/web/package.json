@@ -26,6 +26,7 @@
     "@noble/hashes": "^2.4.0",
     "@profullstack/affiliates": "0.3.0",
     "@profullstack/browser-fingerprint": "^0.1.0",
+    "@profullstack/chat-plugins": "^0.1.0",
     "@profullstack/coinpay-onboard": "0.3.1",
     "@profullstack/favicon-generator": "^1.2.1",
     "@profullstack/footer": "latest",

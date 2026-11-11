@@ -41,6 +41,7 @@ Diagnostics:
 Payments:
   payout       Earnings, withdrawals and payout address
   payments     Show recent payment transactions
+  plugins      Tools the model can use in chat (remote MCP servers): add, ls, rm, on, off
   credits      Your consumer compute credits (not earnings); redeem a code
   redeem       Redeem a credit code: infernet redeem CR-XXXX-XXXX-XXXX-XXXX
   invites      Scarce invites (both sides get credits) and your affiliate link

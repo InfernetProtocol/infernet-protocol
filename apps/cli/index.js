@@ -56,6 +56,7 @@ import mcp from './commands/mcp.js';
 import credits, { invites, redeem } from './commands/credits.js';
 import batch, { billing, keys } from './commands/batch.js';
 import price from './commands/price.js';
+import plugins from './commands/plugins.js';
 
 function parseArgs(argv) {
     const positional = [];
@@ -119,11 +120,12 @@ const COMMANDS = {
     start, status, stop, restart, stats, logs,
     payout, payments, gpu, firewall, chat, setup, model, train, publish, inference, rpc, uncensored, reservation, reservations: reservation, order, orders: order, mcp, credits, invites, redeem, batch, batches: batch, billing, keys, tui, doctor, service, pubkey, debug, deploy, console: consoleCmd, help,
     price, prices: price,
+    plugins, plugin: plugins,
     'house-models': houseModels, house: houseModels
 };
 
 // Commands that can run without a loaded config.
-const NO_CONFIG = new Set(['init', 'login', 'help', 'stats', 'logs', 'stop', 'restart', 'gpu', 'firewall', 'chat', 'setup', 'model', 'train', 'publish', 'inference', 'rpc', 'uncensored', 'reservation', 'reservations', 'order', 'orders', 'mcp', 'credits', 'invites', 'redeem', 'batch', 'batches', 'billing', 'keys', 'tui', 'doctor', 'service', 'pubkey', 'debug', 'deploy', 'console', 'upgrade', 'update', 'remove', 'uninstall', 'house-models', 'house', 'price', 'prices']);
+const NO_CONFIG = new Set(['init', 'login', 'help', 'stats', 'logs', 'stop', 'restart', 'gpu', 'firewall', 'chat', 'setup', 'model', 'train', 'publish', 'inference', 'rpc', 'uncensored', 'reservation', 'reservations', 'order', 'orders', 'mcp', 'credits', 'invites', 'redeem', 'batch', 'batches', 'billing', 'keys', 'tui', 'doctor', 'service', 'pubkey', 'debug', 'deploy', 'console', 'upgrade', 'update', 'remove', 'uninstall', 'house-models', 'house', 'price', 'prices', 'plugins', 'plugin']);
 // Commands that need a config but not a control-plane client (none today
 // — kept as a future escape hatch).
 const NO_CLIENT = new Set();
