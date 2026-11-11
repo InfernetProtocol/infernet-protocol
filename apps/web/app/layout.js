@@ -139,9 +139,38 @@ const JSON_LD = {
 // under this layout can be static; mark the whole tree dynamic.
 export const dynamic = "force-dynamic";
 
+// Page tool registered after the @profullstack/webmcp embed (both are modules, so
+// they run in order); a no-op where the browser has no WebMCP.
+const WEBMCP_TOOLS = `
+const W = window.ProfullstackWebMCP;
+if (W && W.supported) {
+  W.registerTool({
+    name: "network_stats",
+    description: "Live Infernet network numbers: LLM providers online, c0mpute workers, models served, jobs.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    execute: async () => (await fetch("/api/overview", { headers: { accept: "application/json" } })).json(),
+  });
+}
+`;
+
 export default function RootLayout({ children }) {
     return (
         <html lang="en">
+            <head>
+                {/* WebMCP (@profullstack/webmcp): site_info, open_page and network_stats
+                    (the public /api/overview numbers) for the AI agent in the visitor's browser. */}
+                <script
+                    type="module"
+                    data-webmcp=""
+                    src="https://cdn.jsdelivr.net/npm/@profullstack/webmcp@0/src/embed.js"
+                    data-pages='{"docs":"/docs","getting_started":"/getting-started","gpu":"/gpu","cpu":"/cpu","chat":"/chat","status":"/status","protocol":"/protocol","faq":"/faq"}'
+                />
+                <script
+                    type="module"
+                    dangerouslySetInnerHTML={{ __html: WEBMCP_TOOLS }}
+                />
+            </head>
             <body className="flex min-h-screen flex-col">
                 <script
                     type="application/ld+json"
