@@ -469,6 +469,21 @@ export async function createChatJob({
   let servedModel = modelName;
   let requestedModel = null;
 
+  if (!p2pProvider && !pinned && !providerId && (!modelName || isModelAlias(modelName))) {
+    // No model (or an alias like "auto"): take the best model online, not
+    // whatever the first node picked serves. Unpinned chats were landing on
+    // qwen2.5:0.5b, which parroted history and called itself Alibaba's
+    // model while qwen2.5:7b sat idle on another node (2026-11-11).
+    for (const preferred of ALIAS_PREFERENCE) {
+      p2pProvider = await pickChatProvider({ modelName: preferred, minTrustTier, excludeProviderIds, reserve: true });
+      if (p2pProvider) {
+        servedModel = matchServedModel(p2pProvider.specs?.served_models, preferred) ?? preferred;
+        if (modelName) requestedModel = modelName;
+        break;
+      }
+    }
+  }
+
   if (!p2pProvider && !pinned && !providerId) {
     p2pProvider = await pickChatProvider({ modelName, minTrustTier, excludeProviderIds, reserve: true });
     // Asked by another name of the model: run it under the name the node serves.
@@ -489,7 +504,7 @@ export async function createChatJob({
     // No model asked for: run one the node really serves. With model_name
     // null the daemon fell back to its configured default, which it may not
     // have pulled ("ollama HTTP 404: model 'qwen2.5:0.5b' not found").
-    if (p2pProvider && !modelName) {
+    if (p2pProvider && !servedModel) {
       const target = aliasTargetFor(p2pProvider);
       if (target) servedModel = target;
     }
