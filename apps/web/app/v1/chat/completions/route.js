@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
-import { createChatJob, liveModelNames } from "@/lib/data/chat";
+import { createChatJob, liveModelNames, abandonChatJob } from "@/lib/data/chat";
 import { streamJobEvents } from "@/lib/data/chat-stream";
+import { failoverEvents } from "@/lib/data/chat-failover";
 import { bearerFrom, isReservationKey } from "@/lib/reservations/core";
 import { serveChatCompletion } from "@/lib/reservations/serve";
 import { checkChatLimit, wantsP2pOnly } from "@/lib/trusted-clients";
@@ -139,17 +140,18 @@ export async function POST(request) {
     }
     const minTrustTier = ALLOWED_TIERS.has(minTrustTierRaw) ? minTrustTierRaw : undefined;
 
+    const jobArgs = {
+        messages,
+        modelName: typeof model === "string" ? model : undefined,
+        maxTokens: Number.isFinite(max_tokens) ? max_tokens : undefined,
+        billedUserId: billing.mode === "balance" ? payer.userId : null,
+        temperature: Number.isFinite(temperature) ? temperature : undefined,
+        minTrustTier,
+        noFallback: wantsP2pOnly(body)
+    };
     let jobBundle;
     try {
-        jobBundle = await createChatJob({
-            messages,
-            modelName: typeof model === "string" ? model : undefined,
-            maxTokens: Number.isFinite(max_tokens) ? max_tokens : undefined,
-            billedUserId: billing.mode === "balance" ? payer.userId : null,
-            temperature: Number.isFinite(temperature) ? temperature : undefined,
-            minTrustTier,
-            noFallback: wantsP2pOnly(body)
-        });
+        jobBundle = await createChatJob(jobArgs);
     } catch (e) {
         const status = Number.isInteger(e?.status) && e.status >= 400 && e.status < 500 ? e.status : 500;
         return err(status, e?.message ?? "failed to create chat job");
@@ -166,6 +168,17 @@ export async function POST(request) {
     }
 
     const job = jobBundle.job;
+    // A node that errors before its first token, or answers from the stub
+    // backend, hands the request to another node (lib/data/chat-failover.js).
+    const events = () => failoverEvents(job, {
+        stream: streamJobEvents,
+        retry: async (excludeProviderIds) => {
+            const next = await createChatJob({ ...jobArgs, excludeProviderIds });
+            return next.source === "none" ? null : next.job;
+        },
+        abandon: (j, reason) => abandonChatJob(j.id, reason),
+        log: (m) => console.warn(m)
+    });
     const cmplId = makeId();
     const reportedModel = job.model_name ?? model ?? "infernet";
 
@@ -189,7 +202,7 @@ export async function POST(request) {
                 push(`data: ${JSON.stringify(chunkFrame({ id: cmplId, model: reportedModel, role: "assistant", deltaContent: "" }))}\n\n`);
 
                 try {
-                    for await (const ev of streamJobEvents(job.id)) {
+                    for await (const ev of events()) {
                         if (closed) break;
                         if (ev.type === "token") {
                             const text = ev.data?.text ?? "";
@@ -236,7 +249,7 @@ export async function POST(request) {
     let fullText = "";
     let finished = false;
     try {
-        for await (const ev of streamJobEvents(job.id)) {
+        for await (const ev of events()) {
             if (ev.type === "token") fullText += ev.data?.text ?? "";
             else if (ev.type === "done") {
                 if (typeof ev.data?.text === "string" && ev.data.text.length > fullText.length) {

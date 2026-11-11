@@ -168,6 +168,12 @@ export function finishPick(rows, { modelName, minTrustTier, requireE2E = false, 
     });
   }
 
+  // A node that advertises no model cannot answer a chat. Routing one a
+  // model-less request anyway is how c0mpute.com chat got the provider
+  // daemon's stub backend ("This is a stub response ...") or an Ollama 404
+  // for the daemon's default tag as its "answer" (2026-11-11).
+  candidates = candidates.filter((p) => servedModelsOf(p).length > 0);
+
   if (typeof modelName === "string" && modelName) {
     // Any name of the model counts: catalog id, Ollama tag, HF repo or the
     // allmodels.io id (lib/model-names.js).
@@ -346,10 +352,14 @@ const ALIAS_PREFERENCE = [
 ];
 const REASONING_MODEL_RE = /^(?:qwen3|deepseek-r1|qwq|phi4-reasoning|magistral)|think/i;
 
-export function aliasTargetFor(provider) {
-  const served = Array.isArray(provider?.specs?.served_models)
+function servedModelsOf(provider) {
+  return Array.isArray(provider?.specs?.served_models)
     ? provider.specs.served_models.filter((m) => typeof m === "string" && m)
     : [];
+}
+
+export function aliasTargetFor(provider) {
+  const served = servedModelsOf(provider);
   if (served.length === 0) return null;
   for (const m of ALIAS_PREFERENCE) if (served.includes(m)) return m;
   return served.find((m) => !REASONING_MODEL_RE.test(m)) ?? served[0];
@@ -416,7 +426,10 @@ export async function createChatJob({
   // when it finishes (lib/data/interactive-billing.js). Null for the
   // anonymous, IP-rate-limited free tier, which bills nobody. A batch item is
   // billed from its own prepaid hold and never sets this.
-  billedUserId = null
+  billedUserId = null,
+  // Providers this request must not land on: nodes that already failed it
+  // (app/v1/chat/completions fails over before the first token).
+  excludeProviderIds = []
 }) {
   const supabase = getSupabaseServerClient();
   const now = new Date().toISOString();
@@ -457,7 +470,7 @@ export async function createChatJob({
   let requestedModel = null;
 
   if (!p2pProvider && !pinned && !providerId) {
-    p2pProvider = await pickChatProvider({ modelName, minTrustTier, reserve: true });
+    p2pProvider = await pickChatProvider({ modelName, minTrustTier, excludeProviderIds, reserve: true });
     // Asked by another name of the model: run it under the name the node serves.
     const servedName = p2pProvider && modelName ? matchServedModel(p2pProvider.specs?.served_models, modelName) : null;
     if (servedName && servedName !== modelName) {
@@ -465,13 +478,20 @@ export async function createChatJob({
       requestedModel = modelName;
     }
     if (!p2pProvider && isModelAlias(modelName)) {
-      const anyProvider = await pickChatProvider({ minTrustTier, reserve: true });
+      const anyProvider = await pickChatProvider({ minTrustTier, excludeProviderIds, reserve: true });
       const target = aliasTargetFor(anyProvider);
       if (anyProvider && target) {
         p2pProvider = anyProvider;
         servedModel = target;
         requestedModel = modelName;
       }
+    }
+    // No model asked for: run one the node really serves. With model_name
+    // null the daemon fell back to its configured default, which it may not
+    // have pulled ("ollama HTTP 404: model 'qwen2.5:0.5b' not found").
+    if (p2pProvider && !modelName) {
+      const target = aliasTargetFor(p2pProvider);
+      if (target) servedModel = target;
     }
   }
 
@@ -743,4 +763,19 @@ export async function liveModelNames() {
 
 function withStatus(message, status) {
   return Object.assign(new Error(message), { status });
+}
+
+/**
+ * Mark a chat job failed when the route gives up on its node (see
+ * lib/data/chat-failover.js). Only a job still in flight changes, so the
+ * node's own completion afterwards is a no-op and bills nobody.
+ */
+export async function abandonChatJob(jobId, reason) {
+  const supabase = getSupabaseServerClient();
+  const now = new Date().toISOString();
+  await supabase
+    .from("jobs")
+    .update({ status: "failed", error: String(reason ?? "abandoned").slice(0, 1024), completed_at: now, updated_at: now })
+    .eq("id", jobId)
+    .in("status", ["pending", "assigned", "running"]);
 }
