@@ -564,8 +564,11 @@ export async function createChatJob({
   // hosted fallback. Plaintext only (the winning worker reads the prompt), so
   // never E2E, an addressed provider, a reservation, a batch item or a
   // distributed run. They are peer nodes, so p2p_only (noFallback) allows them.
+  // They carry no Infernet trust tier, so a caller who asked for verified or
+  // trusted nodes never lands there.
   let c0mputeModel = null;
   if (!p2pProvider && !providerId && !e2e && !pinned && !distributed && !reservationId && !batchItemId
+      && (!minTrustTier || minTrustTier === "public")
       && Array.isArray(messages) && messages.length > 0 && c0mputeJobsBridge()) {
     c0mputeModel = c0mputeModelFor(await c0mputeChatModels(), modelName);
     if (c0mputeModel) {

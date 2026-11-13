@@ -289,6 +289,12 @@ describe("createChatJob and c0mpute", () => {
         expect((await createChatJob({ messages, providerId: "p9", pinned: true })).source).toBe("none");
     });
 
+    it("never sends a caller who asked for verified or trusted nodes to c0mpute", async () => {
+        expect((await createChatJob({ messages, minTrustTier: "trusted" })).source).toBe("none");
+        expect((await createChatJob({ messages, minTrustTier: "verified" })).source).toBe("none");
+        expect((await createChatJob({ messages, minTrustTier: "public" })).source).toBe("c0mpute");
+    });
+
     it("routes as before when the bridge is not configured", async () => {
         delete process.env.C0MPUTE_JOBS_TOKEN;
         expect((await createChatJob({ messages, modelName: "qwen2.5:7b" })).source).toBe("none");
