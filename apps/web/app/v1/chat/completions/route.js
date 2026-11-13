@@ -240,7 +240,8 @@ export async function POST(request) {
                 "Content-Type": "text/event-stream",
                 "Cache-Control": "no-cache, no-transform",
                 "X-Accel-Buffering": "no",
-                "Connection": "keep-alive"
+                "Connection": "keep-alive",
+                "X-Infernet-Source": jobBundle.source
             }
         });
     }
@@ -248,10 +249,15 @@ export async function POST(request) {
     // ---- Non-streaming path (single JSON response) ---------------------
     let fullText = "";
     let finished = false;
+    // Who answered: a c0mpute job the workers missed moves to the hosted fallback.
+    let servedBy = jobBundle.source;
+    let worker = null;
     try {
         for await (const ev of events()) {
             if (ev.type === "token") fullText += ev.data?.text ?? "";
+            else if (ev.type === "meta" && ev.data?.provider_node_id === "nvidia-nim") servedBy = "nim";
             else if (ev.type === "done") {
+                if (typeof ev.data?.worker === "string") worker = ev.data.worker;
                 if (typeof ev.data?.text === "string" && ev.data.text.length > fullText.length) {
                     fullText = ev.data.text;
                 }
@@ -284,5 +290,7 @@ export async function POST(request) {
         // Token-level usage isn't tracked yet; callers that need it
         // should fall back to estimation (4 chars/token rough).
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+    }, {
+        headers: { "x-infernet-source": servedBy, ...(worker ? { "x-infernet-worker": worker } : {}) }
     });
 }

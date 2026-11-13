@@ -7,8 +7,10 @@
 //     to the c0mpute gateway run on them. They never touch `providers`, so a
 //     page that counts only providers shows a fraction of the live network.
 //
-// The two are kept as separate numbers on purpose: one box can run both, and
-// c0mpute does not publish addresses, so a summed total would double count.
+// The worker card stays its own number: one box can run both, and c0mpute
+// does not publish addresses to dedupe by. The LLM card is the exception: it
+// adds the c0mpute workers that serve LLM chat (Infernet chat routes to them)
+// and says in its note how the sum splits and that it may overlap.
 
 const ONLINE_MS = 10 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -43,6 +45,41 @@ export function providerNote({ week, dormant }) {
   if (week > 0) parts.push(`${week} more seen this week`);
   if (dormant > 0) parts.push(`${dormant} dormant`);
   return parts.length ? `LLM chat · ${parts.join(" · ")}` : "LLM chat";
+}
+
+/**
+ * The public "LLM providers online" card: Infernet providers plus c0mpute
+ * workers that serve LLM chat (workload infernet.inference; chat sends a
+ * request there when no Infernet provider serves the model). The big number is
+ * the sum and the note says how it splits. It may count a box twice: one
+ * machine can run the infernet CLI and a c0mpute worker, and c0mpute publishes
+ * no addresses to dedupe by, so the note says "may overlap" rather than
+ * pretending otherwise.
+ *
+ * `inference` is summarizeC0mputeInference() output, or null when c0mpute's
+ * status was unreachable (the card then counts Infernet only, and says so).
+ */
+export function llmProvidersCard(summary, inference) {
+  const infernet = summary?.online ?? 0;
+  const rest = [];
+  if (summary?.week > 0) rest.push(`${summary.week} more seen this week`);
+  if (summary?.dormant > 0) rest.push(`${summary.dormant} dormant`);
+  if (inference == null) {
+    return {
+      label: "LLM providers online",
+      value: infernet,
+      note: [`${infernet} Infernet (c0mpute count unavailable)`, ...rest].join(" · ")
+    };
+  }
+  const c0mpute = inference.workers ?? 0;
+  const split = c0mpute > 0
+    ? `${infernet} Infernet + ${c0mpute} c0mpute (may overlap)`
+    : `${infernet} Infernet + 0 c0mpute`;
+  return {
+    label: "LLM providers online",
+    value: infernet + c0mpute,
+    note: [split, ...rest].join(" · ")
+  };
 }
 
 /**

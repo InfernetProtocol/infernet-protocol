@@ -5,6 +5,8 @@ import { rebalanceChatJob } from "@/lib/data/chat-rebalance";
 import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapter";
 import { makeStreamSanitizer, sanitizeText } from "@/lib/sanitize-stream";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
+import { c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
+import { moveC0mputeJobToNim } from "@/lib/data/chat-c0mpute";
 
 /**
  * Async generator that yields normalized job events for a given job:
@@ -68,6 +70,11 @@ export async function* streamJobEvents(jobId) {
 
     if (job?.input_spec?.fallback === "nvidia-nim") {
         yield* runNimFallback({ supabase, job });
+        return;
+    }
+
+    if (job?.input_spec?.fallback === "c0mpute") {
+        yield* runC0mputeFallback({ supabase, job, sanitizer });
         return;
     }
 
@@ -146,6 +153,41 @@ export async function* streamJobEvents(jobId) {
     } finally {
         closed = true;
         try { supabase.removeChannel(channel); } catch { /* ignore */ }
+    }
+}
+
+/**
+ * A job sent to c0mpute workers (infernet.inference); see
+ * lib/chat/c0mpute-inference.js. Falls over to the hosted fallback when no
+ * worker answers and that was allowed (input_spec.nim_ok).
+ */
+async function* runC0mputeFallback({ supabase, job, sanitizer }) {
+    for await (const ev of c0mputeJobEvents(job, {
+        insertEvent: (jobId, type, data) => insertJobEvent(supabase, jobId, type, data),
+        finalize: (jobId, patch) => finalizeJob(supabase, jobId, patch),
+        charge: (j, result) => chargeInteractive(j, result)
+    })) {
+        if (ev.type === "token") {
+            const cleanText = sanitizer.process(ev.data?.text ?? "");
+            if (cleanText) yield { ...ev, data: { ...ev.data, text: cleanText } };
+        } else if (ev.type === "done") {
+            const tail = sanitizer.flush();
+            yield { ...ev, data: { ...ev.data, text: sanitizeText(ev.data?.text ?? "") + tail } };
+            return;
+        } else if (ev.type === "c0mpute_failed") {
+            const nimJob = await moveC0mputeJobToNim(supabase, job);
+            if (nimJob) {
+                yield* runNimFallback({ supabase, job: nimJob });
+                return;
+            }
+            const data = { message: ev.data?.message ?? "c0mpute worker failed" };
+            const persisted = await insertJobEvent(supabase, job.id, "error", data);
+            await finalizeJob(supabase, job.id, { status: "failed", error: data.message });
+            yield { type: "error", data, id: persisted?.id };
+            return;
+        } else {
+            yield ev;
+        }
     }
 }
 
