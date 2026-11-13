@@ -81,9 +81,9 @@ describe("house-models manifest", () => {
         expect(m.models.find((e) => e.source === "hf.co/profullstack/not-a-lawyer-agent-GGUF")).toBeTruthy();
         expect(m.models.find((e) => e.source === "hf.co/profullstack/tax-guy-agent-GGUF")).toBeTruthy();
         expect(m.models.filter((e) => e.uncensored).map((e) => e.source).sort()).toEqual([
+            "eriktonon/qwen3.8-uncensored:9b",
             "huihui_ai/qwen3.5-abliterated:0.8b", "huihui_ai/qwen3.5-abliterated:2b",
-            "huihui_ai/qwen3.5-abliterated:4b", "huihui_ai/qwen3.5-abliterated:9b",
-            "huihui_ai/qwen3.8-abliterated:27b"
+            "huihui_ai/qwen3.5-abliterated:4b", "huihui_ai/qwen3.8-abliterated:27b"
         ]);
     });
 });
