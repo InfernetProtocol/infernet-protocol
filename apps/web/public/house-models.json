@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": 7,
+  "version": 8,
   "updated": "2026-11-13",
   "about": "Infernet house models: every provider node pulls and serves the models below that fit it, unless its operator opts out (infernet house-models off; uncensored only: infernet house-models uncensored off). Adding a model is a PR to apps/web/public/house-models.json in InfernetProtocol/infernet-protocol. digest = sha256 of the registry manifest (what `ollama list`/api/tags reports); size_bytes = all layers + config. Docs: https://infernetprotocol.com/docs/house-models",
   "models": [
@@ -77,16 +77,16 @@
       "added": "2026-11-02"
     },
     {
-      "name": "qwen3.5-abliterated-9b",
-      "source": "huihui_ai/qwen3.5-abliterated:9b",
-      "digest": "sha256:92a443adb124f5e805bbdee23fdb38fcd22a7bf00a1016b53f764e741369c600",
-      "size_bytes": 6594474755,
+      "name": "qwen3.8-uncensored-9b",
+      "source": "eriktonon/qwen3.8-uncensored:9b",
+      "digest": "sha256:07dddd9e2cacdd184f07b09fa4b379acc2101b28a246dd2f15d55a94007f13de",
+      "size_bytes": 6404322026,
       "min_ram_gb": 16,
-      "min_disk_gb": 7,
+      "min_disk_gb": 8,
       "uncensored": true,
-      "license": "apache-2.0",
-      "description": "Qwen 3.5 9B, abliterated (refusals removed) by huihui-ai. Uncensored general chat for nodes with 16 GB+ RAM.",
-      "added": "2026-11-02"
+      "license": "qwen3.8-max",
+      "description": "Qwen 3.8 Uncensored 9B by eriktonon: community 9B (qwen35 architecture) billed as a Qwen3.8-2.4T distill with Heretic refusal removal, plus a vision projector. Unofficial; ships a creative-writing system prompt (overridden by any request system message) and 64K default context. Replaces qwen3.5-abliterated-9b. Qwen3.8-Max License.",
+      "added": "2026-11-13"
     },
     {
       "name": "qwen3.8-27b",
