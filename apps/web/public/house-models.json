@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": 6,
+  "version": 7,
   "updated": "2026-11-13",
   "about": "Infernet house models: every provider node pulls and serves the models below that fit it, unless its operator opts out (infernet house-models off; uncensored only: infernet house-models uncensored off). Adding a model is a PR to apps/web/public/house-models.json in InfernetProtocol/infernet-protocol. digest = sha256 of the registry manifest (what `ollama list`/api/tags reports); size_bytes = all layers + config. Docs: https://infernetprotocol.com/docs/house-models",
   "models": [
@@ -171,6 +171,18 @@
       "license": "apache-2.0",
       "description": "Qwen3-Coder 30B-A3B Instruct by Alibaba Qwen: mixture-of-experts with ~3.3B active parameters, so it runs at small-model speed. Agentic coding and tool calling, 256K context.",
       "added": "2026-11-09"
+    },
+    {
+      "name": "qwen3-coder-next-80b",
+      "source": "qwen3-coder-next:q4_K_M",
+      "digest": "sha256:ca06e9e4087c714d44355bf954099187890e63084b4a632b8e9956c4b9492074",
+      "size_bytes": 51741611823,
+      "min_ram_gb": 64,
+      "min_disk_gb": 56,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "description": "Qwen3-Coder-Next 80B-A3B by Alibaba Qwen (Jan 2026): the newest official Qwen coding model, mixture-of-experts with ~3B active parameters, built for coding agents and tool calling. Q4_K_M, for nodes with 64 GB+ RAM.",
+      "added": "2026-11-13"
     },
     {
       "name": "devstral-24b",
