@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": 8,
+  "version": 9,
   "updated": "2026-11-13",
   "about": "Infernet house models: every provider node pulls and serves the models below that fit it, unless its operator opts out (infernet house-models off; uncensored only: infernet house-models uncensored off). Adding a model is a PR to apps/web/public/house-models.json in InfernetProtocol/infernet-protocol. digest = sha256 of the registry manifest (what `ollama list`/api/tags reports); size_bytes = all layers + config. Docs: https://infernetprotocol.com/docs/house-models",
   "models": [
@@ -93,11 +93,11 @@
       "source": "qwen3.8:27b",
       "digest": "sha256:aaee06c39dcf2437cde036998d960e1fc1494b8191be7cc9657d01e509097813",
       "size_bytes": 17741872154,
-      "min_ram_gb": 32,
+      "min_ram_gb": 24,
       "min_disk_gb": 20,
       "uncensored": false,
       "license": "apache-2.0",
-      "description": "Qwen3.8 27B by Alibaba Qwen (August 2026): the newest dense open Qwen, general chat, reasoning and tool calling. Q4_K_M, for nodes with 32 GB+ RAM.",
+      "description": "Qwen3.8 27B by Alibaba Qwen (August 2026): the newest dense open Qwen, general chat, reasoning and tool calling. Q4_K_M, for nodes with 24 GB+ RAM.",
       "added": "2026-11-13"
     },
     {
@@ -105,11 +105,11 @@
       "source": "huihui_ai/qwen3.8-abliterated:27b",
       "digest": "sha256:bdc5e13cd1645bc409e95a7d9e864dc3ce3e5fe5beeb24a43c193e8041edd3e0",
       "size_bytes": 17741871954,
-      "min_ram_gb": 32,
+      "min_ram_gb": 24,
       "min_disk_gb": 20,
       "uncensored": true,
       "license": "apache-2.0",
-      "description": "Qwen3.8 27B, abliterated (refusals removed) by huihui-ai. Uncensored general chat for nodes with 32 GB+ RAM; the bigger sibling of the qwen3.5 abliterated 4B/9B.",
+      "description": "Qwen3.8 27B, abliterated (refusals removed) by huihui-ai. Uncensored general chat for nodes with 24 GB+ RAM; the bigger sibling of the qwen3.5 abliterated 4B/9B.",
       "added": "2026-11-13"
     },
     {
@@ -165,7 +165,7 @@
       "source": "qwen3-coder:30b",
       "digest": "sha256:06c1097efce0431c2045fe7b2e5108366e43bee1b4603a7aded8f21689e90bca",
       "size_bytes": 18556700761,
-      "min_ram_gb": 32,
+      "min_ram_gb": 24,
       "min_disk_gb": 20,
       "uncensored": false,
       "license": "apache-2.0",
@@ -189,7 +189,7 @@
       "source": "devstral:24b",
       "digest": "sha256:9bd74193e93935e9d8564d88607b220a9d341c4a36b748cffcbd9ad4f47a9ca9",
       "size_bytes": 14333928046,
-      "min_ram_gb": 32,
+      "min_ram_gb": 24,
       "min_disk_gb": 16,
       "uncensored": false,
       "license": "apache-2.0",
@@ -213,7 +213,7 @@
       "source": "nemotron-3-nano:30b",
       "digest": "sha256:7487f38ecf2402d4080a074b98e9db8258f9701660625822b7b77747db64f0c9",
       "size_bytes": 24271934866,
-      "min_ram_gb": 32,
+      "min_ram_gb": 28,
       "min_disk_gb": 26,
       "uncensored": false,
       "license": "nvidia-open-model-license",
