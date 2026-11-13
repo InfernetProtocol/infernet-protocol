@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": 5,
+  "version": 6,
   "updated": "2026-11-13",
   "about": "Infernet house models: every provider node pulls and serves the models below that fit it, unless its operator opts out (infernet house-models off; uncensored only: infernet house-models uncensored off). Adding a model is a PR to apps/web/public/house-models.json in InfernetProtocol/infernet-protocol. digest = sha256 of the registry manifest (what `ollama list`/api/tags reports); size_bytes = all layers + config. Docs: https://infernetprotocol.com/docs/house-models",
   "models": [
@@ -39,6 +39,30 @@
       "license": "apache-2.0",
       "description": "Tax research assistant (not a CPA, not tax advice): Qwen2.5-0.5B-Instruct with a LoRA trained on the c0mpute network from rssamplifier tax topics and the pit.world corpus, merged, GGUF Q8_0. Built by Profullstack.",
       "added": "2026-11-02"
+    },
+    {
+      "name": "qwen3.5-abliterated-0.8b",
+      "source": "huihui_ai/qwen3.5-abliterated:0.8b",
+      "digest": "sha256:986ee7a22fdbfe56d58748a6abba50c0438d447d4b709a3cbedeb87a0709ae4c",
+      "size_bytes": 1036046628,
+      "min_ram_gb": 2,
+      "min_disk_gb": 2,
+      "uncensored": true,
+      "license": "apache-2.0",
+      "description": "Qwen 3.5 0.8B, abliterated (refusals removed) by huihui-ai. Tiny uncensored chat that fits almost any node.",
+      "added": "2026-11-13"
+    },
+    {
+      "name": "qwen3.5-abliterated-2b",
+      "source": "huihui_ai/qwen3.5-abliterated:2b",
+      "digest": "sha256:ff8b5c8b4197bde89c5d2f16a1d60c93762efc41bb8907190baaa5a16231f315",
+      "size_bytes": 1945323683,
+      "min_ram_gb": 4,
+      "min_disk_gb": 3,
+      "uncensored": true,
+      "license": "apache-2.0",
+      "description": "Qwen 3.5 2B, abliterated (refusals removed) by huihui-ai. Small uncensored chat for nodes with 4 GB+ RAM.",
+      "added": "2026-11-13"
     },
     {
       "name": "qwen3.5-abliterated-4b",
