@@ -4,6 +4,8 @@ import { rebalanceChatJob } from "@/lib/data/chat-rebalance";
 import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapter";
 import { MIN_RPC_PEERS, MAX_RPC_PEERS, ENGINE_ID as RPC_ENGINE_ID } from "@infernetprotocol/rpc-adapter/constants";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
+import { c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
+import { moveC0mputeJobToNim } from "@/lib/data/chat-c0mpute";
 import {
   selectRpcSlices,
   mergeRpcRouting,
@@ -105,6 +107,18 @@ export async function GET(_request, { params }) {
           await runNimFallback({ supabase, job, safeEnqueue, sseFrame });
         } catch (e) {
           safeEnqueue(sseFrame("error", { message: e?.message ?? String(e) }));
+        }
+        clearInterval(hb);
+        safeClose();
+        return;
+      }
+
+      if (fallback === "c0mpute") {
+        try {
+          await runC0mputeFallback({ supabase, job, safeEnqueue, sseFrame });
+        } catch (e) {
+          safeEnqueue(sseFrame("error", { message: e?.message ?? String(e) }));
+          await finalizeJob(supabase, job.id, { status: "failed", error: e?.message ?? String(e) }).catch(() => {});
         }
         clearInterval(hb);
         safeClose();
@@ -488,6 +502,34 @@ function providerEndpoint(provider) {
   return `http://${provider.address}:${port}`;
 }
 
+
+/**
+ * A job no Infernet provider could take, sent to c0mpute workers
+ * (infernet.inference) through the jobs bridge. One-shot answer: the whole
+ * text arrives as one token event. When no worker answers and the hosted
+ * fallback was allowed at creation (input_spec.nim_ok), the job moves there.
+ */
+async function runC0mputeFallback({ supabase, job, safeEnqueue, sseFrame }) {
+  for await (const ev of c0mputeJobEvents(job, {
+    insertEvent: (jobId, type, data) => insertJobEvent(supabase, jobId, type, data),
+    finalize: (jobId, patch) => finalizeJob(supabase, jobId, patch),
+    charge: (j, result) => chargeInteractive(j, result)
+  })) {
+    if (ev.type !== "c0mpute_failed") {
+      safeEnqueue(sseFrame(ev.type, ev.data, ev.id));
+      continue;
+    }
+    const nimJob = await moveC0mputeJobToNim(supabase, job);
+    if (nimJob) {
+      await runNimFallback({ supabase, job: nimJob, safeEnqueue, sseFrame });
+      return;
+    }
+    const data = { message: ev.data?.message ?? "c0mpute worker failed" };
+    const persisted = await insertJobEvent(supabase, job.id, "error", data);
+    safeEnqueue(sseFrame("error", data, persisted?.id));
+    await finalizeJob(supabase, job.id, { status: "failed", error: data.message });
+  }
+}
 
 async function runNimFallback({ supabase, job, safeEnqueue, sseFrame }) {
   const input = job.input_spec ?? {};

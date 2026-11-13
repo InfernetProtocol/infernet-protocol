@@ -3,7 +3,8 @@ import { getEnv } from "@/lib/env";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { formatGeo } from "@/lib/geo";
 import { summariseNetworkMoney, fmtUsdPrecise } from "@/lib/earnings/core";
-import { c0mputeCard, fetchC0mputeSummary, providerNote, summarizeProviders } from "@/lib/data/network-nodes";
+import { c0mputeCard, fetchC0mputeSummary, llmProvidersCard, summarizeProviders } from "@/lib/data/network-nodes";
+import { fetchC0mputeInference } from "@/lib/chat/c0mpute-inference";
 
 function withLimit(query, limit) {
   const pageSize = getEnv().pageSize;
@@ -590,13 +591,15 @@ export async function getDashboardOverview({ pubkey } = {}) {
   // distinct models advertised by currently online providers.
   let providersQuery = supabase.from("providers").select("status, last_seen, specs");
   if (pubkey) providersQuery = providersQuery.eq("public_key", pubkey);
-  const [{ data: providersAll, error: pErr }, totalJobs, pendingJobs, money, c0mpute] = await Promise.all([
+  const [{ data: providersAll, error: pErr }, totalJobs, pendingJobs, money, c0mpute, c0mputeInference] = await Promise.all([
     providersQuery,
     countJobs({ pubkey }),
     countJobs({ status: "pending", pubkey }),
     // Network-wide totals belong on the public page only, not a per-node view.
     pubkey ? Promise.resolve(undefined) : getNetworkMoney(),
-    pubkey ? Promise.resolve(undefined) : fetchC0mputeSummary()
+    pubkey ? Promise.resolve(undefined) : fetchC0mputeSummary(),
+    // c0mpute workers serving LLM chat (infernet.inference) join the LLM card.
+    pubkey ? Promise.resolve(undefined) : fetchC0mputeInference()
   ]);
   if (pErr) throw new Error(pErr.message);
   const providers = providersAll ?? [];
@@ -621,13 +624,10 @@ export async function getDashboardOverview({ pubkey } = {}) {
     cards: [
       pubkey
         ? { label: "Online nodes", value: onlineProviders.length, note: `of ${providers.length} registered` }
-        : {
-            // `registered` counts every identity ever created and nothing
-            // prunes it, so "6 of 60" read as a mostly dead network.
-            label: "LLM providers online",
-            value: onlineProviders.length,
-            note: providerNote(summarizeProviders(providers))
-          },
+        : // `registered` counts every identity ever created and nothing prunes
+          // it, so "6 of 60" read as a mostly dead network. Online uses the
+          // same 10-minute window as the rest of this card set.
+          llmProvidersCard({ ...summarizeProviders(providers), online: onlineProviders.length }, c0mputeInference),
       ...(pubkey ? [] : [c0mputeCard(c0mpute)]),
       {
         label: "Models served",

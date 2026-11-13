@@ -7,6 +7,7 @@ import { getModelDenylist } from "@/lib/data/blocklists";
 import { deniedModel } from "@/lib/moderation/blocklists";
 import { smartPick, isSaturated, isOverloaded, countInflight } from "@/lib/routing/smart-pick";
 import { estimateInputTokens } from "@/lib/billing/core";
+import { c0mputeJobsBridge, c0mputeChatModels, c0mputeVirtualProvider } from "@/lib/chat/c0mpute-inference";
 
 /**
  * Pick a P2P provider to serve a chat job.
@@ -358,6 +359,28 @@ function servedModelsOf(provider) {
     : [];
 }
 
+// Fine-tunes for one job (hf.co/<org>/...-agent) and uncensored builds are
+// served on purpose, but only to a caller who names them.
+const NOT_A_DEFAULT_RE = /^hf\.co\/|abliterated|uncensored/i;
+
+/**
+ * The model to run on c0mpute workers (infernet.inference) for a request no
+ * Infernet provider can take, or null. `served` is c0mpute's model list.
+ * A named model must be served there (under any of its names); no model or an
+ * alias gets the best general chat model, ranked like provider models.
+ */
+export function c0mputeModelFor(served, modelName) {
+  if (!Array.isArray(served) || served.length === 0) return null;
+  if (typeof modelName === "string" && modelName && !isModelAlias(modelName)) {
+    return matchServedModel(served, modelName);
+  }
+  for (const m of ALIAS_PREFERENCE) {
+    const hit = matchServedModel(served, m);
+    if (hit) return hit;
+  }
+  return served.find((m) => !REASONING_MODEL_RE.test(m) && !NOT_A_DEFAULT_RE.test(m)) ?? null;
+}
+
 export function aliasTargetFor(provider) {
   const served = servedModelsOf(provider);
   if (served.length === 0) return null;
@@ -536,9 +559,25 @@ export async function createChatJob({
     }
   }
 
-  const nimAvailable = !p2pProvider && !providerId && !e2e && !pinned && !noFallback
+  // No Infernet provider can take it: c0mpute workers serving
+  // infernet.inference, through the c0mpute jobs bridge, before the billed
+  // hosted fallback. Plaintext only (the winning worker reads the prompt), so
+  // never E2E, an addressed provider, a reservation, a batch item or a
+  // distributed run. They are peer nodes, so p2p_only (noFallback) allows them.
+  let c0mputeModel = null;
+  if (!p2pProvider && !providerId && !e2e && !pinned && !distributed && !reservationId && !batchItemId
+      && Array.isArray(messages) && messages.length > 0 && c0mputeJobsBridge()) {
+    c0mputeModel = c0mputeModelFor(await c0mputeChatModels(), modelName);
+    if (c0mputeModel) {
+      if (modelName && modelName !== c0mputeModel) requestedModel = modelName;
+      servedModel = c0mputeModel;
+    }
+  }
+
+  const nimEligible = !p2pProvider && !providerId && !e2e && !pinned && !noFallback
     && isNimConfigured() && (await hostedFallbackUnderDailyCap());
-  const source = p2pProvider ? "p2p" : nimAvailable ? "nim" : "none";
+  const nimAvailable = nimEligible && !c0mputeModel;
+  const source = p2pProvider ? "p2p" : c0mputeModel ? "c0mpute" : nimAvailable ? "nim" : "none";
   if (nimAvailable) {
     // The hosted fallback serves one configured model. Forwarding the name the
     // caller asked for ("gpt-4o-mini", "qwen2.5:7b") only earned a 404 there.
@@ -560,6 +599,10 @@ export async function createChatJob({
     temperature,
     ...(requestedModel ? { requested_model: requestedModel } : {}),
     ...(nimAvailable ? { fallback: "nvidia-nim" } : {}),
+    // Served by the chat stream (lib/chat/c0mpute-inference.js). nim_ok: the
+    // hosted fallback was allowed too, so a c0mpute miss (no worker bid) is
+    // still answered there before the caller sees anything.
+    ...(c0mputeModel ? { fallback: "c0mpute", c0mpute_model: c0mputeModel, ...(nimEligible ? { nim_ok: true } : {}) } : {}),
     ...(distributed ? { distributed: true } : {}),
     ...(batchItemId ? { billing: "prepaid_batch" } : {}),
     // Stored so the charge at completion prices the same input the caller
@@ -574,7 +617,7 @@ export async function createChatJob({
   // pending row here just sat forever and inflated the pending count. Record
   // it as failed instead: the row still shows the unmet demand (which model
   // people asked for), and the caller answers 503.
-  const status = p2pProvider ? "assigned" : nimAvailable ? "running" : "failed";
+  const status = p2pProvider ? "assigned" : nimAvailable || c0mputeModel ? "running" : "failed";
 
   const insertRow = {
     title: servedModel ? `chat:${servedModel}` : "chat",
@@ -584,7 +627,7 @@ export async function createChatJob({
     model_name: servedModel ?? null,
     input_spec: encryptJSON(inputSpec),
     payment_offer: 0,
-    assigned_at: p2pProvider || nimAvailable ? now : null,
+    assigned_at: p2pProvider || nimAvailable || c0mputeModel ? now : null,
     updated_at: now,
     ...(billedUserId && !batchItemId ? { billed_user_id: billedUserId } : {})
   };
@@ -622,7 +665,8 @@ export async function createChatJob({
   if (error) throw error;
   markPickInserted(p2pProvider);
 
-  const provider = p2pProvider ?? (nimAvailable ? nimVirtualProvider() : null);
+  const provider = p2pProvider
+    ?? (c0mputeModel ? c0mputeVirtualProvider(c0mputeModel) : nimAvailable ? nimVirtualProvider() : null);
   return { job, provider, source, requestedModel };
 }
 
@@ -681,6 +725,9 @@ export async function listChatModels() {
       if (typeof m === "string" && m) seen.add(m);
     }
   }
+  // Models c0mpute workers serve (infernet.inference), when the bridge is
+  // configured: createChatJob sends a request for one of them there.
+  for (const m of await c0mputeChatModels()) seen.add(m);
   if (seen.size > 0) {
     return [...seen].sort().map((name) => ({ id: name, name, family: null, context_length: null }));
   }

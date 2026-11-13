@@ -200,6 +200,10 @@ export async function POST(request) {
           }
         : null,
       streamUrl: `/api/chat/stream/${job.id}`
+    }, {
+      // p2p (an Infernet provider), c0mpute (a c0mpute worker serving
+      // infernet.inference) or nim (the hosted fallback).
+      headers: { "x-infernet-source": source }
     });
   } catch (e) {
     if (Number.isInteger(e?.status) && e.status >= 400 && e.status < 500) return err(e.status, e.message);
