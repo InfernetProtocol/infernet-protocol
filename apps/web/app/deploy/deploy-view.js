@@ -74,6 +74,64 @@ export default function DeployView({ signedInAs = null }) {
         vpc_uuid: ""
     }, null, 2)}'`;
 
+    // Shared cloud-init for every VM provider that takes user_data
+    // (Vultr, Linode/Akamai, Scaleway, DigitalOcean). The one-liner may
+    // carry the 24h deploy bearer, so we write it to a local file
+    // rather than inline it into a shell argument.
+    const cloudConfig = `#cloud-config\nruncmd:\n  - ${oneLiner}`;
+    const writeCloudConfig = `cat > infernet-cloud-init.yaml <<'EOF'\n${cloudConfig}\nEOF`;
+
+    // Vast.ai: containers, not VMs, so no cloud-init. The on-start
+    // command runs at boot; install.sh detects Vast via PUBLIC_IPADDR /
+    // VAST_TCP_PORT_46337 and advertises the mapped port. Stock CUDA
+    // images ship without curl, so install it first.
+    const vastOnstart = `(command -v curl >/dev/null || (apt-get update && apt-get install -y curl ca-certificates)) && ${oneLiner}`;
+    const vastCliCmd = `pip install vastai && vastai set api-key $VAST_API_KEY
+
+# Cheapest verified, reliable single RTX 4090 (swap gpu_name to taste)
+vastai search offers 'gpu_name=RTX_4090 num_gpus=1 verified=true rentable=true reliability>0.98 direct_port_count>=1' -o 'dph'
+
+# Rent offer <OFFER_ID> from the first column
+vastai create instance <OFFER_ID> \\
+  --image nvidia/cuda:12.4.1-runtime-ubuntu22.04 \\
+  --disk 80 --ssh --direct \\
+  --env '-p 46337:46337' \\
+  --onstart-cmd ${shellSingleQuote(vastOnstart)}`;
+
+    // Vultr: user_data is plain text, vultr-cli base64-encodes it.
+    const vultrCmd = `${writeCloudConfig}
+
+# GPU plans + the regions that stock them
+vultr-cli plans list --type vcg
+vultr-cli regions availability <REGION>
+
+vultr-cli instance create \\
+  --region <REGION> --plan vcg-l40s-16c-180g-48vram \\
+  --os 2284 --label infernet \\
+  --userdata "$(cat infernet-cloud-init.yaml)"`;
+
+    // Linode / Akamai: Metadata service delivers base64 user_data to
+    // cloud-init. Needs a Metadata-capable region + a cloud-init image.
+    const linodeCmd = `${writeCloudConfig}
+
+linode-cli linodes create \\
+  --label infernet --region us-ord \\
+  --type g2-gpu-rtx4000a1-s \\
+  --image linode/ubuntu24.04 \\
+  --root_pass "$(openssl rand -base64 24)" \\
+  --metadata.user_data "$(base64 -w0 infernet-cloud-init.yaml)"`;
+
+    // Scaleway: scw reads cloud-init from a file with the @ prefix.
+    const scalewayCmd = `${writeCloudConfig}
+
+# GPU OS images (NVIDIA driver preinstalled)
+scw marketplace image list | grep -i gpu
+
+scw instance server create \\
+  type=L4-1-24G zone=fr-par-2 \\
+  image=ubuntu_noble_gpu_os_12 name=infernet \\
+  cloud-init=@infernet-cloud-init.yaml`;
+
     return (
         <main className="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6 lg:px-10">
             <header className="mb-8 space-y-3">
@@ -81,7 +139,7 @@ export default function DeployView({ signedInAs = null }) {
                     Rent a GPU, run a node
                 </p>
                 <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                    Spin up a provider on RunPod or DigitalOcean.
+                    Spin up a provider on Vast.ai, RunPod, Vultr, Linode, Scaleway or DigitalOcean.
                 </h1>
                 <p className="max-w-2xl text-sm leading-6 text-[var(--muted)]">
                     Universal bootstrap: one cloud-init script that works on any Linux box.
@@ -136,7 +194,7 @@ export default function DeployView({ signedInAs = null }) {
             <section className="mb-8 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6 backdrop-blur">
                 <h2 className="text-lg font-semibold text-white">2. Paste this into your rented box</h2>
                 <p className="mt-1 text-sm text-[var(--muted)]">
-                    Works on DigitalOcean, RunPod custom images, AWS, GCP, bare metal — anywhere with{" "}
+                    Works on DigitalOcean, Vultr, Linode, Scaleway, RunPod and Vast.ai containers, AWS, GCP, bare metal — anywhere with{" "}
                     <code>curl</code> and root.
                 </p>
                 <div className="relative mt-4">
@@ -235,6 +293,96 @@ runcmd:
                     ]}
                 />
                 <ProviderCard
+                    title="Vast.ai"
+                    blurb="Marketplace of consumer and datacenter GPUs, usually the cheapest 4090s and 3090s per hour. Containers, not VMs: use the on-start script instead of cloud-init."
+                    steps={[
+                        <>
+                            Open{" "}
+                            <ExtLink href="https://cloud.vast.ai/templates/">cloud.vast.ai/templates</ExtLink>
+                            , create a template from any CUDA Ubuntu image (e.g.{" "}
+                            <code>nvidia/cuda:12.4.1-runtime-ubuntu22.04</code>), launch mode <em>SSH</em> with <em>direct</em> connections.
+                        </>,
+                        <>In <em>Docker options</em>, open the P2P port:</>,
+                        <CodeBlock text="-p 46337:46337" />,
+                        <>In <em>On-start script</em>, paste:</>,
+                        <CodeBlock text={vastOnstart} />,
+                        <>
+                            Rent a machine from{" "}
+                            <ExtLink href="https://cloud.vast.ai/create/">cloud.vast.ai/create</ExtLink>{" "}
+                            with that template. Prefer <em>verified</em> hosts with reliability above 98%. The installer
+                            reads <code>PUBLIC_IPADDR</code> and <code>VAST_TCP_PORT_46337</code> and advertises the mapped port.
+                        </>
+                    ]}
+                />
+                <ProviderCard
+                    title="Vast.ai (CLI)"
+                    blurb="Same thing from your terminal. Get an API key at cloud.vast.ai/account and export it as VAST_API_KEY."
+                    steps={[
+                        <>Search offers, then rent one with the on-start script baked in:</>,
+                        <CodeBlock text={vastCliCmd} />,
+                        <>
+                            Check it with <code>vastai show instances</code>. If <code>actual_status</code> goes{" "}
+                            <code>exited</code> or <code>offline</code>, destroy it and rent another offer. Those never recover.
+                        </>
+                    ]}
+                />
+                <ProviderCard
+                    title="Vultr"
+                    blurb="Hourly L40S GPU VMs with plain cloud-init. Stock varies by region, so check availability first."
+                    steps={[
+                        <>
+                            In the console (
+                            <ExtLink href="https://my.vultr.com/deploy/">my.vultr.com/deploy</ExtLink>
+                            ) pick <em>Cloud GPU</em>, then under <em>Additional features → Cloud-Init User-Data</em> paste:
+                        </>,
+                        <CodeBlock text={cloudConfig} />,
+                        <>
+                            Or with{" "}
+                            <ExtLink href="https://github.com/vultr/vultr-cli">vultr-cli</ExtLink>{" "}
+                            (<code>export VULTR_API_KEY=…</code>):
+                        </>,
+                        <CodeBlock text={vultrCmd} />
+                    ]}
+                />
+                <ProviderCard
+                    title="Linode / Akamai"
+                    blurb="RTX 4000 Ada from $0.52/hr, billed hourly. User data goes in through the Metadata service."
+                    steps={[
+                        <>
+                            In{" "}
+                            <ExtLink href="https://cloud.linode.com/linodes/create">cloud.linode.com/linodes/create</ExtLink>
+                            , pick a GPU plan, an Ubuntu 24.04 image and a region with Metadata, then paste this under{" "}
+                            <em>Add User Data</em>:
+                        </>,
+                        <CodeBlock text={cloudConfig} />,
+                        <>
+                            Or with <code>linode-cli</code> (<code>pip install linode-cli</code>, then <code>linode-cli configure</code>):
+                        </>,
+                        <CodeBlock text={linodeCmd} />,
+                        <>
+                            GPU plans: <code>linode-cli linodes types --class gpu</code>. Not every region stocks them.
+                        </>
+                    ]}
+                />
+                <ProviderCard
+                    title="Scaleway"
+                    blurb="EU GPUs (Paris, Warsaw): L4, L40S and H100 instances, with GPU OS images that ship the NVIDIA driver."
+                    steps={[
+                        <>
+                            In{" "}
+                            <ExtLink href="https://console.scaleway.com/instance/servers/create">console.scaleway.com</ExtLink>
+                            , pick a GPU instance type and a <em>GPU OS</em> image, then paste under{" "}
+                            <em>Advanced settings → Cloud-init</em>:
+                        </>,
+                        <CodeBlock text={cloudConfig} />,
+                        <>
+                            Or with the <ExtLink href="https://github.com/scaleway/scaleway-cli">scw CLI</ExtLink>{" "}
+                            (<code>scw init</code> first):
+                        </>,
+                        <CodeBlock text={scalewayCmd} />
+                    ]}
+                />
+                <ProviderCard
                     title="Bring-your-own (Linux / macOS / WSL2)"
                     blurb="Got a desktop with an idle GPU? Run a node on the hardware you already own. Works on any Linux box, macOS (Apple Silicon or AMD), or Windows via WSL2."
                     steps={[
@@ -284,6 +432,29 @@ wsl --install -d Ubuntu`}
                 </ul>
             </section>
         </main>
+    );
+}
+
+function shellSingleQuote(s) {
+    return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
+
+function CodeBlock({ text }) {
+    return (
+        <div className="relative">
+            <CopyButton text={text} />
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-[var(--panel-strong)] p-2 pr-20 text-xs leading-5 text-[var(--accent)]">
+{text}
+            </pre>
+        </div>
+    );
+}
+
+function ExtLink({ href, children }) {
+    return (
+        <a href={href} target="_blank" rel="noreferrer" className="text-[var(--accent)] underline">
+            {children}
+        </a>
     );
 }
 
