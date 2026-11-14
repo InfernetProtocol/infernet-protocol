@@ -422,6 +422,23 @@ export async function hostedFallbackUnderDailyCap(now = new Date()) {
   return count < limit;
 }
 
+/** excludeProviderIds entry that keeps a retry off the c0mpute network. */
+export const C0MPUTE_ROUTE = "c0mpute";
+
+/**
+ * Can this request run on c0mpute workers (infernet.inference via the jobs
+ * bridge)? Plaintext only (the winning worker reads the prompt), so never E2E,
+ * an addressed provider, a reservation, a batch item or a distributed run.
+ * They carry no Infernet trust tier, so a caller who asked for verified or
+ * trusted nodes never lands there. They are peer nodes, so p2p_only allows them.
+ */
+export function c0mputeEligible({ providerId, e2e, pinned, distributed, reservationId, batchItemId, minTrustTier, messages, excludeProviderIds = [] }) {
+  return !providerId && !e2e && !pinned && !distributed && !reservationId && !batchItemId
+    && (!minTrustTier || minTrustTier === "public")
+    && Array.isArray(messages) && messages.length > 0
+    && !(Array.isArray(excludeProviderIds) && excludeProviderIds.includes(C0MPUTE_ROUTE));
+}
+
 export async function createChatJob({
   messages,
   encryptedMessages,
@@ -492,7 +509,24 @@ export async function createChatJob({
   let servedModel = modelName;
   let requestedModel = null;
 
-  if (!p2pProvider && !pinned && !providerId && (!modelName || isModelAlias(modelName))) {
+  // c0mpute nodes first: every chat that can run peer to peer goes to the
+  // c0mpute auction, so any node serving the model can win it and be paid.
+  // Infernet's own provider daemons are the fallback when no c0mpute worker
+  // serves the model, and take a job no worker answered (chat-c0mpute.js
+  // moveC0mputeJobToProvider). Until 2026-11-14 it was the other way round:
+  // c0mpute only when no daemon served the model, so two daemons took all of
+  // it while c0mpute nodes sat idle.
+  let c0mputeModel = null;
+  if (c0mputeEligible({ providerId, e2e, pinned, distributed, reservationId, batchItemId, minTrustTier, messages, excludeProviderIds })
+      && c0mputeJobsBridge()) {
+    c0mputeModel = c0mputeModelFor(await c0mputeChatModels(), modelName);
+    if (c0mputeModel) {
+      if (modelName && modelName !== c0mputeModel) requestedModel = modelName;
+      servedModel = c0mputeModel;
+    }
+  }
+
+  if (!c0mputeModel && !p2pProvider && !pinned && !providerId && (!modelName || isModelAlias(modelName))) {
     // No model (or an alias like "auto"): take the best model online, not
     // whatever the first node picked serves. Unpinned chats were landing on
     // qwen2.5:0.5b, which parroted history and called itself Alibaba's
@@ -507,7 +541,7 @@ export async function createChatJob({
     }
   }
 
-  if (!p2pProvider && !pinned && !providerId) {
+  if (!c0mputeModel && !p2pProvider && !pinned && !providerId) {
     p2pProvider = await pickChatProvider({ modelName, minTrustTier, excludeProviderIds, reserve: true });
     // Asked by another name of the model: run it under the name the node serves.
     const servedName = p2pProvider && modelName ? matchServedModel(p2pProvider.specs?.served_models, modelName) : null;
@@ -556,24 +590,6 @@ export async function createChatJob({
       || expectedKey !== suppliedKey
     ) {
       p2pProvider = null;
-    }
-  }
-
-  // No Infernet provider can take it: c0mpute workers serving
-  // infernet.inference, through the c0mpute jobs bridge, before the billed
-  // hosted fallback. Plaintext only (the winning worker reads the prompt), so
-  // never E2E, an addressed provider, a reservation, a batch item or a
-  // distributed run. They are peer nodes, so p2p_only (noFallback) allows them.
-  // They carry no Infernet trust tier, so a caller who asked for verified or
-  // trusted nodes never lands there.
-  let c0mputeModel = null;
-  if (!p2pProvider && !providerId && !e2e && !pinned && !distributed && !reservationId && !batchItemId
-      && (!minTrustTier || minTrustTier === "public")
-      && Array.isArray(messages) && messages.length > 0 && c0mputeJobsBridge()) {
-    c0mputeModel = c0mputeModelFor(await c0mputeChatModels(), modelName);
-    if (c0mputeModel) {
-      if (modelName && modelName !== c0mputeModel) requestedModel = modelName;
-      servedModel = c0mputeModel;
     }
   }
 

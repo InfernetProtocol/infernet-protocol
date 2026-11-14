@@ -5,7 +5,7 @@ import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapte
 import { MIN_RPC_PEERS, MAX_RPC_PEERS, ENGINE_ID as RPC_ENGINE_ID } from "@infernetprotocol/rpc-adapter/constants";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 import { c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
-import { moveC0mputeJobToNim } from "@/lib/data/chat-c0mpute";
+import { moveC0mputeJobToNim, moveC0mputeJobToProvider, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
 import {
   selectRpcSlices,
   mergeRpcRouting,
@@ -114,15 +114,21 @@ export async function GET(_request, { params }) {
       }
 
       if (fallback === "c0mpute") {
+        let moved = null;
         try {
-          await runC0mputeFallback({ supabase, job, safeEnqueue, sseFrame });
+          moved = await runC0mputeFallback({ supabase, job, safeEnqueue, sseFrame });
         } catch (e) {
           safeEnqueue(sseFrame("error", { message: e?.message ?? String(e) }));
           await finalizeJob(supabase, job.id, { status: "failed", error: e?.message ?? String(e) }).catch(() => {});
         }
-        clearInterval(hb);
-        safeClose();
-        return;
+        if (!moved) {
+          clearInterval(hb);
+          safeClose();
+          return;
+        }
+        // No c0mpute worker answered and a daemon took the job: same job id,
+        // so the provider path below serves it.
+        job = moved;
       }
 
       // While no event has arrived, check every 15 s whether the job is
@@ -504,21 +510,26 @@ function providerEndpoint(provider) {
 
 
 /**
- * A job no Infernet provider could take, sent to c0mpute workers
- * (infernet.inference) through the jobs bridge. One-shot answer: the whole
- * text arrives as one token event. When no worker answers and the hosted
- * fallback was allowed at creation (input_spec.nim_ok), the job moves there.
+ * A chat sent to c0mpute workers (infernet.inference) through the jobs
+ * bridge; c0mpute is tried first for every chat that can run there. One-shot
+ * answer: the whole text arrives as one token event. When no worker answers,
+ * the job moves to an Infernet daemon (returned, so the caller serves it in
+ * the provider path), else to the hosted fallback when that was allowed at
+ * creation (input_spec.nim_ok). Returns the moved job or null.
  */
 async function runC0mputeFallback({ supabase, job, safeEnqueue, sseFrame }) {
   for await (const ev of c0mputeJobEvents(job, {
     insertEvent: (jobId, type, data) => insertJobEvent(supabase, jobId, type, data),
     finalize: (jobId, patch) => finalizeJob(supabase, jobId, patch),
-    charge: (j, result) => chargeInteractive(j, result)
+    // Attributes the job to the winning worker and pays it its share.
+    charge: (j, result) => settleC0mputeJob(supabase, j, result)
   })) {
     if (ev.type !== "c0mpute_failed") {
       safeEnqueue(sseFrame(ev.type, ev.data, ev.id));
       continue;
     }
+    const moved = await moveC0mputeJobToProvider(supabase, job);
+    if (moved) return moved;
     const nimJob = await moveC0mputeJobToNim(supabase, job);
     if (nimJob) {
       await runNimFallback({ supabase, job: nimJob, safeEnqueue, sseFrame });

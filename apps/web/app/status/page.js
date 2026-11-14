@@ -5,6 +5,7 @@ import RealtimeRefresh from "@/components/realtime-refresh";
 import { getCurrentUser } from "@/lib/supabase/auth-server";
 import { getAccountFees } from "@/lib/data/account-fees";
 import { fmtUsdPrecise } from "@/lib/earnings/core";
+import { getJobsByNode24h } from "@/lib/data/jobs-by-node";
 import {
   getAggregators,
   getClients,
@@ -35,7 +36,7 @@ export default async function HomePage() {
   // panel is the only part that needs to know who is reading it.
   const user = await getCurrentUser().catch(() => null);
 
-  const [overview, jobs, providers, models, clients, aggregators, latestCli, mine] = await Promise.all([
+  const [overview, jobs, providers, models, clients, aggregators, latestCli, mine, byNode] = await Promise.all([
     getDashboardOverview(),
     getJobs({ limit: 6 }),
     getStatusProviders({ limit: 12 }),
@@ -43,7 +44,8 @@ export default async function HomePage() {
     getClients({ limit: 6 }),
     getAggregators({ limit: 6 }),
     fetchLatestCliVersion(),
-    user?.id ? getAccountFees(user.id) : Promise.resolve(null)
+    user?.id ? getAccountFees(user.id) : Promise.resolve(null),
+    getJobsByNode24h()
   ]);
 
   // What this account has paid, next to the network totals. Only rendered for
@@ -75,6 +77,22 @@ export default async function HomePage() {
         <RealtimeRefresh tables={["providers", "aggregators", "jobs"]} />
       </div>
       <OverviewGrid cards={[...overview.cards, ...myCards]} />
+      <ResourceTable
+        title="Jobs by node, last 24 hours"
+        description="Every chat Infernet routed, free and billed. Chat goes to c0mpute nodes first; Infernet's own provider daemons take what no c0mpute node serves or answers, and the hosted fallback comes last. Earned is the node's share of what buyers paid."
+        columns={[
+          { key: "node", label: "Node" },
+          { key: "route", label: "Route" },
+          { key: "jobs", label: "Jobs" },
+          { key: "completed", label: "Done" },
+          { key: "billed_free", label: "Billed / free" },
+          { key: "avg_time", label: "Avg time" },
+          { key: "top_model", label: "Top model" },
+          { key: "earned", label: "Earned" }
+        ]}
+        rows={byNode}
+        emptyMessage="No chat jobs in the last 24 hours."
+      />
       <div className="grid gap-6 xl:grid-cols-2">
         <ResourceTable
           title="Recent jobs"

@@ -6,7 +6,7 @@ import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapte
 import { makeStreamSanitizer, sanitizeText } from "@/lib/sanitize-stream";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 import { c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
-import { moveC0mputeJobToNim } from "@/lib/data/chat-c0mpute";
+import { moveC0mputeJobToNim, moveC0mputeJobToProvider, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
 
 /**
  * Async generator that yields normalized job events for a given job:
@@ -165,7 +165,8 @@ async function* runC0mputeFallback({ supabase, job, sanitizer }) {
     for await (const ev of c0mputeJobEvents(job, {
         insertEvent: (jobId, type, data) => insertJobEvent(supabase, jobId, type, data),
         finalize: (jobId, patch) => finalizeJob(supabase, jobId, patch),
-        charge: (j, result) => chargeInteractive(j, result)
+        // Attributes the job to the winning worker and pays it its share.
+        charge: (j, result) => settleC0mputeJob(supabase, j, result)
     })) {
         if (ev.type === "token") {
             const cleanText = sanitizer.process(ev.data?.text ?? "");
@@ -175,6 +176,14 @@ async function* runC0mputeFallback({ supabase, job, sanitizer }) {
             yield { ...ev, data: { ...ev.data, text: sanitizeText(ev.data?.text ?? "") + tail } };
             return;
         } else if (ev.type === "c0mpute_failed") {
+            // No worker answered: an Infernet daemon serving the model next
+            // (same job id, so this stream carries on in the provider path),
+            // and the billed hosted fallback only after that.
+            const moved = await moveC0mputeJobToProvider(supabase, job);
+            if (moved) {
+                yield* streamJobEvents(job.id);
+                return;
+            }
             const nimJob = await moveC0mputeJobToNim(supabase, job);
             if (nimJob) {
                 yield* runNimFallback({ supabase, job: nimJob });
