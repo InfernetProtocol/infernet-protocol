@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import CopyButton from "@/components/copy-button";
 import ProviderLogos from "@/components/provider-logos";
+import OneClickLaunch from "./one-click-launch";
 
 /**
  * One-click deploy UI — universal cloud-init + provider deep links.
@@ -153,6 +154,12 @@ scw instance server create \\
                     </p>
                 ) : null}
             </header>
+
+            <OneClickLaunch />
+
+            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">
+                Or do it by hand, on any cloud
+            </p>
 
             {/* Token mint */}
             <section className="mb-8 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6 backdrop-blur">
