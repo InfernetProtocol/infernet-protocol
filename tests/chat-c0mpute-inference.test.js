@@ -250,8 +250,9 @@ describe("c0mputeModelFor", () => {
 describe("createChatJob and c0mpute", () => {
     it("sends a model no Infernet provider serves to c0mpute workers", async () => {
         state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:0.5b"] } }];
-        const { job, source, provider } = await createChatJob({ messages, modelName: "qwen2.5:7b" });
-        expect(source).toBe("c0mpute");
+        const { job, source, route, provider } = await createChatJob({ messages, modelName: "qwen2.5:7b" });
+        expect(source).toBe("p2p");
+        expect(route).toBe("c0mpute");
         expect(job.status).toBe("running");
         expect(job.provider_id).toBeNull();
         expect(job.model_name).toBe("qwen2.5:7b");
@@ -262,30 +263,34 @@ describe("createChatJob and c0mpute", () => {
 
     it("goes to c0mpute nodes first even when an Infernet daemon serves the model", async () => {
         state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }];
-        const { source, job } = await createChatJob({ messages, modelName: "qwen2.5:7b" });
-        expect(source).toBe("c0mpute");
+        const { source, job, route } = await createChatJob({ messages, modelName: "qwen2.5:7b" });
+        expect(source).toBe("p2p");
+        expect(route).toBe("c0mpute");
         expect(job.provider_id).toBeNull();
         expect(job.input_spec).toMatchObject({ fallback: "c0mpute", c0mpute_model: "qwen2.5:7b" });
     });
 
     it("uses an Infernet daemon when no c0mpute node serves the model", async () => {
         state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["llama3.1:8b"] } }];
-        const { source, job } = await createChatJob({ messages, modelName: "llama3.1:8b" });
+        const { source, job, route } = await createChatJob({ messages, modelName: "llama3.1:8b" });
         expect(source).toBe("p2p");
+        expect(route).toBe("daemon");
         expect(job.provider_id).toBe("p1");
     });
 
     it("a retry that excludes c0mpute lands on a daemon", async () => {
         state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }];
-        const { source, job } = await createChatJob({ messages, modelName: "qwen2.5:7b", excludeProviderIds: [C0MPUTE_ROUTE] });
+        const { source, job, route } = await createChatJob({ messages, modelName: "qwen2.5:7b", excludeProviderIds: [C0MPUTE_ROUTE] });
         expect(source).toBe("p2p");
+        expect(route).toBe("daemon");
         expect(job.provider_id).toBe("p1");
     });
 
     it("comes before the billed hosted fallback, which it keeps as a backup", async () => {
         process.env.NVIDIA_NIM_API_KEY = "nvapi-test";
-        const { source, job, requestedModel } = await createChatJob({ messages, modelName: "gpt-4o-mini" });
-        expect(source).toBe("c0mpute");
+        const { source, job, requestedModel, route } = await createChatJob({ messages, modelName: "gpt-4o-mini" });
+        expect(source).toBe("p2p");
+        expect(route).toBe("c0mpute");
         expect(job.model_name).toBe("qwen2.5:7b");
         expect(requestedModel).toBe("gpt-4o-mini");
         expect(job.input_spec.nim_ok).toBe(true);
@@ -293,8 +298,9 @@ describe("createChatJob and c0mpute", () => {
 
     it("p2p_only allows c0mpute workers (peer nodes) but never arms the hosted backup", async () => {
         process.env.NVIDIA_NIM_API_KEY = "nvapi-test";
-        const { source, job } = await createChatJob({ messages, noFallback: true });
-        expect(source).toBe("c0mpute");
+        const { source, job, route } = await createChatJob({ messages, noFallback: true });
+        expect(source).toBe("p2p");
+        expect(route).toBe("c0mpute");
         expect(job.input_spec.nim_ok).toBeUndefined();
     });
 
@@ -308,7 +314,7 @@ describe("createChatJob and c0mpute", () => {
     it("never sends a caller who asked for verified or trusted nodes to c0mpute", async () => {
         expect((await createChatJob({ messages, minTrustTier: "trusted" })).source).toBe("none");
         expect((await createChatJob({ messages, minTrustTier: "verified" })).source).toBe("none");
-        expect((await createChatJob({ messages, minTrustTier: "public" })).source).toBe("c0mpute");
+        expect((await createChatJob({ messages, minTrustTier: "public" })).route).toBe("c0mpute");
     });
 
     it("routes as before when the bridge is not configured", async () => {
@@ -392,5 +398,13 @@ describe("the winning c0mpute worker is recorded as a provider", () => {
         for (const bad of [null, "", "c0mpute", "../../etc", "x".repeat(80)]) expect(isPeerId(bad)).toBe(false);
         await settleC0mputeJob(fakeClient(), { id: "job-6" }, { worker: "not a peer" });
         expect(state.inserted.some((r) => String(r.node_id ?? "").startsWith("c0mpute:"))).toBe(false);
+    });
+});
+
+describe("source stays p2p for c0mpute nodes", () => {
+    it("tells p2p_only clients a c0mpute job is a peer job, so they stream it", async () => {
+        const { source, route } = await createChatJob({ messages, modelName: "qwen2.5:7b", noFallback: true });
+        expect(source).toBe("p2p");
+        expect(route).toBe("c0mpute");
     });
 });

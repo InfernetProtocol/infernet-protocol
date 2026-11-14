@@ -152,7 +152,7 @@ export async function POST(request) {
   }
 
   try {
-    const { job, provider, source, requestedModel } = await createChatJob({
+    const { job, provider, source, route, requestedModel } = await createChatJob({
       messages: hasPlain ? messages : undefined,
       encryptedMessages: hasEncrypted ? encryptedMessages : undefined,
       clientPubkey: typeof clientPubkey === "string" ? clientPubkey : undefined,
@@ -184,6 +184,7 @@ export async function POST(request) {
       jobId: job.id,
       status: job.status,
       source,
+      route,
       billing: billing.mode === "balance"
         ? { paid_from: "balance", spendable_usd: billing.spendable_usd }
         : billing.mode === "admin"
