@@ -37,7 +37,8 @@ vi.mock("@/lib/supabase/server", () => ({ getSupabaseServerClient: () => fakeCli
 vi.mock("@/lib/encrypt", () => ({ encryptJSON: (v) => v, decryptJSON: (v) => v }));
 
 const c0 = await import("@/lib/chat/c0mpute-inference");
-const { createChatJob, c0mputeModelFor, listChatModels } = await import("@/lib/data/chat");
+const { createChatJob, c0mputeModelFor, listChatModels, c0mputeEligible, C0MPUTE_ROUTE } = await import("@/lib/data/chat");
+const { moveC0mputeJobToProvider, settleC0mputeJob, c0mputeNodeId, isPeerId } = await import("@/lib/data/chat-c0mpute");
 const { llmProvidersCard } = await import("@/lib/data/network-nodes");
 
 const STATUS = {
@@ -259,9 +260,24 @@ describe("createChatJob and c0mpute", () => {
         expect(provider).toMatchObject({ node_id: "c0mpute", model: "qwen2.5:7b" });
     });
 
-    it("still prefers an Infernet provider that serves the model", async () => {
+    it("goes to c0mpute nodes first even when an Infernet daemon serves the model", async () => {
         state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }];
         const { source, job } = await createChatJob({ messages, modelName: "qwen2.5:7b" });
+        expect(source).toBe("c0mpute");
+        expect(job.provider_id).toBeNull();
+        expect(job.input_spec).toMatchObject({ fallback: "c0mpute", c0mpute_model: "qwen2.5:7b" });
+    });
+
+    it("uses an Infernet daemon when no c0mpute node serves the model", async () => {
+        state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["llama3.1:8b"] } }];
+        const { source, job } = await createChatJob({ messages, modelName: "llama3.1:8b" });
+        expect(source).toBe("p2p");
+        expect(job.provider_id).toBe("p1");
+    });
+
+    it("a retry that excludes c0mpute lands on a daemon", async () => {
+        state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }];
+        const { source, job } = await createChatJob({ messages, modelName: "qwen2.5:7b", excludeProviderIds: [C0MPUTE_ROUTE] });
         expect(source).toBe("p2p");
         expect(job.provider_id).toBe("p1");
     });
@@ -324,5 +340,57 @@ describe("llmProvidersCard", () => {
             value: 2,
             note: "2 Infernet (c0mpute count unavailable)"
         });
+    });
+});
+
+describe("c0mputeEligible", () => {
+    const base = { messages };
+    it("takes plaintext public chats", () => {
+        expect(c0mputeEligible(base)).toBe(true);
+        expect(c0mputeEligible({ ...base, minTrustTier: "public" })).toBe(true);
+    });
+    it("refuses E2E, addressed, pinned, distributed, reservation and batch jobs", () => {
+        for (const extra of [{ e2e: true }, { providerId: "p1" }, { pinned: true }, { distributed: true }, { reservationId: "r" }, { batchItemId: "b" }]) {
+            expect(c0mputeEligible({ ...base, ...extra })).toBe(false);
+        }
+    });
+    it("refuses higher trust tiers, empty chats and a retry that excluded c0mpute", () => {
+        expect(c0mputeEligible({ ...base, minTrustTier: "verified" })).toBe(false);
+        expect(c0mputeEligible({ messages: [] })).toBe(false);
+        expect(c0mputeEligible({ ...base, excludeProviderIds: ["p1", C0MPUTE_ROUTE] })).toBe(false);
+    });
+});
+
+describe("a c0mpute job no worker answered moves to a daemon", () => {
+    it("reassigns the same job to a provider serving the model, without the c0mpute fallback", async () => {
+        state.providers = [{ id: "p1", name: "bonita", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }];
+        const job = { id: "job-9", model_name: "qwen2.5:7b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen2.5:7b", nim_ok: true } };
+        const moved = await moveC0mputeJobToProvider(fakeClient(), job);
+        expect(moved).toMatchObject({ id: "job-9", provider_id: "p1", status: "assigned", model_name: "qwen2.5:7b" });
+        expect(moved.input_spec.fallback).toBeUndefined();
+        expect(moved.input_spec.nim_ok).toBeUndefined();
+        expect(moved.input_spec.messages).toEqual(messages);
+    });
+    it("returns null when no daemon serves it, so the hosted fallback can still take it", async () => {
+        state.providers = [];
+        const job = { id: "job-9", model_name: "qwen2.5:7b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen2.5:7b" } };
+        expect(await moveC0mputeJobToProvider(fakeClient(), job)).toBeNull();
+    });
+});
+
+describe("the winning c0mpute worker is recorded as a provider", () => {
+    const peer = "12D3KooWLvVoRHLQw1dZz3fqzVYqQZsZxCBc4x8gV9qDhVqKBdpB";
+    it("creates a never-public, never-available provider row for the worker", async () => {
+        const out = await settleC0mputeJob(fakeClient(), { id: "job-5", billed_user_id: null }, { worker: peer, text: "hi" });
+        expect(out).toMatchObject({ billed: false, reason: "no_buyer" });
+        const row = state.inserted.find((r) => r.node_id === c0mputeNodeId(peer));
+        expect(row).toMatchObject({ status: "c0mpute", is_public: false, trust_tier: "public" });
+        expect(row.specs.c0mpute_peer).toBe(peer);
+    });
+    it("ignores anything that is not a peer id", async () => {
+        expect(isPeerId(peer)).toBe(true);
+        for (const bad of [null, "", "c0mpute", "../../etc", "x".repeat(80)]) expect(isPeerId(bad)).toBe(false);
+        await settleC0mputeJob(fakeClient(), { id: "job-6" }, { worker: "not a peer" });
+        expect(state.inserted.some((r) => String(r.node_id ?? "").startsWith("c0mpute:"))).toBe(false);
     });
 });
