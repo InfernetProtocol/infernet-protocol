@@ -7,6 +7,7 @@ import {
     priceInteractive,
     spendableMicro,
     chargeIdemKey,
+    withMinCharge,
     adminFallback
 } from "../apps/web/lib/billing/interactive.js";
 import { DEFAULT_INFERENCE_PRICING, resolveInferencePricing, MICRO, providerSplitMicro } from "../apps/web/lib/billing/core.js";
@@ -234,5 +235,22 @@ describe("adminFallback", () => {
         const insufficient = { mode: "insufficient", reason: "empty" };
         expect(adminFallback({ isAdmin: false, decision: insufficient })).toBe(insufficient);
         expect(adminFallback({ isAdmin: false, decision: paid })).toBe(paid);
+    });
+});
+
+describe("per-job minimum charge", () => {
+    it("defaults to $0.001 and can be set or turned off", () => {
+        expect(resolveInteractiveConfig({ env: {} }).min_charge_usd).toBe(0.001);
+        expect(resolveInteractiveConfig({ env: {}, settings: { min_charge_usd: 0.002 } }).min_charge_usd).toBe(0.002);
+        expect(resolveInteractiveConfig({ env: { INFERNET_INTERACTIVE_MIN_CHARGE_USD: "0" } }).min_charge_usd).toBe(0);
+        expect(resolveInteractiveConfig({ env: {}, settings: { min_charge_usd: -1 } }).min_charge_usd).toBe(0.001);
+    });
+
+    it("floors a short chat at the minimum and leaves a costlier one alone", () => {
+        const cfg = resolveInteractiveConfig({ env: {} });
+        expect(withMinCharge(45, cfg)).toBe(1000);
+        expect(withMinCharge(2500, cfg)).toBe(2500);
+        expect(withMinCharge(0, cfg)).toBe(0);
+        expect(withMinCharge(45, { ...cfg, min_charge_usd: 0 })).toBe(45);
     });
 });

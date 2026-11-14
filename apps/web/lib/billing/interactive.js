@@ -70,7 +70,14 @@ export const DEFAULT_INTERACTIVE_CONFIG = Object.freeze({
      * A model with no price in the table is served free rather than refused.
      * Refusing would make adding a model to the network a billing incident.
      */
-    free_when_unpriced: true
+    free_when_unpriced: true,
+    /**
+     * Least a billed chat job costs, in USD (Anthony 2026-11-14: "$0.001
+     * minimum per job"). Per-token pricing alone came to ~$0.00003-0.00008
+     * for a short chat. The node keeps its share of the floored charge.
+     * Free-tier jobs bill nobody and stay free. 0 turns the floor off.
+     */
+    min_charge_usd: 0.001
 });
 
 function pct(v, fallback) {
@@ -93,15 +100,35 @@ export function resolveInteractiveConfig({ env = {}, settings = null } = {}) {
         enabled: bool(env.INFERNET_INTERACTIVE_BILLING, d.enabled),
         free_tier_when_empty: bool(env.INFERNET_INTERACTIVE_FREE_TIER, d.free_tier_when_empty),
         spend_earned: bool(env.INFERNET_INTERACTIVE_SPEND_EARNED, d.spend_earned),
-        free_when_unpriced: bool(env.INFERNET_INTERACTIVE_FREE_UNPRICED, d.free_when_unpriced)
+        free_when_unpriced: bool(env.INFERNET_INTERACTIVE_FREE_UNPRICED, d.free_when_unpriced),
+        min_charge_usd: usdAmount(env.INFERNET_INTERACTIVE_MIN_CHARGE_USD, d.min_charge_usd)
     };
     return {
         house_fee_pct: pct(s.house_fee_pct, fromEnv.house_fee_pct),
         enabled: bool(s.enabled, fromEnv.enabled),
         free_tier_when_empty: bool(s.free_tier_when_empty, fromEnv.free_tier_when_empty),
         spend_earned: bool(s.spend_earned, fromEnv.spend_earned),
-        free_when_unpriced: bool(s.free_when_unpriced, fromEnv.free_when_unpriced)
+        free_when_unpriced: bool(s.free_when_unpriced, fromEnv.free_when_unpriced),
+        min_charge_usd: usdAmount(s.min_charge_usd, fromEnv.min_charge_usd)
     };
+}
+
+/** A non-negative USD amount up to $1, or the fallback. */
+function usdAmount(v, fallback) {
+    const n = typeof v === "string" ? Number.parseFloat(v) : v;
+    return Number.isFinite(n) && n >= 0 && n <= 1 ? n : fallback;
+}
+
+/**
+ * The charge for a billed job after the per-job floor: at least
+ * config.min_charge_usd, never less than the per-token cost. A job with
+ * nothing to charge (no output) stays at 0.
+ */
+export function withMinCharge(costMicro, config) {
+    const cost = Math.max(0, Math.round(Number(costMicro) || 0));
+    if (cost <= 0) return 0;
+    const floor = Math.round((Number(config?.min_charge_usd) || 0) * 1_000_000);
+    return Math.max(cost, floor);
 }
 
 /**

@@ -9,6 +9,7 @@ import {
     priceInteractive,
     chargeIdemKey,
     spendableMicro,
+    withMinCharge,
     adminFallback
 } from "@/lib/billing/interactive";
 
@@ -147,6 +148,9 @@ export async function chargeInteractiveJob({ job, result, messages = null, input
         }
         if (!quote.priced) return { charged: false, reason: "unpriced_model", model };
         if (quote.cost_micro <= 0) return { charged: false, reason: "nothing_to_charge", quote };
+        // Per-job floor (config.min_charge_usd, $0.001 by default).
+        quote.token_cost_micro = quote.cost_micro;
+        quote.cost_micro = withMinCharge(quote.cost_micro, config);
 
         const { data, error } = await db().rpc("billing_charge_interactive", {
             p_user_id: userId,
