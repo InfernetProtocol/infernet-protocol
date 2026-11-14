@@ -596,7 +596,13 @@ export async function createChatJob({
   const nimEligible = !p2pProvider && !providerId && !e2e && !pinned && !noFallback
     && isNimConfigured() && (await hostedFallbackUnderDailyCap());
   const nimAvailable = nimEligible && !c0mputeModel;
-  const source = p2pProvider ? "p2p" : c0mputeModel ? "c0mpute" : nimAvailable ? "nim" : "none";
+  // route: where the job runs. source: what callers have always been told,
+  // and c0mpute workers are peer nodes, so they are "p2p" like a daemon.
+  // p2p_only clients (@profullstack/ai-providers, OutreachGraph) open the
+  // stream only for source "p2p"; reporting "c0mpute" made them drop every
+  // job (they never streamed it, so it never ran: 2026-11-14 10:10-10:24).
+  const route = p2pProvider ? "daemon" : c0mputeModel ? "c0mpute" : nimAvailable ? "nim" : "none";
+  const source = route === "daemon" || route === "c0mpute" ? "p2p" : route;
   if (nimAvailable) {
     // The hosted fallback serves one configured model. Forwarding the name the
     // caller asked for ("gpt-4o-mini", "qwen2.5:7b") only earned a 404 there.
@@ -686,7 +692,7 @@ export async function createChatJob({
 
   const provider = p2pProvider
     ?? (c0mputeModel ? c0mputeVirtualProvider(c0mputeModel) : nimAvailable ? nimVirtualProvider() : null);
-  return { job, provider, source, requestedModel };
+  return { job, provider, source, route, requestedModel };
 }
 
 function firstUserPrompt(messages) {
