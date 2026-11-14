@@ -77,10 +77,13 @@ function summarizeFabric(specs) {
   return flags.join(" · ");
 }
 
-function mapJob(row) {
+function mapJob(row, charges = null) {
   return {
     id: row.id,
-    title: "<encrypted>",
+    // The title can carry the caller's content for some job types, so it is
+    // never shown; the type and a short id say which job it is.
+    title: `${row.type || "job"} · ${String(row.id ?? "").slice(0, 8)}`,
+    charged: chargedLabel(row, charges),
     status: row.status,
     model_name: row.model_name || row.models?.name || "unassigned",
     payment_offer: mapCurrency(row.payment_offer),
@@ -253,7 +256,7 @@ export async function getJobs({ limit, status, pubkey } = {}) {
   const supabase = getSupabaseServerClient();
   let query = supabase
     .from("jobs")
-    .select("id,title,status,payment_offer,model_name,client_name,client_pubkey,provider_id,created_at")
+    .select("id,type,title,status,payment_offer,model_name,client_name,client_pubkey,provider_id,billed_user_id,created_at")
     .order("created_at", { ascending: false });
 
   if (status) {
@@ -262,7 +265,39 @@ export async function getJobs({ limit, status, pubkey } = {}) {
   if (pubkey) query = await filterJobsByPubkey(supabase, query, pubkey);
 
   const rows = await runQuery(withLimit(query, limit));
-  return rows.map(mapJob);
+  const charges = await chargesFor(supabase, rows.map((r) => r.id));
+  return rows.map((row) => mapJob(row, charges));
+}
+
+/**
+ * What each job was actually charged, from billing_ledger (job:<id>:charge).
+ * Interactive chat is priced per token after it finishes, so payment_offer
+ * (an up-front price batch and marketplace jobs use) is 0 for every chat.
+ * Never throws: the table just shows no charge.
+ */
+async function chargesFor(supabase, ids) {
+  const out = new Map();
+  const keys = ids.filter(Boolean).map((id) => `job:${id}:charge`);
+  if (keys.length === 0) return out;
+  try {
+    const { data } = await supabase.from("billing_ledger").select("idem_key, amount_micro").in("idem_key", keys);
+    for (const r of data ?? []) {
+      const id = String(r.idem_key).slice(4, -7);
+      out.set(id, (out.get(id) ?? 0) + Math.abs(Number(r.amount_micro) || 0));
+    }
+  } catch {
+    // no charges shown
+  }
+  return out;
+}
+
+/** "$0.000045" for a charge in micro-USD, "free" for an unbilled job. */
+export function chargedLabel(row, charges) {
+  const micro = charges?.get?.(row.id);
+  if (micro > 0) return `$${(micro / 1e6).toFixed(6)}`;
+  if (Number(row.payment_offer) > 0) return mapCurrency(row.payment_offer);
+  if (!row.billed_user_id) return "free";
+  return row.status === "completed" ? "$0" : "pending";
 }
 
 // A pubkey may identify either the consumer (jobs.client_pubkey) or a

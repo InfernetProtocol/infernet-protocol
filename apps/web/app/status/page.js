@@ -96,12 +96,12 @@ export default async function HomePage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <ResourceTable
           title="Recent jobs"
-          description="The latest jobs on the network, newest first."
+          description="The latest jobs on the network, newest first. Chat is priced per token after it finishes; Charged is what the buyer paid (free = free tier)."
           columns={[
             { key: "title", label: "Job" },
             { key: "status", label: "Status" },
             { key: "model_name", label: "Model" },
-            { key: "payment_offer", label: "Offer" }
+            { key: "charged", label: "Charged" }
           ]}
           rows={jobs}
           emptyMessage="No jobs found."
