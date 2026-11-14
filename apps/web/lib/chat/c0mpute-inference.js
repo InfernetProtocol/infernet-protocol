@@ -16,6 +16,9 @@
 // Privacy: the winning worker reads the prompt (the bridge seals it to that one
 // worker, not to the network). E2E chat never comes here.
 
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+
 export const WORKLOAD = "infernet.inference";
 export const ROLE_TAG = "infernet:inference";
 const MODEL_TAG_PREFIX = `${ROLE_TAG}:model:`;
@@ -28,10 +31,48 @@ const MODEL_ID_RE = /^[A-Za-z0-9\-_.:/@]{1,128}$/;
 
 const STATUS_URL = () => process.env.C0MPUTE_STATUS_URL || "https://c0mpute.com/api/status";
 const STATUS_TTL_MS = 30_000;
-// The bridge's own ceiling is 300 s. A CPU worker on a 7B model can need a
-// couple of minutes for a long answer; stay well under undici's 300 s header
-// timeout too.
-export const DEFAULT_TIMEOUT_MS = 180_000;
+// Every live worker is a CPU node: a 1k-token agent turn on a 7B-9B model
+// takes 3-5 min (bids say eta_s 218-301). At 180 s the bridge gave up on
+// answers that landed a minute later, then the job ran AGAIN on a provider
+// daemon on the same box, so the backlog grew and nothing answered (moshcode
+// `agents c0mpute`, 2026-11-14). 7 min leaves a 10 min client (moshcode) room
+// for the provider fallback. Needs a bridge that allows it (c0mpute >= the
+// release raising MAX_TIMEOUT_MS past 300 s; older bridges clamp to 300 s) and
+// node:http (undici fetch dies at 300 s waiting for headers).
+export const DEFAULT_TIMEOUT_MS = 420_000;
+
+/**
+ * POST to the bridge with node:http: a fetch-shaped { ok, status, json() } with
+ * no header timeout, so a job longer than undici's 300 s still answers.
+ * `init.signal` ends it.
+ */
+export function bridgeFetch(url, init = {}) {
+  const u = new URL(url);
+  const request = u.protocol === "https:" ? httpsRequest : httpRequest;
+  const body = init.body == null ? null : Buffer.from(init.body);
+  return new Promise((resolve, reject) => {
+    const req = request(
+      u,
+      {
+        method: init.method ?? "GET",
+        headers: { ...(init.headers ?? {}), ...(body ? { "content-length": body.length } : {}) },
+        signal: init.signal
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("error", reject);
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          const status = res.statusCode ?? 0;
+          resolve({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(text), text: async () => text });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.end(body ?? undefined);
+  });
+}
 
 /** The configured jobs bridge, or null when the feature is off. */
 export function c0mputeJobsBridge(env = process.env) {
@@ -139,7 +180,7 @@ const BRIDGE_ERRORS = {
  * { ok: true, text, model, worker, jobId, price, durationMs } or
  * { ok: false, error, code, status }.
  */
-export async function runC0mputeChat({ model, messages, maxTokens, temperature, timeoutMs = DEFAULT_TIMEOUT_MS }, { fetchImpl = fetch, env } = {}) {
+export async function runC0mputeChat({ model, messages, maxTokens, temperature, timeoutMs = DEFAULT_TIMEOUT_MS }, { fetchImpl = bridgeFetch, env } = {}) {
   const bridge = c0mputeJobsBridge(env);
   if (!bridge) return { ok: false, code: "off", error: "c0mpute chat is not configured" };
   const spec = buildSpec({ model, messages, maxTokens, temperature });
