@@ -144,7 +144,7 @@ export async function POST(request) {
         messages,
         modelName: typeof model === "string" ? model : undefined,
         maxTokens: Number.isFinite(max_tokens) ? max_tokens : undefined,
-        billedUserId: billing.mode === "balance" ? payer.userId : null,
+        billedUserId: billing.mode === "balance" || billing.mode === "admin" ? payer.userId : null,
         temperature: Number.isFinite(temperature) ? temperature : undefined,
         minTrustTier,
         noFallback: wantsP2pOnly(body)

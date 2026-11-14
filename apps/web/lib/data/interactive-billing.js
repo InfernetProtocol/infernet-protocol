@@ -8,7 +8,8 @@ import {
     interactiveModeFor,
     priceInteractive,
     chargeIdemKey,
-    spendableMicro
+    spendableMicro,
+    adminFallback
 } from "@/lib/billing/interactive";
 
 /**
@@ -70,12 +71,12 @@ export async function authorizeInteractive({ userId, model, signedIn = Boolean(u
     const free = (reason) => ({ mode: "free", reason, spendable_micro: 0, spendable_usd: "0.000000" });
     try {
         const config = await getInteractiveConfig();
-        // Admins (INFERNET_ADMIN_USER_IDS) are unmetered: never charged, never
-        // drawing the free allowance, and treated as paid for adult mode.
-        if (userId && isAdminUser({ id: userId })) {
-            return { mode: "admin", reason: "admin", spendable_micro: 0, spendable_usd: "0.000000", config };
+        // Admins pay from their balance when it can, and fall back to
+        // unmetered only when it cannot (see adminFallback).
+        const isAdmin = Boolean(userId) && isAdminUser({ id: userId });
+        if (!config.enabled || !userId) {
+            return adminFallback({ isAdmin, decision: { ...free(config.enabled ? "anonymous" : "metering_off"), config } });
         }
-        if (!config.enabled || !userId) return { ...free(config.enabled ? "anonymous" : "metering_off"), config };
 
         const { getInferencePricing, fundingPreview } = await import("@/lib/data/billing");
         const [pricing, funding] = await Promise.all([getInferencePricing(), fundingPreview(userId)]);
@@ -83,13 +84,16 @@ export async function authorizeInteractive({ userId, model, signedIn = Boolean(u
         const defaults = await getPriceDefaults();
         const decision = interactiveModeFor({ model, pricing, config, funding, defaults, signedIn });
         const spendable = spendableMicro({ funding, config });
-        return {
-            ...decision,
-            spendable_micro: spendable,
-            spendable_usd: microToUsd(spendable),
-            config,
-            pricing
-        };
+        return adminFallback({
+            isAdmin,
+            decision: {
+                ...decision,
+                spendable_micro: spendable,
+                spendable_usd: microToUsd(spendable),
+                config,
+                pricing
+            }
+        });
     } catch (err) {
         console.warn(`[interactive-billing] authorize failed, serving free: ${err?.message ?? err}`);
         return { ...free("degraded"), degraded: true };
