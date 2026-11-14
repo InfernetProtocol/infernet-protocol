@@ -168,7 +168,7 @@ export async function POST(request) {
       distributed: distributed === true,
       minTrustTier,
       noFallback: wantsP2pOnly(payload),
-      billedUserId: billing.mode === "balance" ? payer.userId : null
+      billedUserId: billing.mode === "balance" || billing.mode === "admin" ? payer.userId : null
     });
     if (source === "none") {
       const available = await liveModelNames();
@@ -186,7 +186,9 @@ export async function POST(request) {
       source,
       billing: billing.mode === "balance"
         ? { paid_from: "balance", spendable_usd: billing.spendable_usd }
-        : { paid_from: "free", reason: billing.reason, free_remaining_today: freeLeft },
+        : billing.mode === "admin"
+          ? { paid_from: "admin", spendable_usd: billing.spendable_usd }
+          : { paid_from: "free", reason: billing.reason, free_remaining_today: freeLeft },
       model: job.model_name ?? null,
       ...(requestedModel ? { requestedModel } : {}),
       provider: provider

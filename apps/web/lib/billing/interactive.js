@@ -187,3 +187,19 @@ export function fmtMicro(micro) {
     if (n >= 10_000) return `$${(n / MICRO).toFixed(2)}`;
     return `$${microToUsd(n).replace(/0+$/, "").replace(/\.$/, ".0")}`;
 }
+
+/**
+ * How an admin's request is paid: from the balance whenever it can, and only
+ * unmetered ("admin") when it cannot.
+ *
+ * Admins (INFERNET_ADMIN_USER_IDS) are our own accounts, and the fleet's apps
+ * call in on a key one of them owns. Exempting them outright (#194) made every
+ * app job free, so no job was charged and no node was paid (11-11 to 11-14).
+ * Their jobs now pay like anyone's, so the nodes that ran them are paid; an
+ * admin is never sent to the free tier or refused for an empty balance.
+ * Anyone else's decision is returned unchanged.
+ */
+export function adminFallback({ isAdmin, decision }) {
+    if (!isAdmin || decision?.mode === "balance") return decision;
+    return { ...decision, mode: "admin", reason: "admin" };
+}

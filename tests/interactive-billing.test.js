@@ -6,7 +6,8 @@ import {
     interactiveModeFor,
     priceInteractive,
     spendableMicro,
-    chargeIdemKey
+    chargeIdemKey,
+    adminFallback
 } from "../apps/web/lib/billing/interactive.js";
 import { DEFAULT_INFERENCE_PRICING, resolveInferencePricing, MICRO, providerSplitMicro } from "../apps/web/lib/billing/core.js";
 
@@ -211,5 +212,27 @@ describe("house fee on an interactive charge", () => {
         const chargeMicro = Math.round(saleUsd * MICRO);
         const { providerMicro } = providerSplitMicro(chargeMicro, DEFAULT_INTERACTIVE_HOUSE_FEE_PCT);
         expect(providerMicro).toBeLessThan(chargeMicro);
+    });
+});
+
+describe("adminFallback", () => {
+    const paid = { mode: "balance", reason: "balance", spendable_micro: 5_000_000 };
+
+    it("an admin with a balance pays like anyone, so the node is paid", () => {
+        expect(adminFallback({ isAdmin: true, decision: paid })).toBe(paid);
+    });
+
+    it("an admin whose balance cannot pay runs unmetered, never free tier or 402", () => {
+        for (const mode of ["insufficient", "free"]) {
+            const out = adminFallback({ isAdmin: true, decision: { mode, reason: "empty", spendable_micro: 0 } });
+            expect(out.mode).toBe("admin");
+            expect(out.spendable_micro).toBe(0);
+        }
+    });
+
+    it("leaves everyone else's decision alone", () => {
+        const insufficient = { mode: "insufficient", reason: "empty" };
+        expect(adminFallback({ isAdmin: false, decision: insufficient })).toBe(insufficient);
+        expect(adminFallback({ isAdmin: false, decision: paid })).toBe(paid);
     });
 });
