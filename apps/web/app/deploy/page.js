@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const metadata = {
   title: "Deploy a GPU — Infernet Protocol",
   description:
-    "Launch an Infernet provider node on a rented cloud GPU in one click. No SSH, no package managers — your pod boots, registers, and starts earning."
+    "Launch an Infernet provider node on a rented cloud GPU (Vast.ai, RunPod, Vultr, Linode, Scaleway, DigitalOcean) in one click. No SSH, no package managers — your pod boots, registers, and starts earning."
 };
 
 export default async function DeployPage() {
