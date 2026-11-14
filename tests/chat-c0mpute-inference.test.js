@@ -408,3 +408,39 @@ describe("source stays p2p for c0mpute nodes", () => {
         expect(route).toBe("c0mpute");
     });
 });
+
+describe("bridgeFetch (node:http, no undici header timeout)", () => {
+    it("posts JSON and reads ok/status/json, and a signal ends it", async () => {
+        const { createServer } = await import("node:http");
+        const server = createServer((req, res) => {
+            let body = "";
+            req.on("data", (c) => (body += c));
+            req.on("end", () => {
+                if (req.url === "/slow") return; // never answers
+                const status = req.url === "/busy" ? 503 : 200;
+                res.writeHead(status, { "content-type": "application/json" });
+                res.end(JSON.stringify({ got: JSON.parse(body), auth: req.headers.authorization }));
+            });
+        });
+        await new Promise((r) => server.listen(0, "127.0.0.1", r));
+        const base = `http://127.0.0.1:${server.address().port}`;
+        try {
+            const init = { method: "POST", headers: { authorization: "Bearer x", "content-type": "application/json" }, body: JSON.stringify({ a: 1 }) };
+            const ok = await c0.bridgeFetch(`${base}/v1/jobs`, init);
+            expect(ok.ok).toBe(true);
+            expect(ok.status).toBe(200);
+            expect(await ok.json()).toEqual({ got: { a: 1 }, auth: "Bearer x" });
+            const busy = await c0.bridgeFetch(`${base}/busy`, init);
+            expect(busy).toMatchObject({ ok: false, status: 503 });
+            await expect(c0.bridgeFetch(`${base}/slow`, { ...init, signal: AbortSignal.timeout(100) })).rejects.toThrow();
+        } finally {
+            server.closeAllConnections?.();
+            await new Promise((r) => server.close(r));
+        }
+    });
+
+    it("gives a CPU network minutes, not 180 s", () => {
+        expect(c0.DEFAULT_TIMEOUT_MS).toBeGreaterThan(300_000);
+        expect(c0.DEFAULT_TIMEOUT_MS).toBeLessThan(600_000);
+    });
+});
