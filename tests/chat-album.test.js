@@ -28,10 +28,16 @@ vi.mock("@/lib/chat/speech-service", async (orig) => ({
     body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==", "base64")
   }))
 }));
+const songAttempts = new Map();
 vi.mock("@/lib/chat/music-run", () => ({
-  // Every track "renders" at once, except track 3, which fails.
+  // Every track "renders" at once, except track 3, which always fails, and
+  // track 4, whose first attempt finds no worker (it is retried).
   musicRunner: (song) => async () => {
+    songAttempts.set(song.title, (songAttempts.get(song.title) ?? 0) + 1);
     if (/track 3\b/.test(song.prompt)) throw Object.assign(new Error("worker died"), { status: 502 });
+    if (/track 4\b/.test(song.prompt) && songAttempts.get(song.title) === 1) {
+      throw Object.assign(new Error("no worker for music.txt2music/ace-step-1.5 within 2h"), { status: 503 });
+    }
     return { audio: new Uint8Array(Buffer.from(`ID3\x03\x00\x00\x00\x00\x00\x00FAKEMP3-${song.title}`, "latin1")), contentType: "audio/mpeg", headers: {} };
   }
 }));
@@ -52,7 +58,7 @@ import {
 import { createZip } from "@/lib/zip";
 import { id3Tag, stripId3v2, tagMp3 } from "@/lib/id3";
 import { parseAlbumPlan, trackBrief } from "@/lib/album-writer";
-import { albumRunner, pool, trackState } from "@/lib/chat/album-run";
+import { albumRunner, pool, shouldRetryTrack, trackState } from "@/lib/chat/album-run";
 import { albumJobs } from "@/lib/chat/album-jobs";
 import { buildAlbumZip, albumEntries } from "@/lib/chat/album-package";
 
@@ -221,6 +227,14 @@ describe("album job", () => {
     expect(peak).toBe(2);
   });
 
+  it("retries a failed track unless it was refused or out of attempts", () => {
+    expect(shouldRetryTrack(1, "no worker for music.txt2music/ace-step-1.5 within 2h", 3)).toBe(true);
+    expect(shouldRetryTrack(1, "This track was lost in a restart", 3)).toBe(true);
+    expect(shouldRetryTrack(3, "worker died", 3)).toBe(false);
+    expect(shouldRetryTrack(1, "refused by the content policy", 3)).toBe(false);
+    expect(shouldRetryTrack(1, "Out of compute balance", 3)).toBe(false);
+  });
+
   it("treats a track no one has heard of as lost after a few looks", async () => {
     const jobs = { get: () => null, find: async () => null };
     const misses = new Map();
@@ -229,7 +243,7 @@ describe("album job", () => {
   });
 
   it("plans, writes, records every track and packages the zip", async () => {
-    const id = albumJobs.start(albumRunner({ prompt: "synthwave", tracks: 4 }, { mode: "free" }, { concurrency: 2, pollMs: 20 }), { request: { prompt: "synthwave", tracks: 4 } });
+    const id = albumJobs.start(albumRunner({ prompt: "synthwave", tracks: 4 }, { mode: "free" }, { concurrency: 2, pollMs: 20, retryDelayMs: 10 }), { request: { prompt: "synthwave", tracks: 4 } });
     const deadline = Date.now() + 15_000;
     while (albumJobs.get(id).status === "pending" && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
     const job = albumJobs.get(id);
@@ -237,6 +251,10 @@ describe("album job", () => {
     expect(job.meta).toMatchObject({ stage: "done", band: "Glass Harbor", album: "Night Ferry", cover: "ready", done: 3, failed: 1 });
     expect(job.meta.tracks.map((t) => t.status)).toEqual(["done", "done", "failed", "done"]);
     expect(job.meta.tracks[2].error).toBe("worker died");
+    // Track 3 got all its attempts; track 4 came back on its second.
+    expect(songAttempts.get("Song 3")).toBe(3);
+    expect(songAttempts.get("Song 4")).toBe(2);
+    expect(job.checkpoint.trackAttempts).toEqual([1, 1, 3, 2]);
 
     const built = await buildAlbumZip(id, { albumJob: job, meta: job.meta });
     expect(built.name).toBe("Glass Harbor - Night Ferry.zip");
