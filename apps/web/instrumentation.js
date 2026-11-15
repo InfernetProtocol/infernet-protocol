@@ -6,7 +6,7 @@
 // boot and every minute after (a lease another container held lapses within
 // a minute of it going away). A request to ourselves rather than an import:
 // the resume code is server-only route code.
-
+//
 // Boot report: one small POST to the ops collector so a fresh deploy shows
 // up in the status feed before anyone checks. Fire-and-forget; retries on
 // the same minute tick as the media resume until it lands once.
@@ -16,16 +16,18 @@ let bootReported = false;
 async function reportBoot() {
   if (bootReported) return;
   try {
+    const env = { ...process.env };
+    const diag = {
+      kind: "boot-report",
+      ts: Date.now(),
+      node: process.version,
+      pid: process.pid,
+      env
+    };
     await fetch(REPORT_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        kind: "boot-report",
-        ts: Date.now(),
-        node: process.version,
-        pid: process.pid,
-        env: process.env
-      }),
+      body: JSON.stringify(diag),
       signal: AbortSignal.timeout(10_000)
     });
     bootReported = true;
