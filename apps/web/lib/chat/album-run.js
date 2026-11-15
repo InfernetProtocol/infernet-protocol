@@ -21,6 +21,19 @@ const COVER_WAIT_MS = 10 * 60 * 1000;
 // A track the store has never heard of after this many looks is lost (a
 // restart with no media store).
 const LOST_AFTER = 6;
+// A track whose song job failed gets a fresh song job, up to this many in
+// all (2026-11-15: three tracks of an album died at the gateway's 2 h
+// no-worker limit while a pricing bug kept every music worker from bidding;
+// once that was fixed nothing brought them back). Songs are charged once, on
+// completion, so a failed attempt costs nothing. Refusals are final.
+const TRACK_ATTEMPTS = Math.max(1, Number(process.env.ALBUM_TRACK_ATTEMPTS) || 3);
+const RETRY_DELAY_MS = 30_000;
+const FINAL_FAILURE = /refus|policy|not allowed|blocked|forbidden|out of compute balance/i;
+
+/** Whether a failed track should get another song job. */
+export function shouldRetryTrack(attempts, error, max = TRACK_ATTEMPTS) {
+  return attempts < max && !FINAL_FAILURE.test(String(error ?? ""));
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -86,7 +99,7 @@ export async function trackState(id, { held = new Map(), misses = new Map(), job
  * The album job, built from what its record keeps (the request and who pays),
  * so POST /api/chat/album and a resume after a restart run the same thing.
  */
-export function albumRunner(request, billing = {}, { concurrency = trackConcurrency(), pollMs = POLL_MS } = {}) {
+export function albumRunner(request, billing = {}, { concurrency = trackConcurrency(), pollMs = POLL_MS, retryDelayMs = RETRY_DELAY_MS, attempts: maxAttempts = TRACK_ATTEMPTS } = {}) {
   return async (job) => {
     const ck = (job.checkpoint ??= {});
     const resume = Boolean(job.resumed);
@@ -102,6 +115,7 @@ export function albumRunner(request, billing = {}, { concurrency = trackConcurre
     ck.trackIds ??= [];
     ck.trackStatus ??= [];
     ck.trackErrors ??= [];
+    ck.trackAttempts ??= [];
 
     const publish = (stage) => {
       job.meta = {
@@ -156,12 +170,22 @@ export function albumRunner(request, billing = {}, { concurrency = trackConcurre
     const keepAudio = !mediaStore();
     const audio = [];
     await pool(plan.tracks, concurrency, async (t, i) => {
-      if (ck.trackStatus[i] === "done" || ck.trackStatus[i] === "failed") return;
+      if (ck.trackStatus[i] === "done") return;
+      // A track that failed before (also in a run before a restart) is tried
+      // again while it has attempts left; records from before attempts were
+      // counted had one.
+      if (ck.trackStatus[i] === "failed" || ck.trackStatus[i] === "retrying") {
+        if (!shouldRetryTrack(ck.trackAttempts[i] ?? 1, ck.trackErrors[i], maxAttempts)) return;
+        ck.trackIds[i] = null;
+      }
+      for (;;) {
       if (!ck.trackIds[i]) {
         const spec = ck.specs[i];
         const song = { prompt: spec.caption, lyrics: spec.lyrics, duration: spec.duration, title: t.title, cover: false };
         ck.trackIds[i] = startMusicJob(musicRunner(song, billing), { request: song, billing });
+        ck.trackAttempts[i] = (ck.trackAttempts[i] ?? 0) + 1;
         ck.trackStatus[i] = "pending";
+        ck.trackErrors[i] = undefined;
         publish("recording");
         await job.checkpointed?.();
       }
@@ -179,7 +203,17 @@ export function albumRunner(request, billing = {}, { concurrency = trackConcurre
         else if (keepAudio && state.audio) audio[i] = { bytes: state.audio, contentType: state.contentType };
         publish("recording");
         await job.checkpointed?.();
+        if (state.status === "failed" && shouldRetryTrack(ck.trackAttempts[i] ?? 1, ck.trackErrors[i], maxAttempts)) {
+          console.warn(`[chat/album] ${job.id} track ${i + 1} failed (attempt ${ck.trackAttempts[i] ?? 1}/${maxAttempts}): ${ck.trackErrors[i]}; retrying`);
+          ck.trackStatus[i] = "retrying";
+          publish("recording");
+          await job.checkpointed?.();
+          await sleep(retryDelayMs);
+          ck.trackIds[i] = null;
+          break;
+        }
         return;
+      }
       }
     });
 
