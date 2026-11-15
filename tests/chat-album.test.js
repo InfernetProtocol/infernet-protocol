@@ -57,7 +57,7 @@ import {
 } from "@/lib/billing/album";
 import { createZip } from "@/lib/zip";
 import { id3Tag, stripId3v2, tagMp3 } from "@/lib/id3";
-import { parseAlbumPlan, trackBrief } from "@/lib/album-writer";
+import { creativeDirection, directionNote, parseAlbumPlan, tooSimilar, trackBrief } from "@/lib/album-writer";
 import { albumRunner, pool, shouldRetryTrack, trackState } from "@/lib/chat/album-run";
 import { albumJobs } from "@/lib/chat/album-jobs";
 import { buildAlbumZip, albumEntries } from "@/lib/chat/album-package";
@@ -135,6 +135,44 @@ describe("album commands and requests", () => {
     expect(
       describeAlbumStage({ stage: "recording", tracks: [{ status: "done" }, { status: "pending", node: { stage: "rendering" } }, { status: "pending" }, { status: "failed" }] })
     ).toBe("Recording on c0mpute workers · 1/4 done · 1 rendering · 1 waiting for a worker · 1 failed");
+  });
+});
+
+describe("distinct albums from one brief", () => {
+  // 2026-11-15: three runs of one celtic punk prompt gave Raven's Requiem,
+  // Ravenstone Rebellion and Ravenstone Rebels, two of them "Electric Highlands".
+  it("flags a band or album title that is too close to one already made", () => {
+    const avoid = { bands: ["Raven's Requiem", "Ravenstone Rebellion"], albums: ["Electric Highlands"] };
+    expect(tooSimilar({ band: "Ravenstone Rebels", album: "New One" }, avoid)).toBe(true);
+    expect(tooSimilar({ band: "The Brine Choir", album: "Electric Highlands" }, avoid)).toBe(true);
+    expect(tooSimilar({ band: "The Brine Choir", album: "Salt in the Ledger" }, avoid)).toBe(false);
+    expect(tooSimilar({ band: "Anything", album: "Else" }, {})).toBe(false);
+  });
+
+  it("gives each album its own direction and tells the planner what to avoid", () => {
+    let i = 0;
+    const seq = [0.01, 0.5, 0.99, 0.3, 0.7, 0.2, 0.8];
+    const a = creativeDirection(() => seq[i++ % seq.length]);
+    const b = creativeDirection(() => 0.6);
+    expect(Object.keys(a)).toEqual(["naming", "setting", "era", "voice", "angle", "art", "palette"]);
+    expect(a).not.toEqual(b);
+    const note = directionNote(a, { bands: ["Ravenstone Rebellion"], albums: ["Electric Highlands"], songs: ["Battle Cry"] });
+    expect(note).toContain(a.setting);
+    expect(note).toContain("do NOT reuse or resemble these band names: Ravenstone Rebellion");
+    expect(note).toContain("Battle Cry");
+  });
+
+  it("draws the cover in the album's own medium and palette", () => {
+    const p = albumCoverPrompt({ band: "B", album: "A", sound: "punk", direction: { art: "a linocut print", palette: "teal and coral", setting: "a mining valley", era: "the 1910s" } });
+    expect(p).toContain("a linocut print");
+    expect(p).toContain("teal and coral");
+    expect(p).toContain("a mining valley");
+  });
+
+  it("passes a bounded avoid list through the request", () => {
+    const r = validateAlbumRequest({ prompt: "celtic punk", avoid: { bands: ["Blackshore Brigade", 7, ""], songs: ["x"] } });
+    expect(r.request.avoid).toEqual({ bands: ["Blackshore Brigade"], albums: [], songs: ["x"] });
+    expect(validateAlbumRequest({ prompt: "celtic punk" }).request.avoid).toBeUndefined();
   });
 });
 

@@ -14,6 +14,7 @@ import { musicJobs, startMusicJob } from "@/lib/chat/music-jobs";
 import { musicRunner } from "@/lib/chat/music-run";
 import { albumJobs } from "@/lib/chat/album-jobs";
 import { mediaStore } from "@/lib/chat/media-store";
+import { createDurableJobs } from "@/lib/chat/durable-jobs";
 
 const POLL_MS = 5000;
 const WRITERS = 3;
@@ -74,6 +75,29 @@ export async function makeAlbumCover(id, plan, { resume = false } = {}) {
 }
 
 /**
+ * Band names, album titles and song titles of recent albums (the store keeps
+ * them a week), so a new album from the same brief is told not to repeat
+ * them. Best effort: an unreadable store means an empty list, never a failure.
+ */
+export async function recentAlbumNames({ exceptId = null, limit = 40, durable = createDurableJobs({ kind: "album", store: () => mediaStore() }) } = {}) {
+  const out = { bands: [], albums: [], songs: [] };
+  try {
+    const ids = (await durable.ids()).filter((id) => id && id !== exceptId).slice(-limit * 2);
+    const recs = (await Promise.all(ids.map((id) => durable.load(id).catch(() => null)))).filter((r) => r?.checkpoint?.plan);
+    recs.sort((a, b) => Number(b.createdAt ?? 0) - Number(a.createdAt ?? 0));
+    for (const r of recs.slice(0, limit)) {
+      const p = r.checkpoint.plan;
+      if (p.band) out.bands.push(p.band);
+      if (p.album) out.albums.push(p.album);
+      for (const t of p.tracks ?? []) if (t?.title) out.songs.push(t.title);
+    }
+  } catch (e) {
+    console.warn(`[chat/album] recent albums unreadable: ${e?.message ?? e}`);
+  }
+  return out;
+}
+
+/**
  * Where one track's song job stands: { status: "pending" | "done" | "failed",
  * audio?, contentType?, error?, meta? }. `held` keeps the job objects this
  * process has seen, so a song the page already fetched (take()) still counts.
@@ -107,7 +131,11 @@ export function albumRunner(request, billing = {}, { concurrency = trackConcurre
 
     if (!ck.plan) {
       job.meta = { stage: "planning", tracksWanted: request.tracks };
-      ck.plan = await writeAlbumPlan(request);
+      const recent = await recentAlbumNames({ exceptId: job.id });
+      // The caller may name more to steer clear of (e.g. a label's existing artists).
+      const extra = request.avoid ?? {};
+      const avoid = { bands: [...(extra.bands ?? []), ...recent.bands], albums: [...(extra.albums ?? []), ...recent.albums], songs: [...(extra.songs ?? []), ...recent.songs] };
+      ck.plan = await writeAlbumPlan(request, { avoid });
       await job.checkpointed?.();
     }
     const plan = ck.plan;
