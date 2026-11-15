@@ -52,7 +52,11 @@ export function validateAlbumRequest(body) {
   if (duration !== null && (!Number.isInteger(duration) || duration < MIN_MUSIC_SECONDS || duration > MAX_MUSIC_SECONDS)) {
     return { ok: false, error: `Duration must be a whole number of seconds from ${MIN_MUSIC_SECONDS} to ${MAX_MUSIC_SECONDS}` };
   }
-  return { ok: true, request: { prompt, tracks, ...(duration ? { duration } : {}) } };
+  // Optional names to steer clear of: { bands?, albums?, songs? }, strings only, bounded.
+  const names = (v, n) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim().slice(0, 80)).slice(0, n) : []);
+  const avoid = body?.avoid && typeof body.avoid === "object" ? { bands: names(body.avoid.bands, 100), albums: names(body.avoid.albums, 100), songs: names(body.avoid.songs, 300) } : null;
+  const hasAvoid = avoid && (avoid.bands.length || avoid.albums.length || avoid.songs.length);
+  return { ok: true, request: { prompt, tracks, ...(duration ? { duration } : {}), ...(hasAvoid ? { avoid } : {}) } };
 }
 
 /** One status line for the chat from an album poll. */
@@ -160,14 +164,16 @@ export function albumSheetText(plan, tracks = []) {
  * sound and concept as one image, with the band and album names as the only
  * lettering.
  */
-export function albumCoverPrompt({ band, album, sound, concept }) {
+export function albumCoverPrompt({ band, album, sound, concept, direction = null }) {
   const clean = (s, n) => String(s ?? "").replace(/["\n\r]/g, " ").replace(/\s+/g, " ").trim().slice(0, n);
   const style = clean(String(sound ?? "").replace(/\b\d+\s*bpm\b|\b[A-G](?:#|b)?\s*(?:major|minor)\b/gi, ""), 300).replace(/[\s,]+$/, "");
   return [
     "Square album cover artwork.",
     style ? `The music: ${style}.` : "",
     concept ? `The album is about: ${clean(concept, 300)}.` : "",
-    "One bold, striking image that captures the album: a strong central subject, cinematic lighting, a rich color palette, a high-detail illustration or photo style that fits the genre.",
+    direction?.art || direction?.palette
+      ? `One bold, striking image that captures the album${direction.setting ? ` (set in ${clean(direction.setting, 80)}${direction.era ? `, ${clean(direction.era, 40)}` : ""})` : ""}, made as ${clean(direction.art || "an illustration", 60)} in a ${clean(direction.palette || "rich", 60)} palette, with a strong central subject.`
+      : "One bold, striking image that captures the album: a strong central subject, cinematic lighting, a rich color palette, a high-detail illustration or photo style that fits the genre.",
     `The only lettering is the band name "${clean(band, 50)}" and the album title "${clean(album, 60)}" in big, stylish, legible type that suits the genre.`,
     "Professional album art, centered composition, no frames, no borders, no watermark."
   ]
