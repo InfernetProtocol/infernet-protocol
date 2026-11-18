@@ -752,7 +752,7 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
                         ["/api/v1/node/jobs/poll",         "POST", "X-Infernet-Auth", "Pull assigned jobs"],
                         ["/api/v1/node/jobs/[id]/events",  "POST", "X-Infernet-Auth", "Stream tokens back"],
                         ["/api/v1/node/jobs/[id]/complete","POST", "X-Infernet-Auth", "Mark completed; triggers receipt"],
-                        ["/api/v1/node/jobs/[id]/requeue", "POST", "X-Infernet-Auth", "Node is busy: job back to the front of the queue"],
+                        ["/api/v1/node/jobs/[id]/requeue", "POST", "X-Infernet-Auth", "Node is busy: job back into the queue (at the back); ends after 3 requeues"],
                         ["/api/v1/reservations/*",         "admin / buyer token", "Managed endpoints: reservations, keys, availability report, invoice data"],
                         ["/v1/chat/completions (ifr_res_ key)", "POST", "reservation key", "Inference pinned to one operator + exact model"],
                         ["/api/auth/{signup,login,callback,logout,reset-password,update-password}",

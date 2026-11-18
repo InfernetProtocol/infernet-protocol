@@ -7,7 +7,7 @@ import {
 } from "@/lib/auth/verify-signed-request";
 import { requeueJobForNode } from "@/lib/data/node-api";
 
-// A node turned a chat job away (busy): back to the front of the queue
+// A node turned a chat job away (busy): back into the queue, at the back
 // (lib/routing/requeue.js). CLI >= 0.1.97 calls this before failing a job.
 export async function POST(request, { params }) {
     return handleRoute(async () => {

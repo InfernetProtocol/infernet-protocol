@@ -3,7 +3,7 @@ import "server-only";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { tableForRole } from "@/lib/auth/verify-signed-request";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
-import { requeueDecision } from "@/lib/routing/requeue";
+import { requeueDecision, maxRequeues, NETWORK_BUSY_MESSAGE, RUN_A_NODE_URL } from "@/lib/routing/requeue";
 import { isPublicIp, refreshGeoIfMoved } from "@/lib/geo";
 
 const MAX_SPECS_GPUS = 16;
@@ -344,6 +344,9 @@ export async function pollJobsForNode({ pubkey, limit = 5 }) {
         .select("id, title, type, status, payment_offer, payment_coin, model_name, input_spec, client_pubkey, created_at")
         .eq("provider_id", provider.id)
         .in("status", ["assigned"])
+        // Queue order: a requeued job (lib/routing/requeue.js) gets a new
+        // assigned_at, so it runs after the jobs that were waiting.
+        .order("assigned_at", { ascending: true, nullsFirst: true })
         .order("created_at", { ascending: true })
         .limit(Math.min(Math.max(Number(limit) || 5, 1), 25));
 
@@ -592,12 +595,12 @@ export async function getSelfRow({ role, pubkey }) {
 
 const EVENT_BATCH_MAX = 200;
 /**
- * The node turned this chat job away (busy): put it back at the front of the
- * queue instead of failing it (lib/routing/requeue.js). Same row, so it keeps
- * its created_at and its client's stream; moved only to a free node serving
- * the same model that is at least as fast, else left on this node, which
- * polls it first. Answers { requeued: false, reason } when it must fail as
- * before (answer already streaming, too many turn-aways, ...).
+ * The node turned this chat job away (busy): back through the queue, at the
+ * back (lib/routing/requeue.js). Same row and client stream; assigned to the
+ * provider the normal picker chooses for the model, else this node again.
+ * After the requeue cap it ends the job with NETWORK_BUSY_MESSAGE
+ * ({ ended: true }). Answers { requeued: false, reason } when the node should
+ * fail it as before (answer already streaming, not its job, ...).
  */
 export async function requeueJobForNode({ pubkey, jobId, body = {} }) {
     if (!jobId) throw withStatus("jobId is required", 400);
@@ -633,17 +636,32 @@ export async function requeueJobForNode({ pubkey, jobId, body = {} }) {
         try {
             const { pickChatProvider } = await import("@/lib/data/chat");
             const minTrustTier = provider.trust_tier && provider.trust_tier !== "public" ? provider.trust_tier : undefined;
-            target = await pickChatProvider({
-                modelName: job.model_name ?? undefined,
-                minTrustTier,
-                excludeProviderIds: [provider.id],
-                requireFreeSlot: true
-            });
+            // Through the queue: the provider a new job for this model gets.
+            target = await pickChatProvider({ modelName: job.model_name ?? undefined, minTrustTier });
         } catch {
             target = null;
         }
     }
-    const decision = requeueDecision({ job, tokens: tokens ?? 0, provider, target });
+    const decision = requeueDecision({ job, tokens: tokens ?? 0, provider, target, max: maxRequeues() });
+    if (decision.end) {
+        // Out of requeues: tell the caller and end the job.
+        const now = new Date().toISOString();
+        const { data: ended } = await supabase
+            .from("jobs")
+            .update({ status: "failed", error: NETWORK_BUSY_MESSAGE, completed_at: now, updated_at: now })
+            .eq("id", jobId)
+            .eq("provider_id", provider.id)
+            .in("status", ["assigned", "running"])
+            .select("id");
+        if (ended && ended.length > 0) {
+            await supabase.from("job_events").insert({
+                job_id: jobId,
+                event_type: "error",
+                data: encryptJSON({ message: NETWORK_BUSY_MESSAGE, code: "network_busy", run_a_node: RUN_A_NODE_URL })
+            });
+        }
+        return { id: jobId, requeued: false, ended: true, reason: decision.reason };
+    }
     if (!decision.requeue) return { id: jobId, requeued: false, reason: decision.reason };
 
     let modelName = job.model_name;
@@ -674,9 +692,7 @@ export async function requeueJobForNode({ pubkey, jobId, body = {} }) {
     const reason = typeof body?.reason === "string" ? body.reason.slice(0, 300) : null;
     const status = {
         state: "requeued",
-        message: decision.moved
-            ? "the node was busy; moved to a free node, keeping its place"
-            : "the node was busy; back at the front of its queue",
+        message: "the node was busy; back in the queue",
         moved: Boolean(decision.moved),
         requeues,
         reason
