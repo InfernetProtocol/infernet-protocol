@@ -346,8 +346,15 @@ export function isModelAlias(modelName) {
 // last: a client that sent gpt-4o-mini with max_tokens 16 expects an answer,
 // and qwen3 spent the whole budget thinking, so the reply was empty (seen
 // live on 2026-10-07; the same prompt on gemma3:4b answered at once).
+//
+// The house 9B leads (named here on purpose, although NOT_A_DEFAULT_RE keeps
+// other uncensored builds out of the fallback): it is what our GPU node keeps
+// loaded. qwen2.5:7b led before and was dropped from the house models on
+// 2026-11-18: alias traffic asking for it on the GPU that also held the 9B
+// evicted and reloaded the 9B on every switch, pushing jobs onto CPU nodes for
+// ~10 min. It stays second only for nodes whose operators still serve it.
 const ALIAS_PREFERENCE = [
-  "qwen2.5:7b", "llama3.1:8b", "gemma3:4b",
+  "eriktonon/qwen3.8-uncensored:9b", "qwen2.5:7b", "llama3.1:8b", "gemma3:4b",
   "llama3.2:3b", "llama-3.2-3b:latest", "qwen2.5:3b",
   "llama3.2:1b", "llama-3.2-1b:latest", "qwen2.5:1.5b", "qwen2.5:0.5b"
 ];

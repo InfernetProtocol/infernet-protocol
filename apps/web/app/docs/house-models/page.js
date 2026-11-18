@@ -100,6 +100,34 @@ export default function HouseModelsPage() {
                 themselves is never updated; <code>infernet house-models</code> reports it as outdated.
             </P>
 
+            <H2 id="removing">When a model leaves the list</H2>
+            <P>
+                Dropping an entry from the list removes the model from every node that pulled it, on that node&apos;s next
+                sync (on start, then every 6 hours). Only the copy the node pulled itself goes: a node whose operator
+                ran <code>ollama pull</code> for the same model keeps it, and <code>infernet house-models</code> stops
+                listing it as a house model. qwen2.5:7b left the list this way in version 10 (2026-11-18): next to the
+                house 9B on one GPU, every switch between the two evicted and reloaded the other.
+            </P>
+
+            <H2 id="memory">Context size and Ollama memory</H2>
+            <P>
+                Ollama sizes a model&apos;s memory by its context window, and some builds ship a large one (the house 9B
+                sets 64K, which Ollama budgets at about 13.6 GB for a 6 GB model). Nodes therefore run every Ollama model
+                at no more than 32K of context: a model whose own <code>num_ctx</code> is larger gets{" "}
+                <code>num_ctx 32768</code> on each request, smaller ones are left alone. Change the cap with{" "}
+                <code>INFERNET_OLLAMA_MAX_CTX</code> (or <code>engine.ollama_max_ctx</code> in the node config);{" "}
+                <code>0</code> turns it off. Do not re-tag a house model with a different context to get the same
+                effect: that changes its digest, and the node re-pulls the published build.
+            </P>
+            <P>
+                The installer (and every <code>infernet update</code>) also gives the <code>ollama.service</code>{" "}
+                systemd unit <code>OLLAMA_FLASH_ATTENTION=1</code> and <code>OLLAMA_KV_CACHE_TYPE=q8_0</code>, which
+                halve the context&apos;s memory, as a drop-in at{" "}
+                <code>/etc/systemd/system/ollama.service.d/infernet-memory.conf</code>. A value the operator already set
+                for either key wins; <code>INFERNET_SKIP_OLLAMA_ENV=1</code> skips the step, and deleting the file
+                undoes it. With both, the 9B fits a 12 GB GPU entirely (about 6.2 GB).
+            </P>
+
             <H2 id="opt-out">Opting out</H2>
             <Code>{`infernet house-models                 # what is pulled, disk used, last sync
 infernet house-models list            # the list and whether each model fits here

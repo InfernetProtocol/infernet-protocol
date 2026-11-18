@@ -157,6 +157,11 @@ async function defaultEngine() {
     if (Number.isFinite(eng.ollama_num_thread) && eng.ollama_num_thread > 0) {
         opts.numThread = eng.ollama_num_thread;
     }
+    // Optional override for the per-request context cap (default 32768,
+    // INFERNET_OLLAMA_MAX_CTX; 0 = no cap). See DEFAULT_MAX_CTX in the engine.
+    if (Number.isFinite(eng.ollama_max_ctx) && eng.ollama_max_ctx >= 0) {
+        opts.maxCtx = eng.ollama_max_ctx;
+    }
     const cacheKey = `default:${eng.backend ?? 'auto'}`;
     const engine = await buildEngine(cacheKey, opts);
     if (engine.kind === 'stub' && !stubExplicitlyChosen(config)) {

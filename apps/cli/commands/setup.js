@@ -218,7 +218,12 @@ async function startOllama({ yes }) {
     // --user service or simply lack passwordless sudo.
     const uid = process.getuid?.() ?? null;
     const userBus = uid != null && fsSync.existsSync(`/run/user/${uid}/bus`);
-    const NOHUP = "(nohup ollama serve > /tmp/ollama.log 2>&1 < /dev/null &)";
+    // Flash attention + q8_0 KV cache unless the operator set them: halves
+    // the KV cache, so long-context models fit the GPU (see install.sh
+    // ensure_ollama_memory_env, which does the same for ollama.service).
+    const NOHUP = "(OLLAMA_FLASH_ATTENTION=${OLLAMA_FLASH_ATTENTION:-1}"
+        + " OLLAMA_KV_CACHE_TYPE=${OLLAMA_KV_CACHE_TYPE:-q8_0}"
+        + " nohup ollama serve > /tmp/ollama.log 2>&1 < /dev/null &)";
     let cmd;
     if (isMac) {
         cmd = `open -a Ollama || ${NOHUP}`;

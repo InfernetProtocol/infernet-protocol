@@ -986,6 +986,100 @@ ensure_cpu_baseline_model() {
     unset _cpu_model
 }
 
+# ---------------------------------------------------------------------------
+# Ollama memory defaults: flash attention + q8_0 KV cache.
+#
+# Halves the KV cache Ollama reserves for a long context, so a model fits the
+# GPU instead of thrashing (2026-11-18: the house 9B on a 12 GB RTX 3060 went
+# from a predicted 13.6 GiB, evicted on every model switch, to 6.2 GB, 100%
+# GPU). Written as a systemd drop-in for the ollama.service that Ollama's own
+# installer creates, and only for keys the operator has not set anywhere in
+# that unit. Re-runs (every `infernet update`) are idempotent: Ollama is only
+# restarted when the drop-in actually changed.
+#
+# Opt-out: INFERNET_SKIP_OLLAMA_ENV=1 (an existing drop-in is left as is;
+# delete /etc/systemd/system/ollama.service.d/infernet-memory.conf to undo).
+# ---------------------------------------------------------------------------
+OLLAMA_DROPIN_DIR="/etc/systemd/system/ollama.service.d"
+OLLAMA_DROPIN="$OLLAMA_DROPIN_DIR/infernet-memory.conf"
+
+# Prints the keys (of OLLAMA_FLASH_ATTENTION, OLLAMA_KV_CACHE_TYPE) that the
+# unit sets outside our own drop-in. Reads `systemctl cat` output on stdin.
+ollama_operator_env_keys() {
+    awk -v ours="$OLLAMA_DROPIN" '
+        /^# \// { skip = ($2 == ours); next }
+        skip { next }
+        /^[[:space:]]*Environment[[:space:]]*=/ {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /OLLAMA_FLASH_ATTENTION=/) print "OLLAMA_FLASH_ATTENTION"
+                if ($i ~ /OLLAMA_KV_CACHE_TYPE=/) print "OLLAMA_KV_CACHE_TYPE"
+            }
+        }
+    ' | sort -u
+}
+
+# Builds the drop-in body for the keys the operator has not set. Empty when
+# the operator set both. Args: newline-separated operator keys.
+ollama_memory_dropin() {
+    _keys="$1"
+    _env=""
+    printf '%s\n' "$_keys" | grep -qx OLLAMA_FLASH_ATTENTION || _env="$_env \"OLLAMA_FLASH_ATTENTION=1\""
+    printf '%s\n' "$_keys" | grep -qx OLLAMA_KV_CACHE_TYPE || _env="$_env \"OLLAMA_KV_CACHE_TYPE=q8_0\""
+    if [ -n "$_env" ]; then
+        printf '# Written by the Infernet installer (install.sh: ensure_ollama_memory_env).\n'
+        printf '# Only keys not already set in ollama.service. Remove this file to undo.\n'
+        printf '[Service]\nEnvironment=%s\n' "${_env# }"
+    fi
+    unset _keys _env
+}
+
+ensure_ollama_memory_env() {
+    if [ "${INFERNET_SKIP_OLLAMA_ENV:-0}" = "1" ]; then
+        info "INFERNET_SKIP_OLLAMA_ENV=1 — leaving Ollama's environment alone"
+        return 0
+    fi
+    [ "$OS" = "linux" ] || return 0
+    [ -d /run/systemd/system ] || return 0
+    command -v systemctl >/dev/null 2>&1 || return 0
+    _unit="$(systemctl cat ollama.service 2>/dev/null)" || { unset _unit; return 0; }
+    [ -n "$_unit" ] || { unset _unit; return 0; }
+
+    _priv=""
+    if [ "$(id -u 2>/dev/null || echo 0)" != "0" ]; then
+        if [ -n "$SUDO" ] && $SUDO -n true 2>/dev/null; then
+            _priv="$SUDO -n"
+        else
+            info "Ollama memory defaults: need root to write $OLLAMA_DROPIN — skipped"
+            unset _unit _priv
+            return 0
+        fi
+    fi
+
+    _want="$(ollama_memory_dropin "$(printf '%s\n' "$_unit" | ollama_operator_env_keys)")"
+    _have="$(cat "$OLLAMA_DROPIN" 2>/dev/null || true)"
+    if [ "$_want" = "$_have" ]; then
+        unset _unit _priv _want _have
+        return 0
+    fi
+    if [ -z "$_want" ]; then
+        # The operator now sets both keys: our drop-in has nothing to add.
+        $_priv rm -f "$OLLAMA_DROPIN" 2>/dev/null || true
+    else
+        $_priv mkdir -p "$OLLAMA_DROPIN_DIR" 2>/dev/null || true
+        if ! printf '%s\n' "$_want" | $_priv tee "$OLLAMA_DROPIN" >/dev/null 2>&1; then
+            warn "could not write $OLLAMA_DROPIN — Ollama keeps its defaults"
+            unset _unit _priv _want _have
+            return 0
+        fi
+    fi
+    $_priv systemctl daemon-reload 2>/dev/null || true
+    if systemctl is-active --quiet ollama.service 2>/dev/null; then
+        $_priv systemctl restart ollama.service 2>/dev/null || warn "could not restart ollama.service"
+    fi
+    ok "Ollama memory defaults: flash attention + q8_0 KV cache ($OLLAMA_DROPIN)"
+    unset _unit _priv _want _have
+}
+
 run_install() {
     # Prefer bun — it's fast, self-contained, and (crucially) doesn't route
     # through mise's shim layer, which breaks pnpm with "No version is set for
@@ -1560,6 +1654,10 @@ main() {
     # operators who skip `infernet setup` still have a working model.
     # Opt-out: INFERNET_SKIP_CPU_BASELINE=1.
     ensure_cpu_baseline_model
+
+    # Flash attention + q8_0 KV cache for the systemd ollama.service, unless
+    # the operator set those already. Opt-out: INFERNET_SKIP_OLLAMA_ENV=1.
+    ensure_ollama_memory_env
 
     prune_stray_cli_copies
 

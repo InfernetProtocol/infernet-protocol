@@ -43,6 +43,45 @@ export function defaultNumThread() {
 export const OLLAMA_DEFAULT_HOST = DEFAULT_HOST;
 
 /**
+ * Default context cap for Ollama inference. A model whose Modelfile sets a
+ * larger `num_ctx` is run at this size instead (options.num_ctx on every
+ * /api/chat call); a model that sets a smaller one, or none, is left alone.
+ *
+ * Why: the house 9B (eriktonon/qwen3.8-uncensored:9b) ships num_ctx 65536.
+ * At that size Ollama predicts 13.6 GiB for a 6 GB model, so on a 12 GB GPU
+ * every model switch evicted and reloaded it, jobs hit the local timeout and
+ * fell over to CPU nodes (~10 min); CPU nodes held 8.8 GB for it. 32768 is
+ * plenty for chat. The cap is sent on every request so Ollama keeps a model
+ * loaded at one size (a different num_ctx per request would reload it).
+ * Lift or disable with INFERNET_OLLAMA_MAX_CTX (0 = no cap).
+ */
+export const DEFAULT_MAX_CTX = 32768;
+
+export function resolveMaxCtx(value = process.env.INFERNET_OLLAMA_MAX_CTX) {
+    if (value === undefined || value === null || String(value).trim() === "") return DEFAULT_MAX_CTX;
+    const n = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(n) || n < 0) return DEFAULT_MAX_CTX;
+    return n; // 0 disables the cap
+}
+
+/** `num_ctx` from an /api/show `parameters` string ("num_ctx 65536\nstop ..."), or null. */
+export function parseNumCtx(parameters) {
+    if (typeof parameters !== "string") return null;
+    const m = parameters.match(/^\s*num_ctx\s+(\d+)\s*$/m);
+    return m ? Number.parseInt(m[1], 10) : null;
+}
+
+/**
+ * The context a request should ask for: the cap when the model's own
+ * num_ctx is above it, otherwise null (send nothing, keep Ollama's choice).
+ */
+export function cappedNumCtx(modelCtx, maxCtx) {
+    if (!Number.isFinite(maxCtx) || maxCtx <= 0) return null;
+    if (!Number.isFinite(modelCtx) || modelCtx <= maxCtx) return null;
+    return maxCtx;
+}
+
+/**
  * Minimal fetch over node:http for the /api/chat stream, with no headers or
  * body timeout.
  *
@@ -110,6 +149,7 @@ export async function createOllamaBackend({
     host = process.env.OLLAMA_HOST ?? DEFAULT_HOST,
     defaultModel = process.env.INFERNET_ENGINE_MODEL ?? null,
     numThread = Number.parseInt(process.env.OLLAMA_NUM_THREAD ?? "", 10) || defaultNumThread(),
+    maxCtx = resolveMaxCtx(),
     skipProbe = false,
     fetchImpl = ollamaHttpFetch
 } = {}) {
@@ -122,10 +162,38 @@ export async function createOllamaBackend({
         }
     }
 
+    // Model -> its Modelfile num_ctx (null when unset or /api/show failed).
+    // A failed lookup is retried after a minute; a good one is kept.
+    const ctxCache = new Map();
+    async function modelNumCtx(model, signal) {
+        const hit = ctxCache.get(model);
+        if (hit && (hit.ok || Date.now() - hit.at < 60_000)) return hit.ctx;
+        let ctx = null;
+        let ok = false;
+        try {
+            const res = await fetchImpl(new URL("/api/show", host), {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ model }),
+                signal
+            });
+            if (res?.ok && typeof res.text === "function") {
+                const info = JSON.parse(await res.text());
+                ctx = parseNumCtx(info?.parameters);
+                ok = true;
+            }
+        } catch {
+            // best-effort: no cap rather than no answer
+        }
+        ctxCache.set(model, { ctx, ok, at: Date.now() });
+        return ctx;
+    }
+
     return {
         kind: "ollama",
         host,
         numThread,
+        maxCtx,
         generate({ messages, id, model = null, max_tokens, temperature } = {}) {
             const genId = id ?? randomUUID();
             const stream = new AsyncQueue();
@@ -163,6 +231,12 @@ export async function createOllamaBackend({
                 // every core. Operator can lift the cap via OLLAMA_NUM_THREAD.
                 if (Number.isFinite(numThread) && numThread > 0) {
                     body.options.num_thread = numThread;
+                }
+                // Cap a model whose Modelfile asks for a huge context (see
+                // DEFAULT_MAX_CTX). Only looked up when a cap is set.
+                if (Number.isFinite(maxCtx) && maxCtx > 0) {
+                    const numCtx = cappedNumCtx(await modelNumCtx(resolvedModel, ctrl.signal), maxCtx);
+                    if (numCtx) body.options.num_ctx = numCtx;
                 }
 
                 let res;
