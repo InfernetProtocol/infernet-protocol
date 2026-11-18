@@ -127,6 +127,13 @@ export default function HouseModelsPage() {
                 for either key wins; <code>INFERNET_SKIP_OLLAMA_ENV=1</code> skips the step, and deleting the file
                 undoes it. With both, the 9B fits a 12 GB GPU entirely (about 6.2 GB).
             </P>
+            <P>
+                On a GPU with 10 GB or more the same drop-in sets <code>OLLAMA_NUM_PARALLEL</code> (2 slots from 10 GB,
+                3 from 20 GB, 4 from 40 GB), and the node runs that many jobs at once (CLI 0.1.96 and later). CPU-only
+                nodes run one job at a time. Override with <code>INFERNET_MAX_CONCURRENT_JOBS</code> (or{" "}
+                <code>engine.max_concurrent_jobs</code>); an <code>OLLAMA_NUM_PARALLEL</code> you set yourself wins
+                over ours and the node follows it.
+            </P>
 
             <H2 id="opt-out">Opting out</H2>
             <Code>{`infernet house-models                 # what is pulled, disk used, last sync

@@ -987,7 +987,9 @@ ensure_cpu_baseline_model() {
 }
 
 # ---------------------------------------------------------------------------
-# Ollama memory defaults: flash attention + q8_0 KV cache.
+# Ollama defaults: flash attention + q8_0 KV cache, and on GPUs with 10 GB+
+# parallel request slots (OLLAMA_NUM_PARALLEL) so the node runs jobs side by
+# side; the daemon runs as many jobs at once as Ollama has slots.
 #
 # Halves the KV cache Ollama reserves for a long context, so a model fits the
 # GPU instead of thrashing (2026-11-18: the house 9B on a 12 GB RTX 3060 went
@@ -1013,24 +1015,50 @@ ollama_operator_env_keys() {
             for (i = 1; i <= NF; i++) {
                 if ($i ~ /OLLAMA_FLASH_ATTENTION=/) print "OLLAMA_FLASH_ATTENTION"
                 if ($i ~ /OLLAMA_KV_CACHE_TYPE=/) print "OLLAMA_KV_CACHE_TYPE"
+                if ($i ~ /OLLAMA_NUM_PARALLEL=/) print "OLLAMA_NUM_PARALLEL"
             }
         }
     ' | sort -u
 }
 
+# Parallel request slots for this GPU: total NVIDIA VRAM -> 1 (<10 GB or no
+# GPU), 2 (10-20 GB), 3 (20-40 GB), 4 (40 GB+). Each slot holds its own KV
+# cache. Same table as slotsForVram in apps/cli/lib/concurrency.js, which
+# sizes how many jobs the daemon runs at once. Arg: total VRAM in MiB
+# (default: nvidia-smi).
+ollama_parallel_slots() {
+    _mib="${1:-}"
+    if [ -z "$_mib" ] && command -v nvidia-smi >/dev/null 2>&1; then
+        _mib="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null \
+            | awk '{ s += $1 } END { printf "%d", s }')"
+    fi
+    case "$_mib" in ''|*[!0-9]*) _mib=0 ;; esac
+    if [ "$_mib" -ge 40960 ]; then echo 4
+    elif [ "$_mib" -ge 20480 ]; then echo 3
+    elif [ "$_mib" -ge 10240 ]; then echo 2
+    else echo 1
+    fi
+    unset _mib
+}
+
 # Builds the drop-in body for the keys the operator has not set. Empty when
-# the operator set both. Args: newline-separated operator keys.
+# the operator set all of them. Args: newline-separated operator keys,
+# parallel slots (OLLAMA_NUM_PARALLEL is only written for 2 or more).
 ollama_memory_dropin() {
     _keys="$1"
+    _slots="${2:-1}"
     _env=""
     printf '%s\n' "$_keys" | grep -qx OLLAMA_FLASH_ATTENTION || _env="$_env \"OLLAMA_FLASH_ATTENTION=1\""
     printf '%s\n' "$_keys" | grep -qx OLLAMA_KV_CACHE_TYPE || _env="$_env \"OLLAMA_KV_CACHE_TYPE=q8_0\""
+    if [ "$_slots" -ge 2 ] 2>/dev/null; then
+        printf '%s\n' "$_keys" | grep -qx OLLAMA_NUM_PARALLEL || _env="$_env \"OLLAMA_NUM_PARALLEL=$_slots\""
+    fi
     if [ -n "$_env" ]; then
         printf '# Written by the Infernet installer (install.sh: ensure_ollama_memory_env).\n'
         printf '# Only keys not already set in ollama.service. Remove this file to undo.\n'
         printf '[Service]\nEnvironment=%s\n' "${_env# }"
     fi
-    unset _keys _env
+    unset _keys _slots _env
 }
 
 ensure_ollama_memory_env() {
@@ -1055,7 +1083,7 @@ ensure_ollama_memory_env() {
         fi
     fi
 
-    _want="$(ollama_memory_dropin "$(printf '%s\n' "$_unit" | ollama_operator_env_keys)")"
+    _want="$(ollama_memory_dropin "$(printf '%s\n' "$_unit" | ollama_operator_env_keys)" "$(ollama_parallel_slots)")"
     _have="$(cat "$OLLAMA_DROPIN" 2>/dev/null || true)"
     if [ "$_want" = "$_have" ]; then
         unset _unit _priv _want _have
@@ -1076,7 +1104,7 @@ ensure_ollama_memory_env() {
     if systemctl is-active --quiet ollama.service 2>/dev/null; then
         $_priv systemctl restart ollama.service 2>/dev/null || warn "could not restart ollama.service"
     fi
-    ok "Ollama memory defaults: flash attention + q8_0 KV cache ($OLLAMA_DROPIN)"
+    ok "Ollama defaults: flash attention, q8_0 KV cache, parallel slots by VRAM ($OLLAMA_DROPIN)"
     unset _unit _priv _want _have
 }
 

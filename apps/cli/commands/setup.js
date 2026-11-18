@@ -35,6 +35,7 @@ import {
 import { isDaemonAlive } from "../lib/ipc.js";
 import { ensureService, systemUnitPresent } from "./service.js";
 import { createNodeClient } from "../lib/node-client.js";
+import { slotsForVram, totalVramGbOf } from "../lib/concurrency.js";
 
 const pExec = promisify(execFile);
 
@@ -201,7 +202,7 @@ async function confirmRun({ label, command, yes }) {
     });
 }
 
-async function startOllama({ yes }) {
+async function startOllama({ yes, gpus = [] }) {
     // Linux: usually has the ollama systemd unit from the installer.
     // macOS: usually opens the Ollama.app. Fall back to `ollama serve &`.
     // Non-systemd Linux (containers, WSL, distros without systemd as
@@ -221,8 +222,12 @@ async function startOllama({ yes }) {
     // Flash attention + q8_0 KV cache unless the operator set them: halves
     // the KV cache, so long-context models fit the GPU (see install.sh
     // ensure_ollama_memory_env, which does the same for ollama.service).
+    // GPUs with 10 GB+ also get parallel slots (lib/concurrency.js), the
+    // same number the daemon then runs jobs at once.
+    const slots = slotsForVram(totalVramGbOf(gpus));
     const NOHUP = "(OLLAMA_FLASH_ATTENTION=${OLLAMA_FLASH_ATTENTION:-1}"
         + " OLLAMA_KV_CACHE_TYPE=${OLLAMA_KV_CACHE_TYPE:-q8_0}"
+        + (slots >= 2 ? ` OLLAMA_NUM_PARALLEL=\${OLLAMA_NUM_PARALLEL:-${slots}}` : "")
         + " nohup ollama serve > /tmp/ollama.log 2>&1 < /dev/null &)";
     let cmd;
     if (isMac) {
@@ -675,7 +680,7 @@ export default async function setup(args) {
                     ? `Ollama installed (${ollamaState.version}) but not reachable at ${host}`
                     : `Ollama installed but not reachable at ${host}`
             );
-            const started = await startOllama({ yes });
+            const started = await startOllama({ yes, gpus: detectedGpus });
             if (started) {
                 // Background `ollama serve &` returns instantly; the
                 // daemon needs a few seconds to bind on cold start.

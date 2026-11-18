@@ -129,6 +129,16 @@ describe("concurrency caps", () => {
         expect(isOverloaded(node("g", { active: 3 }))).toBe(false);
     });
 
+    it("a 2-slot GPU node with one job takes the second while a 1-slot node is busy (2026-11-18)", () => {
+        const gpu2 = node("gpu2", { tps: 30, active: 1, cap: 2 });
+        const cpu1 = cpuNode("cpu1", { tps: 5, active: 1, cap: 1 });
+        expect(isOverloaded(gpu2)).toBe(false);
+        expect(isOverloaded(cpu1)).toBe(true);
+        expect(smartPick([cpu1, gpu2], {}, fixed).id).toBe("gpu2");
+        // Both slots busy: now it is overloaded and ranks with the busy nodes.
+        expect(isOverloaded(node("gpu2", { tps: 30, active: 2, cap: 2 }))).toBe(true);
+    });
+
     it("an advertised cap wins either way", () => {
         expect(capOf(cpuNode("c", { cap: 2 }))).toBe(2);
         expect(capOf(node("g", { cap: 1 }))).toBe(1);
