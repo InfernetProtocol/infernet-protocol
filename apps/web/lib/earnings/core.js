@@ -498,3 +498,89 @@ export const EARNING_STATUS_LABELS = {
     confirmed: "confirmed",
     void: "void"
 };
+
+/*
+ * Earnings over time, for a chart (GET /api/v1/billing/node-earnings: the
+ * c0mpute.com operator dashboard plots earnings against spend).
+ *
+ * What a row means for the operator: computeJobCredits() splits the charge so
+ * that gross_usd = amount_usd + fee_usd, where amount_usd is what the
+ * operator is CREDITED (net, theirs to keep) and fee_usd is the house fee.
+ * So amount_usd is already the operator's net share; there is no separate
+ * "earned" figure to derive.
+ *
+ * Which rows count: everything that is or may still become the operator's
+ * money ('pending_approval', 'pending', 'confirmed'). 'void' rows never will
+ * be paid (a rejected subsidy, a voided credit), so they are left out. Rows of
+ * kind 'spent_on_compute' are the operator SPENDING earnings, not earning
+ * them, so they are left out too: spend belongs on the other line of the chart.
+ */
+export const EARNINGS_SERIES_MAX_DAYS = 31;
+export const EARNINGS_SERIES_DEFAULT_HOURS = 24;
+export const EARNINGS_SERIES_EXCLUDED_STATUSES = Object.freeze(["void"]);
+export const EARNINGS_SERIES_EXCLUDED_KINDS = Object.freeze(["spent_on_compute"]);
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * The window start for an earnings series: `since` (ISO 8601) when it parses,
+ * else 24 hours ago; never more than 31 days back, never in the future.
+ * Returns an ISO string.
+ */
+export function resolveEarningsSince(raw, now = Date.now()) {
+    const nowMs = typeof now === "number" ? now : new Date(now).getTime();
+    const floor = nowMs - EARNINGS_SERIES_MAX_DAYS * 24 * HOUR_MS;
+    const parsed = raw ? Date.parse(String(raw)) : NaN;
+    let ms = Number.isFinite(parsed) ? parsed : nowMs - EARNINGS_SERIES_DEFAULT_HOURS * HOUR_MS;
+    if (ms < floor) ms = floor;
+    if (ms > nowMs) ms = nowMs;
+    return new Date(ms).toISOString();
+}
+
+/** True when a provider_earnings row belongs in an earnings series. */
+export function countsTowardEarningsSeries(row) {
+    if (!row) return false;
+    if (EARNINGS_SERIES_EXCLUDED_STATUSES.includes(row.status)) return false;
+    if (EARNINGS_SERIES_EXCLUDED_KINDS.includes(row.kind)) return false;
+    return true;
+}
+
+/** The UTC hour an instant falls in, as an ISO string ("2026-11-18T13:00:00.000Z"). */
+export function hourStartIso(at) {
+    if (at === null || at === undefined || at === "") return null;
+    const ms = new Date(at).getTime();
+    if (!Number.isFinite(ms)) return null;
+    return new Date(Math.floor(ms / HOUR_MS) * HOUR_MS).toISOString();
+}
+
+/**
+ * Fold provider_earnings rows into hourly buckets per provider:
+ *   { provider_id, at, jobs, amount_usd, fee_usd, gross_usd }
+ * `jobs` counts rows with a job_id (a reservation row has none); amount_usd
+ * is the operator's net credit, fee_usd the house fee, gross_usd their sum.
+ * Rows that do not count (see countsTowardEarningsSeries) or carry no usable
+ * earned_at are skipped. Sorted by hour, then provider_id. Empty hours are
+ * not emitted: the chart fills its own gaps.
+ */
+export function bucketEarningsHourly(rows = []) {
+    const buckets = new Map();
+    for (const row of rows ?? []) {
+        if (!countsTowardEarningsSeries(row)) continue;
+        const at = hourStartIso(row.earned_at);
+        if (!at || !row.provider_id) continue;
+        const key = `${at}|${row.provider_id}`;
+        let b = buckets.get(key);
+        if (!b) {
+            b = { provider_id: row.provider_id, at, jobs: 0, amount_usd: 0, fee_usd: 0, gross_usd: 0 };
+            buckets.set(key, b);
+        }
+        const amount = Number(row.amount_usd) || 0;
+        const fee = Number(row.fee_usd) || 0;
+        if (row.job_id) b.jobs += 1;
+        b.amount_usd = roundUsd(b.amount_usd + amount);
+        b.fee_usd = roundUsd(b.fee_usd + fee);
+        b.gross_usd = roundUsd(b.gross_usd + amount + fee);
+    }
+    return [...buckets.values()].sort((a, b) =>
+        a.at < b.at ? -1 : a.at > b.at ? 1 : String(a.provider_id).localeCompare(String(b.provider_id)));
+}
