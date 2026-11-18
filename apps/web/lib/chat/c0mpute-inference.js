@@ -49,6 +49,9 @@ export const DEFAULT_TIMEOUT_MS = 420_000;
 export const DEFAULT_WAIT_MS = 540_000;
 // Below this much time left, another bridge attempt cannot finish.
 export const MIN_ATTEMPT_MS = 20_000;
+// A worker that "failed" without saying why is retried this many times (it
+// is usually a runtime under load), then the job gives up.
+export const MAX_WORKER_FAILURES = 3;
 // Bridge answers that mean "busy, try again", not "cannot serve this"
 // (see isRetryable for worker_failed).
 export const RETRYABLE_CODES = new Set([
@@ -70,26 +73,6 @@ export function isRetryable(out) {
 export function c0mputeWaitMs(env = process.env) {
   const n = Number.parseInt(env.INFERNET_C0MPUTE_WAIT_MS ?? "", 10);
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_WAIT_MS;
-}
-
-/**
- * When c0mpute cannot answer, may the job move to an Infernet provider daemon
- * (often a CPU node, ~10 min for a 9B turn)? INFERNET_C0MPUTE_PROVIDER_FALLBACK:
- *   "no-capable" (default): only when no c0mpute worker serves the model at
- *                           all; a busy one means wait for it.
- *   "always":     on any c0mpute miss (the behavior before 2026-11-18).
- *   "never":      never.
- */
-export function providerFallbackPolicy(env = process.env) {
-  const v = String(env.INFERNET_C0MPUTE_PROVIDER_FALLBACK ?? "").trim().toLowerCase();
-  return v === "always" || v === "never" ? v : "no-capable";
-}
-
-/** Should a c0mpute miss move to a provider daemon under `policy`? */
-export function shouldMoveToProvider(policy, { capable }) {
-  if (policy === "always") return true;
-  if (policy === "never") return false;
-  return capable === false;
 }
 
 /**
@@ -341,22 +324,34 @@ const sharedWaitQueue = createWaitQueue();
  * normalized events as the other paths ({ type: meta|status|token|done|error,
  * data, id }) and persists them through the injected helpers.
  *
- * Busy is not failure: while the bridge answers "busy, try again"
- * (RETRYABLE_CODES) and a worker serving the model exists, it asks again until
- * the wait budget from job creation runs out, and yields a `status` event
- * ({ state: "waiting", message, queue_position, attempt, waited_ms }) each
- * time so the client can show "waiting for a free GPU slot".
+ * One queue, two kinds of capable nodes (Anthony, 2026-11-18: "if it turns
+ * away a job send it back to the front of the queue", "it should definitely
+ * go through the queue again", "it could be a cpu node if that's all that's
+ * available"). The job waits in a per-model FIFO (created_at order); at the
+ * head it is dispatched to the first capable node with a free slot:
+ *   1. the c0mpute auction (the bridge picks a free worker, GPU or CPU);
+ *   2. else an Infernet provider daemon with a free slot serving the model
+ *      (`assign({ freeSlot: true })`, the fastest free one).
+ * A turn-away, a busy or failed worker or a timeout puts it back in line at
+ * its old place (the front, ahead of newer jobs), with a `status` event
+ * ({ state: "waiting", message, queue_position, attempt, waited_ms }), until
+ * the wait budget from job creation (INFERNET_C0MPUTE_WAIT_MS) runs out.
+ * Nothing hands the job to a busy node outside this queue.
  *
- * When it gives up it yields { type: "c0mpute_failed", data: { message, code,
- * capable } } WITHOUT persisting an error, so the caller can still move the
- * job (providerFallbackPolicy) before anything else is shown. `capable` is
- * false only when no c0mpute worker serves the model at all.
+ * When no c0mpute worker serves the model at all, the c0mpute auction drops
+ * out and the job is assigned to the best daemon serving it (`assign({
+ * freeSlot: false })`, which queues it there oldest first).
+ *
+ * Yields { type: "assigned", job } when a daemon took it (the caller then
+ * streams the provider path, same job id), or { type: "c0mpute_failed",
+ * data: { message, code, capable } } (nothing persisted) when it gave up.
  */
 export async function* c0mputeJobEvents(job, {
   run = runC0mputeChat,
   insertEvent,
   finalize,
   charge,
+  assign = async () => null,
   log = console.log,
   serves = c0mputeServesModel,
   waitMs = c0mputeWaitMs(),
@@ -380,42 +375,62 @@ export async function* c0mputeJobEvents(job, {
   const deadline = createdAt + waitMs;
   let out = null;
   let capable = null;
-  for (let attempt = 1; ; attempt += 1) {
-    const remaining = deadline - now();
-    const timeoutMs = Math.max(MIN_ATTEMPT_MS, Math.min(DEFAULT_TIMEOUT_MS, remaining));
-    out = await run({ model, messages: input.messages ?? [], maxTokens: input.max_tokens, temperature: input.temperature, timeoutMs });
-    if (out.ok) break;
-    log(`[c0mpute-chat] job ${job.id} model=${model} attempt ${attempt}: ${out.error}`);
-    if (!isRetryable(out)) break;
-    capable = await serves(model).catch(() => null);
-    if (capable === false) break;
-    const left = deadline - now();
-    if (left < MIN_ATTEMPT_MS) break;
-    // Our own place among the chats waiting here, unless the bridge said.
-    const localPos = queue.join(model, job.id, createdAt);
-    const position = out.queuePosition ?? (localPos >= 0 ? localPos : null);
-    const status = {
-      state: "waiting",
-      route: "c0mpute",
-      message: position != null
-        ? `waiting for a free GPU slot (position ${position + 1} in the queue)`
-        : "waiting for a free GPU slot on the c0mpute network",
-      queue_position: position,
-      attempt,
-      waited_ms: now() - createdAt,
-      reason: out.code
-    };
-    const persisted = await insertEvent(job.id, "status", status);
-    yield { type: "status", data: persisted?.data ?? status, id: persisted?.id };
-    // A bridge that queues answers when a slot frees; one that turns the job
-    // away at once (no_bids) gets a short pause so we do not hammer it.
-    await sleep(Math.min(5_000, Math.max(0, left - MIN_ATTEMPT_MS)));
-    // Front of the queue first: wait until every older waiting chat for this
-    // model has asked again (or the budget runs out), then leave the line.
-    while (queue.position(model, job.id) > 0 && deadline - now() > MIN_ATTEMPT_MS) await sleep(500);
+  let workerFailures = 0;
+  queue.join(model, job.id, createdAt);
+  try {
+    for (let attempt = 1; ; attempt += 1) {
+      // Front of the queue first: dispatch once every older waiting chat for
+      // this model has been dispatched (or the budget runs out).
+      while (queue.position(model, job.id) > 0 && deadline - now() > MIN_ATTEMPT_MS) await sleep(500);
+      queue.leave(model, job.id);
+
+      if (capable === false) {
+        // No c0mpute worker serves it: a daemon serving it, queued there.
+        const moved = await assign({ freeSlot: false }).catch(() => null);
+        if (moved) { yield { type: "assigned", job: moved }; return; }
+        out = { ok: false, code: "no_capable_node", error: `no node serves ${model ?? "this model"}` };
+        break;
+      }
+
+      const remaining = deadline - now();
+      const timeoutMs = Math.max(MIN_ATTEMPT_MS, Math.min(DEFAULT_TIMEOUT_MS, remaining));
+      out = await run({ model, messages: input.messages ?? [], maxTokens: input.max_tokens, temperature: input.temperature, timeoutMs });
+      if (out.ok) break;
+      log(`[c0mpute-chat] job ${job.id} model=${model} attempt ${attempt}: ${out.error}`);
+      if (out.code === "worker_failed") workerFailures += 1;
+      if (!isRetryable(out) && !(out.code === "worker_failed" && workerFailures <= MAX_WORKER_FAILURES)) break;
+      capable = await serves(model).catch(() => null);
+      if (capable === false) { attempt -= 1; continue; }
+
+      // Turned away: the next capable node with a free slot, CPU included.
+      const moved = await assign({ freeSlot: true }).catch(() => null);
+      if (moved) { yield { type: "assigned", job: moved }; return; }
+
+      const left = deadline - now();
+      if (left < MIN_ATTEMPT_MS) break;
+      // Back in line at its old place.
+      const localPos = queue.join(model, job.id, createdAt);
+      const position = out.queuePosition ?? (localPos >= 0 ? localPos : null);
+      const status = {
+        state: "waiting",
+        route: "queue",
+        message: position != null
+          ? `waiting for a free slot (position ${position + 1} in the queue)`
+          : "waiting for a free slot",
+        queue_position: position,
+        attempt,
+        waited_ms: now() - createdAt,
+        reason: out.code
+      };
+      const persisted = await insertEvent(job.id, "status", status);
+      yield { type: "status", data: persisted?.data ?? status, id: persisted?.id };
+      // A bridge that queues answers when a slot frees; one that turns the job
+      // away at once (no_bids) gets a short pause so we do not hammer it.
+      await sleep(Math.min(5_000, Math.max(0, left - MIN_ATTEMPT_MS)));
+    }
+  } finally {
     queue.leave(model, job.id);
   }
-  queue.leave(model, job.id);
   if (!out.ok) {
     if (capable === null && isRetryable(out)) capable = await serves(model).catch(() => null);
     yield { type: "c0mpute_failed", data: { message: out.error, code: out.code, capable } };

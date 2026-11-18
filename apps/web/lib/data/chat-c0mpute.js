@@ -1,7 +1,6 @@
 import "server-only";
 import { isNimConfigured, nimVirtualProvider } from "@infernetprotocol/nim-adapter";
 import { encryptJSON } from "@/lib/encrypt";
-import { providerFallbackPolicy, shouldMoveToProvider } from "@/lib/chat/c0mpute-inference";
 
 /**
  * A c0mpute chat job no worker answered: hand it to the hosted fallback when
@@ -116,19 +115,21 @@ export async function settleC0mputeJob(supabase, job, result) {
 }
 
 /**
- * A c0mpute chat job no worker answered: hand it to an Infernet provider
- * daemon serving the model before anything else (the hosted fallback is
- * billed and comes after). Keeps the job id, so the caller's stream carries
- * on in the provider path. Returns the reassigned job, or null when no daemon
- * can take it.
+ * Assign a queued c0mpute chat job to an Infernet provider daemon serving the
+ * model, as a step of the queue (lib/chat/c0mpute-inference.js
+ * c0mputeJobEvents), never as a side door: with `freeSlot` only a daemon that
+ * can start it now (the fastest free one, CPU included); without, the best
+ * daemon serving the model, where it queues oldest first (used only when no
+ * c0mpute worker serves the model). Keeps the job id, so the caller's stream
+ * carries on in the provider path. Returns the reassigned job, or null.
  */
-export async function moveC0mputeJobToProvider(supabase, job) {
+export async function assignC0mputeJob(supabase, job, { freeSlot = true } = {}) {
   const input = job?.input_spec ?? {};
   const model = input.c0mpute_model ?? job?.model_name ?? null;
   try {
     const { pickChatProvider } = await import("@/lib/data/chat");
     const { matchServedModel } = await import("@/lib/model-names");
-    const provider = await pickChatProvider({ modelName: model ?? undefined, reserve: true });
+    const provider = await pickChatProvider({ modelName: model ?? undefined, reserve: true, requireFreeSlot: freeSlot });
     if (!provider) return null;
     const served = (model ? matchServedModel(provider.specs?.served_models, model) : null) ?? model;
     const { fallback: _f, c0mpute_model: _c0, nim_ok: _ok, ...rest } = input;
@@ -145,30 +146,23 @@ export async function moveC0mputeJobToProvider(supabase, job) {
     };
     const { error } = await supabase.from("jobs").update(patch).eq("id", job.id);
     if (error) return null;
-    console.warn(`[c0mpute-chat] job ${job.id}: no c0mpute worker answered; moved to provider ${provider.name ?? provider.id}`);
+    console.warn(`[c0mpute-chat] job ${job.id}: assigned from the queue to provider ${provider.name ?? provider.id} (${freeSlot ? "free slot" : "no c0mpute worker serves the model"})`);
     return { ...job, ...patch, input_spec: spec };
   } catch (err) {
-    console.warn(`[c0mpute-chat] move to provider failed for job ${job?.id}: ${err?.message ?? err}`);
+    console.warn(`[c0mpute-chat] assign to provider failed for job ${job?.id}: ${err?.message ?? err}`);
     return null;
   }
 }
 
 /**
- * Where a chat goes when c0mpute gave up on it (c0mpute_failed), or null when
- * it stays failed. A provider daemon only under providerFallbackPolicy (by
- * default only when no c0mpute worker serves the model at all: a busy GPU
- * worker was already waited for, and moving to a CPU daemon took ~10 min),
- * then the billed hosted fallback when the job allowed it.
+ * The queue gave up on a c0mpute chat (wait budget spent, or no node serves
+ * the model): the billed hosted fallback when the job allowed it (nim_ok),
+ * else null and the job fails. Never a direct hand-off to a provider: that
+ * happens only inside the queue (assignC0mputeJob).
  *
- * @returns {Promise<{ kind: "provider" | "nim", job: object } | null>}
+ * @returns {Promise<{ kind: "nim", job: object } | null>}
  */
-export async function routeC0mputeMiss(supabase, job, { capable = null, code = null } = {}, { policy = providerFallbackPolicy() } = {}) {
-  if (shouldMoveToProvider(policy, { capable })) {
-    const moved = await moveC0mputeJobToProvider(supabase, job);
-    if (moved) return { kind: "provider", job: moved };
-  } else {
-    console.warn(`[c0mpute-chat] job ${job?.id}: c0mpute busy (${code ?? "?"}), a worker serves the model; not moving it to a provider (policy ${policy})`);
-  }
+export async function routeC0mputeMiss(supabase, job) {
   const nimJob = await moveC0mputeJobToNim(supabase, job);
   if (nimJob) return { kind: "nim", job: nimJob };
   return null;

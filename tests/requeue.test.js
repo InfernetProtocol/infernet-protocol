@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requeueDecision, isTurnAwayError, notSlower, MAX_REQUEUES } from "../apps/web/lib/routing/requeue.js";
+import { requeueDecision, isTurnAwayError, MAX_REQUEUES } from "../apps/web/lib/routing/requeue.js";
 import { isTurnAwayError as cliIsTurnAway, requeueTurnedAway } from "../apps/cli/lib/turn-away.js";
 
 // Anthony, 2026-11-18: "if it turns away a job send it back to the front of the queue".
@@ -9,15 +9,16 @@ const fastGpu = { id: "gpu2", specs: { bench: { tokens_per_second_avg: 60 } } };
 const job = (over = {}) => ({ type: "chat", status: "assigned", provider_id: "gpu", input_spec: {}, ...over });
 
 describe("requeueDecision: a turned-away job goes back to the front", () => {
-    it("stays on its node (front of its queue) rather than moving to a slower one", () => {
+    it("goes to the first capable node with a free slot, a CPU node included", () => {
         expect(requeueDecision({ job: job(), tokens: 0, provider: gpu, target: cpu }))
-            .toEqual({ requeue: true, reason: "front_of_queue", to: "gpu", moved: false });
-        expect(requeueDecision({ job: job(), tokens: 0, provider: gpu, target: null }).to).toBe("gpu");
-    });
-
-    it("moves to a free node that is at least as fast", () => {
+            .toEqual({ requeue: true, reason: "moved_to_free_node", to: "cpu", moved: true });
         expect(requeueDecision({ job: job(), tokens: 0, provider: gpu, target: fastGpu }))
             .toMatchObject({ requeue: true, to: "gpu2", moved: true });
+    });
+
+    it("with no node free, stays first in line on its node", () => {
+        expect(requeueDecision({ job: job(), tokens: 0, provider: gpu, target: null }))
+            .toEqual({ requeue: true, reason: "front_of_queue", to: "gpu", moved: false });
     });
 
     it("never requeues an answer that started, a finished job or someone else's", () => {
@@ -36,11 +37,6 @@ describe("requeueDecision: a turned-away job goes back to the front", () => {
         for (const pin of [{ reservation_id: "r" }, { client_pubkey: "ab" }, { batch_item_id: "b" }]) {
             expect(requeueDecision({ job: job(pin), tokens: 0, provider: gpu, target: fastGpu }).to).toBe("gpu");
         }
-    });
-
-    it("notSlower: unmeasured targets never beat a measured node", () => {
-        expect(notSlower({ id: "x", specs: {} }, gpu)).toBe(false);
-        expect(notSlower({ id: "x", specs: {} }, { id: "y", specs: {} })).toBe(true);
     });
 });
 
