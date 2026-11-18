@@ -59,6 +59,7 @@ import { checkModelFits, formatFitFailure } from '../lib/model-fit.js';
 import { downloadHfModel, resolveHfToken } from '../lib/hf-model.js';
 import { startVllmServe, stopVllmServe, vllmInstalled, waitForVllmModel, extractVllmError } from '../lib/vllm.js';
 import { detectGpus, detectHost } from '@infernetprotocol/gpu';
+import { ollamaNumParallel, resolveMaxConcurrentJobs, totalVramGbOf } from '../lib/concurrency.js';
 import { getOrCreateModelKey, getModelPublicKeys } from '../lib/model-key.js';
 import { pullLatestBinary } from './upgrade.js';
 import { PROBE_INTERVAL_MS, runProbeRound } from '../lib/aggregator.js';
@@ -227,10 +228,18 @@ async function runDaemon(args, ctx) {
     const heartbeatMs = Number.parseInt(args.get('heartbeat-interval') ?? '', 10) || DEFAULT_HEARTBEAT_MS;
     const pollMs     = Number.parseInt(args.get('poll-interval') ?? '', 10)      || DEFAULT_POLL_MS;
     const once       = args.has('once');
-    // Chat jobs run at once. Ollama on one GPU serves a single request at a
-    // time unless OLLAMA_NUM_PARALLEL is raised, so extra jobs only queue
-    // inside it; raise this together with that.
-    const maxConcurrentJobs = Number.parseInt(process.env.INFERNET_MAX_CONCURRENT_JOBS ?? '', 10) || 1;
+    // Jobs run at once: capacity-based by default (lib/concurrency.js). CPU
+    // nodes run 1; GPU nodes as many as Ollama has parallel slots
+    // (OLLAMA_NUM_PARALLEL, which install.sh sizes from VRAM). Override with
+    // INFERNET_MAX_CONCURRENT_JOBS or engine.max_concurrent_jobs.
+    let totalVramGb = 0;
+    try { totalVramGb = totalVramGbOf(await detectGpus()); } catch { /* CPU-only */ }
+    const concurrency = resolveMaxConcurrentJobs({
+        config,
+        totalVramGb,
+        runtimeSlots: totalVramGb > 0 ? await ollamaNumParallel() : null
+    });
+    const maxConcurrentJobs = concurrency.value;
 
     const p2pDisabled = args.has('no-p2p');
     const noAdvertise = args.has('no-advertise') || node.address === null;
@@ -293,6 +302,7 @@ async function runDaemon(args, ctx) {
     process.stdout.write(`  config:    ${configPath}\n`);
     process.stdout.write(`  heartbeat: ${heartbeatMs}ms\n`);
     process.stdout.write(`  poll:      ${pollMs}ms\n`);
+    process.stdout.write(`  jobs:      up to ${maxConcurrentJobs} at once (${concurrency.source})\n`);
     if (!p2pDisabled) {
         process.stdout.write(`  p2p:       ${formatEndpoint(advertisedAddress ?? '-', advertisedPort)}${bindPort !== advertisedPort ? ` (binds locally :${bindPort})` : ''}\n`);
     } else {
@@ -661,7 +671,14 @@ async function runDaemon(args, ctx) {
                 // and the restarted daemon picks them up.
                 if (stats.draining) break;
                 if (stats.activeJobIds.size >= maxConcurrentJobs) break;
-                await processJob(job);
+                if (maxConcurrentJobs <= 1) {
+                    await processJob(job);
+                } else {
+                    // Parallel slots: start it and keep filling slots from
+                    // this batch. processJob marks the job active before its
+                    // first await, so the cap check above sees it.
+                    processJob(job).catch((err) => process.stderr.write(`job ${job.id} threw: ${err?.message ?? err}\n`));
+                }
             }
         } catch (err) {
             stats.pollsFailed += 1;

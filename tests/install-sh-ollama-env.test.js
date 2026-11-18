@@ -10,11 +10,15 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = readFileSync(path.join(repoRoot, "install.sh"), "utf8");
 const grab = (name) => script.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}\\n`, "m"))[0];
-const fns = `OLLAMA_DROPIN=/etc/systemd/system/ollama.service.d/infernet-memory.conf\n${grab("ollama_operator_env_keys")}\n${grab("ollama_memory_dropin")}\n`;
+const fns = `OLLAMA_DROPIN=/etc/systemd/system/ollama.service.d/infernet-memory.conf\n${grab("ollama_operator_env_keys")}\n${grab("ollama_memory_dropin")}\n${grab("ollama_parallel_slots")}\n`;
 
-function dropinFor(unitCat) {
-    const sh = `set -eu\n${fns}\nollama_memory_dropin "$(printf '%s\\n' "$UNIT" | ollama_operator_env_keys)"\n`;
+function dropinFor(unitCat, slots = 1) {
+    const sh = `set -eu\n${fns}\nollama_memory_dropin "$(printf '%s\\n' "$UNIT" | ollama_operator_env_keys)" "${slots}"\n`;
     return execFileSync("sh", ["-c", sh], { encoding: "utf8", env: { ...process.env, UNIT: unitCat } }).trim();
+}
+
+function slotsFor(mib) {
+    return execFileSync("sh", ["-c", `set -eu\n${fns}\nollama_parallel_slots "${mib}"\n`], { encoding: "utf8" }).trim();
 }
 
 const BASE = `# /etc/systemd/system/ollama.service
@@ -49,6 +53,19 @@ Environment="OLLAMA_FLASH_ATTENTION=1" "OLLAMA_KV_CACHE_TYPE=q8_0"`);
 
     it("writes nothing when the operator set both", () => {
         expect(dropinFor(`${BASE}\nEnvironment=OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q4_0`)).toBe("");
+    });
+
+    it("adds parallel slots on a 10 GB+ GPU unless the operator set them", () => {
+        expect(dropinFor(BASE, 2)).toContain('"OLLAMA_NUM_PARALLEL=2"');
+        expect(dropinFor(BASE, 1)).not.toContain("NUM_PARALLEL");
+        expect(dropinFor(`${BASE}\nEnvironment="OLLAMA_NUM_PARALLEL=1"`, 3)).not.toContain("NUM_PARALLEL");
+    });
+
+    it("sizes slots from VRAM like the daemon (lib/concurrency.js slotsForVram)", () => {
+        expect(slotsFor("8192")).toBe("1");
+        expect(slotsFor("12288")).toBe("2");
+        expect(slotsFor("24576")).toBe("3");
+        expect(slotsFor("81920")).toBe("4");
     });
 
     it("runs from main after the baseline model", () => {

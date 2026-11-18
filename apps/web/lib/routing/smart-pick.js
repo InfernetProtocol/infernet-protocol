@@ -6,8 +6,10 @@
  *      assigned/running jobs we routed there (heartbeats lag a burst, and the
  *      daemon reports only the job it is running, never the ones queued
  *      behind it).
- *   2. Concurrency cap = what the node advertises (specs.load.concurrency_cap,
- *      from INFERNET_MAX_CONCURRENT_JOBS), else 1 on a CPU-only node (no VRAM:
+ *   2. Concurrency cap = what the node advertises (specs.load.concurrency_cap:
+ *      since CLI 0.1.96 its capacity by default, 1 on CPU-only nodes and the
+ *      Ollama parallel slots on GPU nodes; INFERNET_MAX_CONCURRENT_JOBS
+ *      overrides), else 1 on a CPU-only node (no VRAM:
  *      CPU Ollama serves one request at a time) and 4 on a GPU node.
  *      Overloaded = load >= cap, or GPU pegged >= 95%. Overloaded nodes rank
  *      after every free one, but can still take queued work up to the queue
