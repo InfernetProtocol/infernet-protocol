@@ -48,8 +48,18 @@ export const DEFAULT_TIMEOUT_MS = 420_000;
 export const DEFAULT_WAIT_MS = 540_000;
 // Below this much time left, another bridge attempt cannot finish.
 export const MIN_ATTEMPT_MS = 20_000;
-// Pause before a requeued job is dispatched again.
-export const REQUEUE_PAUSE_MS = 5_000;
+// A requeued job's wait window: up to this long at the back of the queue for
+// a node or worker with a free slot (a GPU frees one every ~20-90 s), asking
+// again every REQUEUE_POLL_MS; a try counts as used only when its window ends
+// with no taker. INFERNET_REQUEUE_WAIT_MS.
+export const DEFAULT_REQUEUE_WAIT_MS = 90_000;
+export const REQUEUE_POLL_MS = 5_000;
+
+/** INFERNET_REQUEUE_WAIT_MS, else DEFAULT_REQUEUE_WAIT_MS. */
+export function requeueWaitMs(env = process.env) {
+  const n = Number.parseInt(env?.INFERNET_REQUEUE_WAIT_MS ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_REQUEUE_WAIT_MS;
+}
 // Bridge answers that mean "busy, try again", not "cannot serve this"
 // (see isRetryable for worker_failed).
 export const RETRYABLE_CODES = new Set([
@@ -344,13 +354,17 @@ const sharedWaitQueue = createWaitQueue();
  * model (`assign({ freeSlot: true })`, the fastest free one). Turned away, a
  * busy or failed worker or a timeout: back in the queue at the BACK ("just
  * add it to the back of the queue"), with a `status` event ({ state:
- * "waiting", message, queue_position, attempt, requeues }), and dispatched
- * again after a short pause. Nothing hands the job straight to a busy node.
+ * "waiting", message, queue_position, requeues, max_requeues, wait_ms }), and
+ * a real wait: up to INFERNET_REQUEUE_WAIT_MS (90 s) asking every few seconds
+ * for a daemon with a free slot or a c0mpute worker that bids, dispatched as
+ * soon as one does. A try counts as used only when its window ends with no
+ * taker. Nothing hands the job straight to a busy node.
  *
  * Guards against looping forever:
  *   - no node serves the model at all (no c0mpute worker, no daemon): fail at
  *     once ("No node serves <model>.");
- *   - after INFERNET_MAX_REQUEUES (3) requeues with no node taking it, or at
+ *   - after INFERNET_MAX_REQUEUES (3) wait windows with no node taking it
+ *     (worst case ~3 x 90 s), or at
  *     the wait budget (INFERNET_C0MPUTE_WAIT_MS): end with "Network is busy.
  *     Run a node or wait." ("if there's no nodes available after 3 queues
  *     tell the user and end");
@@ -374,7 +388,8 @@ export async function* c0mputeJobEvents(job, {
   serves = c0mputeServesModel,
   waitMs = c0mputeWaitMs(),
   maxRequeues = defaultMaxRequeues(),
-  pauseMs = REQUEUE_PAUSE_MS,
+  windowMs = requeueWaitMs(),
+  pollMs = REQUEUE_POLL_MS,
   queue = sharedWaitQueue,
   now = () => Date.now(),
   sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -394,19 +409,19 @@ export async function* c0mputeJobEvents(job, {
   const createdAt = Date.parse(job.created_at ?? "") || now();
   const deadline = createdAt + waitMs;
   const busy = (code) => ({ ok: false, code, final: true, error: NETWORK_BUSY_MESSAGE });
-  let out = null;
+  const attempt = async (n) => {
+    const timeoutMs = Math.max(MIN_ATTEMPT_MS, Math.min(DEFAULT_TIMEOUT_MS, deadline - now()));
+    const r = await run({ model, messages: input.messages ?? [], maxTokens: input.max_tokens, temperature: input.temperature, timeoutMs });
+    if (!r.ok) log(`[c0mpute-chat] job ${job.id} model=${model} attempt ${n}: ${r.error}`);
+    return r;
+  };
+  const turnedAway = (r) => isRetryable(r) || r.code === "worker_failed";
+  let attempts = 1;
+  let out = await attempt(attempts);
   let capable = null;
   let requeues = 0;
   try {
-    for (let attempt = 1; ; attempt += 1) {
-      queue.leave(model, job.id);
-      const remaining = deadline - now();
-      const timeoutMs = Math.max(MIN_ATTEMPT_MS, Math.min(DEFAULT_TIMEOUT_MS, remaining));
-      out = await run({ model, messages: input.messages ?? [], maxTokens: input.max_tokens, temperature: input.temperature, timeoutMs });
-      if (out.ok) break;
-      log(`[c0mpute-chat] job ${job.id} model=${model} attempt ${attempt}: ${out.error}`);
-      if (!isRetryable(out) && out.code !== "worker_failed") break;
-
+    outer: while (!out.ok && turnedAway(out)) {
       capable = await serves(model).catch(() => null);
       if (capable === false) {
         // No c0mpute worker serves it: a daemon serving it, or nothing does.
@@ -415,29 +430,44 @@ export async function* c0mputeJobEvents(job, {
         out = { ok: false, code: "no_capable_node", final: true, error: `No node serves ${model ?? "this model"}.` };
         break;
       }
-      // The next capable node with a free slot, CPU included.
-      const moved = await assign({ freeSlot: true }).catch(() => null);
-      if (moved) { yield { type: "assigned", job: moved }; return; }
-
+      // A daemon with a free slot right now (CPU included) takes it at once.
+      const freeNow = await assign({ freeSlot: true }).catch(() => null);
+      if (freeNow) { yield { type: "assigned", job: freeNow }; return; }
       if (requeues >= maxRequeues) { out = busy("too_many_requeues"); break; }
       if (deadline - now() < MIN_ATTEMPT_MS) { out = busy("wait_budget"); break; }
+
+      // Back of the queue, and a real wait: up to windowMs for a capable
+      // node or worker with a free slot, asking every pollMs.
       requeues += 1;
       const position = out.queuePosition ?? queue.join(model, job.id);
       if (out.queuePosition != null) queue.join(model, job.id);
+      const windowEnd = Math.min(now() + windowMs, deadline - MIN_ATTEMPT_MS);
       const status = {
         state: "waiting",
         route: "queue",
-        message: `no free node; back in the queue (position ${position + 1}, try ${requeues} of ${maxRequeues})`,
+        message: `no free node; waiting in the queue (position ${position + 1}, try ${requeues} of ${maxRequeues})`,
         queue_position: position,
-        attempt,
         requeues,
         max_requeues: maxRequeues,
+        wait_ms: Math.max(0, windowEnd - now()),
         waited_ms: now() - createdAt,
         reason: out.code
       };
       const persisted = await insertEvent(job.id, "status", status);
       yield { type: "status", data: persisted?.data ?? status, id: persisted?.id };
-      await sleep(Math.min(pauseMs, Math.max(0, deadline - now() - MIN_ATTEMPT_MS)));
+
+      while (now() < windowEnd) {
+        await sleep(Math.max(0, Math.min(pollMs, windowEnd - now())));
+        // The first capable node with a free slot: a daemon (CPU included)...
+        const moved = await assign({ freeSlot: true }).catch(() => null);
+        if (moved) { yield { type: "assigned", job: moved }; return; }
+        // ...or a c0mpute worker that bids now.
+        attempts += 1;
+        out = await attempt(attempts);
+        if (out.ok) break outer;
+        if (!turnedAway(out)) break outer;
+      }
+      // The window ended with no taker: that try is used.
     }
   } finally {
     queue.leave(model, job.id);
