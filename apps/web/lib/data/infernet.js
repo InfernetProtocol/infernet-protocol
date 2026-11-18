@@ -606,14 +606,13 @@ function moneyCards(money) {
       note: `${fmtUsdPrecise(money.spent_on_compute_usd)} on compute · ${fmtUsdPrecise(money.paid_out_usd)} paid out`
     },
     {
-      // The house's cut of paid work. Reported beside what the house paid out
-      // in subsidy, because a fee total on its own reads as profit when most
-      // of the traffic so far has been the house buying activity.
+      // The house's cut of node-billed work, with the effective rate so it
+      // can be checked against the published 5% house fee.
       label: "Platform fees",
       value: fmtUsdPrecise(money.fees_usd),
       note: money.fee_jobs === 0
-        ? `no billed jobs yet · ${fmtUsdPrecise(money.subsidised_usd)} subsidised`
-        : `${plural(money.fee_jobs, "billed job")} on ${fmtUsdPrecise(money.fee_gross_usd)} · ${fmtUsdPrecise(money.subsidised_usd)} subsidised`
+        ? "no billed jobs yet"
+        : `${money.fee_pct}% of ${fmtUsdPrecise(money.fee_gross_usd)} billed · ${plural(money.fee_jobs, "job")}`
     }
   ];
 }

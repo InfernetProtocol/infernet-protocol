@@ -48,8 +48,11 @@ export const DEFAULT_EARNINGS_CONFIG = Object.freeze({
     house_fee_pct: 5,
     min_payout_usd: 5,
     // Requests at or below this many USD are approved and sent the moment
-    // they are made. 0 = every request waits for an admin.
-    auto_approve_max_usd: 0
+    // they are made; only bigger ones wait for an admin (Anthony,
+    // 2026-11-18: "payouts should happen automatically when requested no
+    // platform admin approval unless the amount is over $100").
+    // 0 = every request waits for an admin.
+    auto_approve_max_usd: 100
 });
 
 function num(v, fallback) {
@@ -415,7 +418,11 @@ export function checkPayoutRequest({ balance, amountUsd, config, hasAddress, has
  */
 export function summariseNetworkMoney(earnings = [], payouts = []) {
     const sum = (rows) => roundUsd(rows.reduce((a, r) => a + (Number(r.amount_usd) || 0), 0));
-    const credits = earnings.filter((e) => e.status !== "void" && e.kind !== "spent_on_compute");
+    // House subsidy credits are left out: the house paying its own nodes for
+    // free traffic (98% of it, stopped 2026-11-05) is not money the network
+    // earned, and it buried the real total 10x over. Node balances still
+    // count those rows; only this network-wide summary skips them.
+    const credits = earnings.filter((e) => e.status !== "void" && e.kind !== "spent_on_compute" && e.kind !== "subsidy");
     const confirmed = sum(credits.filter((e) => e.status === "confirmed"));
     const pending = sum(credits.filter((e) => e.status !== "confirmed"));
     const spentOnCompute = roundUsd(Math.max(0,
@@ -449,18 +456,21 @@ export function summariseNetworkMoney(earnings = [], payouts = []) {
  * is reported next to the fee. Showing fees without it would read as profit.
  */
 export function summariseFees(credits = []) {
-    const confirmed = credits.filter((e) => e.status === "confirmed");
+    const confirmed = credits.filter((e) => e.status === "confirmed" && e.kind !== "subsidy");
     const fee = (r) => Number(r.fee_usd) || 0;
     const feeBearing = confirmed.filter((r) => fee(r) > 0);
+    const fees = roundUsd(confirmed.reduce((a, r) => a + fee(r), 0));
+    const gross = roundUsd(
+        feeBearing.reduce((a, r) => a + (Number(r.gross_usd) || Number(r.amount_usd) || 0), 0)
+    );
     return {
-        fees_usd: roundUsd(confirmed.reduce((a, r) => a + fee(r), 0)),
+        fees_usd: fees,
         fee_jobs: feeBearing.length,
-        fee_gross_usd: roundUsd(
-            feeBearing.reduce((a, r) => a + (Number(r.gross_usd) || Number(r.amount_usd) || 0), 0)
-        ),
-        subsidised_usd: roundUsd(
-            confirmed.filter((e) => e.kind === "subsidy").reduce((a, r) => a + (Number(r.amount_usd) || 0), 0)
-        )
+        fee_gross_usd: gross,
+        // The fee as a share of what was billed, so the card shows whether it
+        // matches the published house fee. Lifetime, so rows written at an
+        // older rate (20% before 2026-11-08) pull it above today's 5%.
+        fee_pct: gross > 0 ? Math.round((fees / gross) * 1000) / 10 : 0
     };
 }
 
