@@ -197,7 +197,10 @@ describe("c0mputeJobEvents", () => {
             charge: async (job, result) => { calls.charge.push(result); },
             log: () => {},
             queue: c0.createWaitQueue(),
-            sleep: async () => {}
+            // A fake clock: sleeping moves time on.
+            clock: { t: 0 },
+            get now() { const c = this.clock; return () => c.t; },
+            get sleep() { const c = this.clock; return async (ms) => { c.t += ms; }; }
         };
     };
     const job = { id: "job-1", model_name: "qwen2.5:7b", billed_user_id: "u1", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen2.5:7b", max_tokens: 64 } };
@@ -222,37 +225,53 @@ describe("c0mputeJobEvents", () => {
 
     // Anthony, 2026-11-18: "just add it to the back of the queue", "if there's
     // no nodes available after 3 queues tell the user and end".
-    it("turned away: back in the queue with a status event, then served", async () => {
+    it("turned away: waits at the back of the queue and is served as soon as a worker bids", async () => {
         const d = deps();
         const answers = [turnedAway, { ok: false, code: "worker_failed", error: "the c0mpute worker failed (worker reported the job failed)" }, ok];
         const run = vi.fn(async () => answers.shift());
         const out = await drain(job, { ...d, run, serves: async () => true });
-        expect(out.map((e) => e.type)).toEqual(["meta", "status", "status", "token", "done"]);
-        expect(out[1].data).toMatchObject({ state: "waiting", route: "queue", requeues: 1, max_requeues: 3, queue_position: 0 });
-        expect(out[2].data.requeues).toBe(2);
+        // One wait window: a worker bid on the 2nd ask inside it.
+        expect(out.map((e) => e.type)).toEqual(["meta", "status", "token", "done"]);
+        expect(out[1].data).toMatchObject({ state: "waiting", route: "queue", requeues: 1, max_requeues: 3, queue_position: 0, wait_ms: 90_000 });
+        expect(out[1].data.message).toBe("no free node; waiting in the queue (position 1, try 1 of 3)");
         expect(run).toHaveBeenCalledTimes(3);
+        expect(d.clock.t).toBe(10_000); // two 5 s polls, not a 90 s sleep
     });
 
-    it("guard (b): after 3 requeues with no node, ends with 'Network is busy. Run a node or wait.'", async () => {
+    it("a try counts only when its window ends with no taker", async () => {
+        const d = deps();
+        let n = 0;
+        const run = vi.fn(async () => (++n >= 25 ? ok : turnedAway));
+        const out = await drain(job, { ...d, run, serves: async () => true });
+        // Window 1: 18 asks over 90 s, no taker. Window 2: served on its 6th ask.
+        expect(out.filter((e) => e.type === "status").map((e) => e.data.requeues)).toEqual([1, 2]);
+        expect(out.at(-1).type).toBe("done");
+        expect(d.clock.t).toBe(90_000 + 30_000);
+    });
+
+    it("guard (b): after 3 wait windows with no taker (~3 x 90 s), ends with 'Network is busy. Run a node or wait.'", async () => {
         const d = deps();
         const run = vi.fn(async () => turnedAway);
         const out = await drain(job, { ...d, run, serves: async () => true });
-        expect(run).toHaveBeenCalledTimes(4); // the first try + 3 requeues
         expect(out.filter((e) => e.type === "status")).toHaveLength(3);
+        expect(run).toHaveBeenCalledTimes(1 + 3 * 18); // first try + every 5 s for 3 x 90 s
+        expect(d.clock.t).toBe(270_000);
         expect(out.at(-1)).toEqual({ type: "c0mpute_failed", data: { message: "Network is busy. Run a node or wait.", code: "too_many_requeues", capable: true, final: true } });
         expect(c0.c0mputeErrorData(out.at(-1).data)).toEqual({ message: "Network is busy. Run a node or wait.", code: "network_busy", run_a_node: "https://infernetprotocol.com/docs" });
         expect(d.calls.finalize).toEqual([]);
         expect(d.calls.charge).toEqual([]);
     });
 
-    it("guard (b): the cap is configurable, and the wait budget also ends it", async () => {
+    it("guard (b): cap, window and the 9 min budget are configurable / enforced", async () => {
         const d = deps();
         const run = vi.fn(async () => turnedAway);
-        await drain(job, { ...d, run, serves: async () => true, maxRequeues: 1 });
-        expect(run).toHaveBeenCalledTimes(2);
-        let t = 0;
-        const slow = vi.fn(async () => { t += 300_000; return { ok: false, code: "timeout", error: "slow" }; });
-        const out = await drain({ ...job, created_at: new Date(0).toISOString() }, { ...deps(), run: slow, serves: async () => true, now: () => t, waitMs: 540_000 });
+        await drain(job, { ...d, run, serves: async () => true, maxRequeues: 1, windowMs: 20_000 });
+        expect(run).toHaveBeenCalledTimes(1 + 4);
+        expect(c0.requeueWaitMs({})).toBe(90_000);
+        expect(c0.requeueWaitMs({ INFERNET_REQUEUE_WAIT_MS: "45000" })).toBe(45_000);
+        const d2 = deps();
+        const slow = vi.fn(async () => { d2.clock.t += 300_000; return { ok: false, code: "timeout", error: "slow" }; });
+        const out = await drain({ ...job, created_at: new Date(0).toISOString() }, { ...d2, run: slow, serves: async () => true, waitMs: 540_000 });
         expect(out.at(-1).data).toMatchObject({ final: true, code: "wait_budget", message: "Network is busy. Run a node or wait." });
         expect(slow).toHaveBeenCalledTimes(2);
     });
