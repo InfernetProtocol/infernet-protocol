@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": 10,
+  "version": 11,
   "updated": "2026-11-18",
   "about": "Infernet house models: every provider node pulls and serves the models below that fit it, unless its operator opts out (infernet house-models off; uncensored only: infernet house-models uncensored off). Adding a model is a PR to apps/web/public/house-models.json in InfernetProtocol/infernet-protocol. digest = sha256 of the registry manifest (what `ollama list`/api/tags reports); size_bytes = all layers + config. Docs: https://infernetprotocol.com/docs/house-models",
   "models": [
@@ -231,6 +231,30 @@
       "license": "apache-2.0",
       "description": "Qwen3 4B: small general model with optional thinking mode; in the fleet ai-providers default list.",
       "added": "2026-11-09"
+    },
+    {
+      "name": "minicpm-v4.7-1b",
+      "source": "openbmb/minicpm-v4.7:1b",
+      "digest": "sha256:00e691b8ed678b69976caf078b953ea79eaea650990fad3f51ba7b3f6a609777",
+      "size_bytes": 1782122856,
+      "min_ram_gb": 4,
+      "min_disk_gb": 3,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "added": "2026-11-18",
+      "description": "MiniCPM-V 4.7 1B by OpenBMB: vision (images + video in, text out) small enough for every node. Q4_K_M plus vision projector."
+    },
+    {
+      "name": "minicpm-v4.7-35b-a3b",
+      "source": "openbmb/minicpm-v4.7:35b-a3b",
+      "digest": "sha256:d3df93d6e613db6676538134e67c847cc84057b9b71501f196ced113f40886d0",
+      "size_bytes": 22285832047,
+      "min_ram_gb": 28,
+      "min_disk_gb": 24,
+      "uncensored": false,
+      "license": "apache-2.0",
+      "added": "2026-11-18",
+      "description": "MiniCPM-V 4.7 35B-A3B by OpenBMB: MoE vision model (~3B active, so usable on CPU nodes), images + video in, text out. Q4_K_M plus vision projector."
     }
   ]
 }
