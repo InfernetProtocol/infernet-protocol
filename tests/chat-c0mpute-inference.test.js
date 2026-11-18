@@ -293,6 +293,13 @@ describe("c0mputeJobEvents", () => {
         expect(q.position("qwen2.5:7b", "job-1")).toBe(-1);
     });
 
+    it("a worker whose runtime timed out counts as busy (2026-11-18 log line)", () => {
+        expect(c0.isRetryable({ ok: false, code: "worker_failed", error: "the c0mpute worker could not answer: reach the local runtime: error sending request for url (http://127.0.0.1:11434/v1/chat/completions): operation timed out" })).toBe(true);
+        expect(c0.isRetryable({ ok: false, code: "unreachable", error: "c0mpute jobs bridge unreachable: socket hang up" })).toBe(true);
+        expect(c0.isRetryable({ ok: false, code: "worker_failed", error: "the c0mpute worker could not answer: malformed result" })).toBe(false);
+        expect(c0.isRetryable({ ok: false, code: "bad_request", error: "x" })).toBe(false);
+    });
+
     it("does not retry an answer that is not 'busy'", async () => {
         const d = deps();
         const run = vi.fn(async () => ({ ok: false, code: "unauthorized", error: "no" }));

@@ -49,10 +49,22 @@ export const DEFAULT_TIMEOUT_MS = 420_000;
 export const DEFAULT_WAIT_MS = 540_000;
 // Below this much time left, another bridge attempt cannot finish.
 export const MIN_ATTEMPT_MS = 20_000;
-// Bridge answers that mean "busy, try again", not "cannot serve this".
+// Bridge answers that mean "busy, try again", not "cannot serve this"
+// (see isRetryable for worker_failed).
 export const RETRYABLE_CODES = new Set([
   "no_bids", "timeout", "busy", "queued", "waiting", "capacity", "worker_busy", "unreachable", "http_429", "http_502", "http_503", "http_504"
 ]);
+
+// A worker that took the job but whose runtime was busy or slow to answer
+// ("reach the local runtime: ... operation timed out", 2026-11-18): busy too.
+const WORKER_BUSY_RE = /timed? ?out|busy|reach the local runtime|too many requests|\b(?:429|503)\b|queue/i;
+
+/** Is this bridge answer "busy, try again"? */
+export function isRetryable(out) {
+  if (!out || out.ok) return false;
+  if (RETRYABLE_CODES.has(out.code)) return true;
+  return out.code === "worker_failed" && WORKER_BUSY_RE.test(String(out.error ?? ""));
+}
 
 /** Total wait budget (ms) from INFERNET_C0MPUTE_WAIT_MS, else DEFAULT_WAIT_MS. */
 export function c0mputeWaitMs(env = process.env) {
@@ -374,7 +386,7 @@ export async function* c0mputeJobEvents(job, {
     out = await run({ model, messages: input.messages ?? [], maxTokens: input.max_tokens, temperature: input.temperature, timeoutMs });
     if (out.ok) break;
     log(`[c0mpute-chat] job ${job.id} model=${model} attempt ${attempt}: ${out.error}`);
-    if (!RETRYABLE_CODES.has(out.code)) break;
+    if (!isRetryable(out)) break;
     capable = await serves(model).catch(() => null);
     if (capable === false) break;
     const left = deadline - now();
@@ -405,7 +417,7 @@ export async function* c0mputeJobEvents(job, {
   }
   queue.leave(model, job.id);
   if (!out.ok) {
-    if (capable === null && RETRYABLE_CODES.has(out.code)) capable = await serves(model).catch(() => null);
+    if (capable === null && isRetryable(out)) capable = await serves(model).catch(() => null);
     yield { type: "c0mpute_failed", data: { message: out.error, code: out.code, capable } };
     return;
   }
