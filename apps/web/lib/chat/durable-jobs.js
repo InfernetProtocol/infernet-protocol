@@ -36,6 +36,17 @@ const SYSTEM = new Set(["job.json", "lease.json"]);
  * importing a route never touches the network). Every method is a no-op
  * (or null / false / []) when there is no store.
  */
+/**
+ * When a job last moved: its last save (every checkpoint stamps updatedAt),
+ * else when it started. "Stuck" counts from here, not from createdAt, so a
+ * long album still recording (or waiting its turn in a busy queue) is not
+ * failed at 24 h. 2026-11-15: two albums at 3/8 and 1/8 were failed by the
+ * sweep while their songs waited behind a stalled music queue.
+ */
+export function lastProgress(rec) {
+  return Math.max(Number(rec?.updatedAt) || 0, Number(rec?.createdAt) || 0);
+}
+
 export function createDurableJobs({ kind, store, owner = processOwner(), leaseMs = LEASE_MS, ttlMs = MEDIA_JOB_TTL_MS, stuckMs = STUCK_MS, now = Date.now } = {}) {
   const s = () => (typeof store === "function" ? store() : store) ?? null;
   const key = (id, name) => `${kind}/${id}/${name}`;
@@ -160,7 +171,7 @@ export function createDurableJobs({ kind, store, owner = processOwner(), leaseMs
               await api.remove(id);
               removed++;
             }
-          } else if (t - (rec.createdAt ?? 0) > stuckMs) {
+          } else if (t - lastProgress(rec) > stuckMs) {
             await api.save({ ...rec, status: "failed", error: "This job stopped and could not be resumed; try again", httpStatus: 504, finishedAt: t });
           }
         } catch (e) {

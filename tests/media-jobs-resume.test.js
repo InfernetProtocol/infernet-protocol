@@ -110,8 +110,14 @@ describe("durable jobs: leases and expiry", () => {
     await d.save({ id: "old", status: "done", createdAt: t - 8 * day, finishedAt: t - 8 * day });
     await d.putFile("old", "song.mp3", Buffer.from("x"));
     await d.save({ id: "fresh", status: "done", createdAt: t - day, finishedAt: t - day });
-    await d.save({ id: "stuck", status: "pending", createdAt: t - 7 * 60 * 60 * 1000 });
-    await d.save({ id: "running", status: "pending", createdAt: t - 60_000 });
+    // Saved (last moved) 7 h ago: stuck. Saves stamp updatedAt with the clock.
+    const nowT = t;
+    t = nowT - 7 * 60 * 60 * 1000;
+    await d.save({ id: "stuck", status: "pending", createdAt: t });
+    // Started two days ago but checkpointed a minute ago: still running.
+    t = nowT - 60_000;
+    await d.save({ id: "running", status: "pending", createdAt: nowT - 2 * day });
+    t = nowT;
     expect(await d.sweep()).toBe(1);
     expect((await d.ids()).sort()).toEqual(["fresh", "running", "stuck"]);
     expect(await d.load("stuck")).toMatchObject({ status: "failed", httpStatus: 504 });
