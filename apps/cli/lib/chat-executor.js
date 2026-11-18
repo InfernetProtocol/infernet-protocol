@@ -13,6 +13,7 @@
  */
 
 import { createEngine, MSG } from "@infernetprotocol/engine";
+import { isTurnAwayError } from "./turn-away.js";
 import { loadConfig } from "./config.js";
 import { getConversationKey, decrypt, encrypt } from "./nip44.js";
 import { getModelKeyPair } from "./model-key.js";
@@ -255,7 +256,14 @@ export async function executeChatJob({ client, job, node }) {
         }
     }
 
-    const engine = await getEngineForModel(job.model_name);
+    let engine;
+    try {
+        engine = await getEngineForModel(job.model_name);
+    } catch (err) {
+        // No engine reachable right now (Ollama restarting): busy, not broken.
+        if (isTurnAwayError(err?.message)) err.turnedAway = true;
+        throw err;
+    }
     const buffer = new EventBuffer(client, job.id, convKey);
 
     const t0 = Date.now();
@@ -295,10 +303,20 @@ export async function executeChatJob({ client, job, node }) {
                     finished_at: ev.finished_at ?? new Date().toISOString()
                 });
                 break;
-            case MSG.ERROR:
-                await buffer.push("error", { message: ev.message ?? "engine error" });
+            case MSG.ERROR: {
+                const message = ev.message ?? "engine error";
+                if (tokenCount === 0 && isTurnAwayError(message)) {
+                    // Busy before the first token: no error event, so the
+                    // caller can requeue the job at the front instead.
+                    await buffer.flush();
+                    const err = new Error(message);
+                    err.turnedAway = true;
+                    throw err;
+                }
+                await buffer.push("error", { message });
                 await buffer.flush();
-                throw new Error(ev.message ?? "engine error");
+                throw new Error(message);
+            }
             default:
                 // forward unknown event types verbatim — useful for backend
                 // extensions (logits, tool_call, etc.) once the protocol grows.

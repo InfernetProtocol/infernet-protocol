@@ -60,6 +60,7 @@ import { downloadHfModel, resolveHfToken } from '../lib/hf-model.js';
 import { startVllmServe, stopVllmServe, vllmInstalled, waitForVllmModel, extractVllmError } from '../lib/vllm.js';
 import { detectGpus, detectHost } from '@infernetprotocol/gpu';
 import { ollamaNumParallel, resolveMaxConcurrentJobs, totalVramGbOf } from '../lib/concurrency.js';
+import { requeueTurnedAway, TURN_AWAY_BACKOFF_MS } from '../lib/turn-away.js';
 import { getOrCreateModelKey, getModelPublicKeys } from '../lib/model-key.js';
 import { pullLatestBinary } from './upgrade.js';
 import { PROBE_INTERVAL_MS, runProbeRound } from '../lib/aggregator.js';
@@ -580,6 +581,9 @@ async function runDaemon(args, ctx) {
         if (finishedJobAt.size > 1000) finishedJobAt.delete(finishedJobAt.keys().next().value);
     }
 
+    // Jobs this daemon turned away (busy), not to be taken again before.
+    const turnedAwayUntil = new Map();
+
     async function processJob(job) {
         const t0 = new Date().toISOString();
         stats.jobsPicked += 1;
@@ -617,6 +621,15 @@ async function runDaemon(args, ctx) {
             stats.activeJobIds.delete(job.id);
             markFinished(job.id);
             const msg = err?.message ?? String(err);
+            // Busy (engine queue full, Ollama restarting): hand the job back
+            // to the front of the queue instead of failing it, and leave it
+            // alone here for a moment (lib/turn-away.js).
+            if (job.type === 'chat' && err?.turnedAway === true && await requeueTurnedAway(client, job.id, msg)) {
+                stats.jobsFailed -= 1;
+                turnedAwayUntil.set(job.id, Date.now() + TURN_AWAY_BACKOFF_MS);
+                process.stdout.write(`[${new Date().toISOString()}] turned away job ${job.id} (${msg}); requeued at the front\n`);
+                return;
+            }
             process.stderr.write(`job ${job.id} failed: ${msg}\n`);
             if (job.type === 'chat') {
                 await failChatJob({ client, jobId: job.id, message: msg });
@@ -663,6 +676,11 @@ async function runDaemon(args, ctx) {
                 // complete, so without this guard the poll loop queues the
                 // same job on every tick while it's in flight.
                 if (stats.activeJobIds.has(job.id)) continue;
+                const awayUntil = turnedAwayUntil.get(job.id);
+                if (awayUntil !== undefined) {
+                    if (awayUntil > Date.now()) continue;
+                    turnedAwayUntil.delete(job.id);
+                }
                 if ((finishedJobAt.get(job.id) ?? 0) >= polledAt) continue;
                 // A self-update can start draining while this batch runs
                 // (each job is awaited in turn). Stop picking the rest up, or
@@ -1832,6 +1850,9 @@ async function runDaemon(args, ctx) {
         // Release whatever is still running after the drain window.
         for (const jobId of stats.activeJobIds) {
             try {
+                // Not started yet: back to the front of the queue, for the
+                // restarted daemon or a free node (lib/turn-away.js).
+                if (await requeueTurnedAway(client, jobId, 'daemon restarting for self-update')) continue;
                 await client.failJob(jobId, 'daemon restarting for self-update');
             } catch { /* best-effort */ }
         }

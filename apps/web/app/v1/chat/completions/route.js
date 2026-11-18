@@ -212,6 +212,10 @@ export async function POST(request) {
                             push(`data: [DONE]\n\n`);
                             close();
                             return;
+                        } else if (ev.type === "status") {
+                            // "Waiting for a free GPU slot": an SSE comment,
+                            // which OpenAI clients skip and moshcode can show.
+                            push(`: status ${JSON.stringify(ev.data ?? {})}\n\n`);
                         } else if (ev.type === "error") {
                             const msg = ev.data?.message ?? "engine error";
                             // Emit error in OpenAI-ish shape and close — most clients

@@ -97,6 +97,13 @@ export function createNodeClient({ url, publicKey, privateKey, role, timeoutMs =
             });
         },
 
+        // Busy: put the job back at the front of the queue (CLI 0.1.97).
+        requeueJob(jobId, reason) {
+            return signedFetch(`/api/v1/node/jobs/${encodeURIComponent(jobId)}/requeue`, {
+                reason: typeof reason === 'string' ? reason.slice(0, 300) : String(reason ?? 'busy')
+            });
+        },
+
         postJobEvents(jobId, events) {
             return signedFetch(`/api/v1/node/jobs/${encodeURIComponent(jobId)}/events`, { events });
         },
