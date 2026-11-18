@@ -112,6 +112,9 @@ export function cleanModels(models) {
         const o = priceOk(p?.output_per_m_usd);
         if (i === null || o === null) return null;
         out[name] = { input_per_m_usd: Number(p.input_per_m_usd), output_per_m_usd: Number(p.output_per_m_usd) };
+        // A deliberate list price the market multiplier must not scale
+        // (operator-prices.js effectivePrice).
+        if (p?.fixed === true) out[name].fixed = true;
     }
     return out;
 }

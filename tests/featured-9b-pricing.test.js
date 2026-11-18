@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { effectivePrice, describePrice } from "../apps/web/lib/billing/operator-prices.js";
-import { DEFAULT_INFERENCE_PRICING } from "../apps/web/lib/billing/core.js";
+import { DEFAULT_INFERENCE_PRICING, resolveInferencePricing } from "../apps/web/lib/billing/core.js";
 import { FEATURED_MODEL, perChatUsd, breakEvenChatsPerDay } from "../apps/web/lib/pricing/featured.js";
 
 // Anthony, 2026-11-18: make the GPU 9B pay for its GPU (~$0.005 a chat).
@@ -19,6 +19,13 @@ describe("the GPU 9B list price", () => {
         expect(describePrice({ model: FEATURED_MODEL.id, pricing: DEFAULT_INFERENCE_PRICING, defaults, dynamic: halfPrice }).fixed).toBe(true);
         // Other house prices still follow the market.
         expect(effectivePrice({ model: "qwen2.5:7b", pricing: DEFAULT_INFERENCE_PRICING, defaults, dynamic: halfPrice }).source).toBe("dynamic");
+    });
+
+    it("the settings row keeps `fixed` (it was stripped in 0.1.102, so the market still halved the price)", () => {
+        const live = resolveInferencePricing({ env: {}, settings: { models: { [FEATURED_MODEL.id]: { input_per_m_usd: 0.1, output_per_m_usd: 0.4, fixed: true }, "qwen2.5:7b": { input_per_m_usd: 0.05, output_per_m_usd: 0.2 } } } });
+        expect(live.models[FEATURED_MODEL.id].fixed).toBe(true);
+        expect(live.models["qwen2.5:7b"].fixed).toBeUndefined();
+        expect(effectivePrice({ model: FEATURED_MODEL.id, pricing: live, defaults, dynamic: halfPrice })).toMatchObject({ input_per_m_usd: 0.1, output_per_m_usd: 0.4, fixed: true });
     });
 
     it("an average chat costs about $0.005 on the 7-day token mix", () => {
