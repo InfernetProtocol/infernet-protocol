@@ -19,6 +19,13 @@
  *                   already nets it out. Written only by the SQL functions in
  *                   20261102020000_paid_batch_inference.sql, which share the
  *                   provider row lock with a payout_requests trigger.
+ *   kind 'platform_fee'  the house fee of a 'paid' or 'reservation' credit,
+ *                   credited to the platform provider (settings
+ *                   'earnings'.platform_provider_id, on the admin account).
+ *                   Posted by a trigger (20261118170000_platform_fee_ledger.sql),
+ *                   one per source credit (source_earning_id), same status.
+ *                   So per job: payer debit (gross) = node share + this fee,
+ *                   and the platform account nets to zero on its own jobs.
  *   kind 'reservation'  a node reservation order the buyer prepaid: one row
  *                   per reservation (no job), the hours less the house fee.
  *                   Always 'pending_approval' until an admin confirms it.
@@ -374,7 +381,9 @@ export function summariseBalance(earnings = [], payouts = []) {
         available_usd: roundUsd(Math.max(0, confirmed - open - paid)),
         // Earnings moved to (or back from) the compute balance are not jobs.
         spent_on_compute_usd: roundUsd(-sum(earnings.filter((e) => e.kind === "spent_on_compute" && e.status === "confirmed"))),
-        jobs_credited: earnings.filter((e) => e.status !== "void" && e.kind !== "spent_on_compute").length
+        // House fees credited to this (platform) node: revenue, not jobs.
+        platform_fee_usd: sum(earnings.filter((e) => e.kind === "platform_fee" && e.status === "confirmed")),
+        jobs_credited: earnings.filter((e) => e.status !== "void" && !NOT_JOB_KINDS.includes(e.kind)).length
     };
 }
 
@@ -422,7 +431,7 @@ export function summariseNetworkMoney(earnings = [], payouts = []) {
     // free traffic (98% of it, stopped 2026-11-05) is not money the network
     // earned, and it buried the real total 10x over. Node balances still
     // count those rows; only this network-wide summary skips them.
-    const credits = earnings.filter((e) => e.status !== "void" && e.kind !== "spent_on_compute" && e.kind !== "subsidy");
+    const credits = earnings.filter((e) => e.status !== "void" && !NOT_JOB_KINDS.includes(e.kind) && e.kind !== "subsidy");
     const confirmed = sum(credits.filter((e) => e.status === "confirmed"));
     const pending = sum(credits.filter((e) => e.status !== "confirmed"));
     const spentOnCompute = roundUsd(Math.max(0,
@@ -438,7 +447,7 @@ export function summariseNetworkMoney(earnings = [], payouts = []) {
         paid_out_usd: paidOut,
         earning_nodes: earners.size,
         credits: credits.length,
-        ...summariseFees(credits)
+        ...summariseFees(credits, earnings.filter((e) => e.kind === "platform_fee"))
     };
 }
 
@@ -446,20 +455,25 @@ export function summariseNetworkMoney(earnings = [], payouts = []) {
  * What the platform itself has earned, and what it paid to get there.
  *
  * Every earning row splits the customer's charge: the provider keeps
- * amount_usd, the house keeps fee_usd, and the two sum to gross_usd. So the
- * platform's revenue is just the sum of fee_usd, with no second ledger to
- * reconcile against.
+ * amount_usd, the house keeps fee_usd, and the two sum to gross_usd. The fee
+ * is posted as its own 'platform_fee' credit to the platform account
+ * (2026-11-18), and revenue is the sum of those rows, so fee_usd is never
+ * counted a second time. `platformFees` null (a ledger from before those rows)
+ * falls back to summing fee_usd.
  *
  * Only CONFIRMED rows count. A pending fee is not money the house has. And a
  * subsidised job carries fee_usd 0 by definition: there the house is paying
  * for the traffic rather than taking a cut of it, which is why `subsidised_usd`
  * is reported next to the fee. Showing fees without it would read as profit.
  */
-export function summariseFees(credits = []) {
-    const confirmed = credits.filter((e) => e.status === "confirmed" && e.kind !== "subsidy");
+export function summariseFees(credits = [], platformFees = null) {
+    const confirmed = credits.filter((e) => e.status === "confirmed" && e.kind !== "subsidy" && e.kind !== "platform_fee");
     const fee = (r) => Number(r.fee_usd) || 0;
     const feeBearing = confirmed.filter((r) => fee(r) > 0);
-    const fees = roundUsd(confirmed.reduce((a, r) => a + fee(r), 0));
+    const ledger = Array.isArray(platformFees) && platformFees.length > 0;
+    const fees = ledger
+        ? roundUsd(platformFees.filter((r) => r.status === "confirmed").reduce((a, r) => a + (Number(r.amount_usd) || 0), 0))
+        : roundUsd(confirmed.reduce((a, r) => a + fee(r), 0));
     const gross = roundUsd(
         feeBearing.reduce((a, r) => a + (Number(r.gross_usd) || Number(r.amount_usd) || 0), 0)
     );
@@ -489,8 +503,45 @@ export const EARNING_KIND_LABELS = {
     paid: "paid job",
     subsidy: "house subsidy",
     reservation: "reservation",
-    spent_on_compute: "spent on compute"
+    spent_on_compute: "spent on compute",
+    platform_fee: "house fee (platform)"
 };
+
+/** Ledger kinds that are not a node earning money for a job. */
+export const NOT_JOB_KINDS = Object.freeze(["spent_on_compute", "platform_fee"]);
+
+/**
+ * The platform_fee credit for one fee-bearing credit, as the trigger in
+ * 20261118170000_platform_fee_ledger.sql writes it (pure mirror, for tests and
+ * the reconciliation below), or null when there is no fee to post.
+ */
+export function platformFeeFor(credit, platformProviderId) {
+    if (!credit || !["paid", "reservation"].includes(credit.kind)) return null;
+    const fee = Number(credit.fee_usd) || 0;
+    if (!platformProviderId || fee <= 0) return null;
+    return {
+        kind: "platform_fee",
+        provider_id: platformProviderId,
+        job_id: null,
+        source_earning_id: credit.id ?? null,
+        gross_usd: fee,
+        fee_usd: 0,
+        amount_usd: fee,
+        status: credit.status,
+        metadata: { source: "house_fee", source_kind: credit.kind, job_id: credit.job_id ?? null }
+    };
+}
+
+/**
+ * Net of a set of ledger rows (debits negative): spent_on_compute + paid +
+ * platform_fee. Zero means every dollar the payer was debited was credited to
+ * a node or to the platform.
+ */
+export function ledgerNet(rows = []) {
+    return 0 + roundUsd(rows
+        .filter((r) => ["spent_on_compute", "paid", "platform_fee"].includes(r.kind) && r.status === "confirmed")
+        .reduce((a, r) => a + (Number(r.amount_usd) || 0), 0));
+}
 
 export const EARNING_STATUS_LABELS = {
     pending_approval: "pending approval",
@@ -518,7 +569,8 @@ export const EARNING_STATUS_LABELS = {
 export const EARNINGS_SERIES_MAX_DAYS = 31;
 export const EARNINGS_SERIES_DEFAULT_HOURS = 24;
 export const EARNINGS_SERIES_EXCLUDED_STATUSES = Object.freeze(["void"]);
-export const EARNINGS_SERIES_EXCLUDED_KINDS = Object.freeze(["spent_on_compute"]);
+// platform_fee rows are the house's fee, not the operator's earnings.
+export const EARNINGS_SERIES_EXCLUDED_KINDS = Object.freeze(["spent_on_compute", "platform_fee"]);
 
 const HOUR_MS = 60 * 60 * 1000;
 

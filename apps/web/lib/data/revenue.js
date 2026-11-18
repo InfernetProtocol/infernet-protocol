@@ -93,7 +93,42 @@ export async function getRevenue(params = {}) {
         if (error) throw withStatus(error.message, 500);
         for (const e of data ?? []) if (e.status !== "void") providerByJob.set(e.job_id, (providerByJob.get(e.job_id) ?? 0) + Number(e.amount_usd));
     }
+    // House fees credited in the window (platform_fee rows), with whether the
+    // job was paid for by the platform account itself (internal usage).
+    const feeRows = await selectAll(() => db.from("provider_earnings")
+        .select("id, provider_id, amount_usd, status, metadata")
+        .eq("kind", "platform_fee").gte("earned_at", from).lt("earned_at", to).order("earned_at"))
+        .catch((e) => { if (/platform_fee|kind/.test(e.message ?? "")) return []; throw e; });
+    const platformOwners = new Set();
+    const platformProviders = [...new Set(feeRows.map((f) => f.provider_id).filter(Boolean))];
+    if (platformProviders.length > 0) {
+        const { data: provs } = await db.from("providers").select("public_key").in("id", platformProviders);
+        const keys = (provs ?? []).map((p) => p.public_key).filter(Boolean);
+        if (keys.length > 0) {
+            const { data: links } = await db.from("pubkey_links").select("user_id").in("pubkey", keys).eq("role", "provider");
+            for (const l of links ?? []) platformOwners.add(String(l.user_id));
+        }
+    }
+    const feeJobIds = [...new Set(feeRows.map((f) => f.metadata?.job_id).filter(Boolean))];
+    const payerByJob = new Map();
+    for (let i = 0; i < feeJobIds.length; i += 200) {
+        const { data, error } = await db.from("jobs").select("id, billed_user_id").in("id", feeJobIds.slice(i, i + 200));
+        if (error) throw withStatus(error.message, 500);
+        for (const j of data ?? []) payerByJob.set(j.id, j.billed_user_id ?? null);
+    }
+    const platformFees = feeRows.map((f) => {
+        const jobId = f.metadata?.job_id ?? null;
+        const payer = jobId ? payerByJob.get(jobId) : null;
+        return {
+            job_id: jobId,
+            source_kind: f.metadata?.source_kind ?? null,
+            amount_usd: Number(f.amount_usd) || 0,
+            status: f.status,
+            internal: Boolean(payer && platformOwners.has(String(payer)))
+        };
+    });
     const batchCharges = batchItems.map((i) => ({
+        job_id: i.job_id ?? null,
         cost_usd: Number(i.cost_micro) / 1e6,
         provider_usd: providerByJob.has(i.job_id) ? providerByJob.get(i.job_id) : null,
         email: batchEmail.get(i.batch_id) ?? null
@@ -110,7 +145,8 @@ export async function getRevenue(params = {}) {
             subsidy,
             config,
             internal: internalBuyers(),
-            batchCharges
+            batchCharges,
+            platformFees
         })
     };
 }

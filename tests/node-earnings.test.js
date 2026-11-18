@@ -152,7 +152,7 @@ describe("GET /api/v1/billing/node-earnings", () => {
         expect(q.filters).toContainEqual(["in", "provider_id", ["p1"]]);
         expect(q.filters).toContainEqual(["gte", "earned_at", data.since]);
         expect(q.filters).toContainEqual(["not", "status", "in", "(void)"]);
-        expect(q.filters).toContainEqual(["not", "kind", "in", "(spent_on_compute)"]);
+        expect(q.filters).toContainEqual(["not", "kind", "in", "(spent_on_compute,platform_fee)"]);
     });
 
     it("serves a signed-in caller their own earnings", async () => {
