@@ -145,16 +145,19 @@ describe("fmtAmount", () => {
 });
 
 describe("auto-approve config", () => {
-    it("defaults off, reads env and settings, ignores garbage", () => {
-        expect(resolveEarningsConfig({ env: {} }).auto_approve_max_usd).toBe(0);
+    it("defaults to $100, reads env and settings, ignores garbage", () => {
+        // Default: anything up to $100 is sent without an admin.
+        expect(resolveEarningsConfig({ env: {} }).auto_approve_max_usd).toBe(100);
         expect(resolveEarningsConfig({ env: { INFERNET_AUTO_APPROVE_MAX_USD: "2" } }).auto_approve_max_usd).toBe(2);
         expect(resolveEarningsConfig({ env: {}, settings: { auto_approve_max_usd: 1 } }).auto_approve_max_usd).toBe(1);
-        expect(resolveEarningsConfig({ env: {}, settings: { auto_approve_max_usd: -5 } }).auto_approve_max_usd).toBe(0);
+        expect(resolveEarningsConfig({ env: {}, settings: { auto_approve_max_usd: -5 } }).auto_approve_max_usd).toBe(100);
         const cfg = { auto_approve_max_usd: 1 };
         expect(isAutoApprovable(0.05564, cfg)).toBe(true);
         expect(isAutoApprovable(1, cfg)).toBe(true);
         expect(isAutoApprovable(1.01, cfg)).toBe(false);
         expect(isAutoApprovable(0.5, { auto_approve_max_usd: 0 })).toBe(false);
+        expect(isAutoApprovable(100, { auto_approve_max_usd: 100 })).toBe(true);
+        expect(isAutoApprovable(100.01, { auto_approve_max_usd: 100 })).toBe(false);
     });
 });
 
@@ -177,21 +180,21 @@ describe("summariseNetworkMoney", () => {
             ]
         );
         expect(m).toEqual({
-            earned_usd: 12.3,
+            // The pending_approval subsidy row is not network earnings.
+            earned_usd: 11.8,
             earned_confirmed_usd: 9.8,
-            earned_pending_usd: 2.5,
+            earned_pending_usd: 2,
             spent_usd: 5.75,
             spent_on_compute_usd: 2.75,
             paid_out_usd: 3,
             earning_nodes: 2,
-            credits: 3,
+            credits: 2,
             // Platform fees: none of these rows carries a fee_usd, so the
-            // house earned nothing on them. The confirmed subsidy total is
-            // zero too (the only subsidy row here is pending_approval).
+            // house earned nothing on them.
             fees_usd: 0,
             fee_jobs: 0,
             fee_gross_usd: 0,
-            subsidised_usd: 0
+            fee_pct: 0
         });
     });
 

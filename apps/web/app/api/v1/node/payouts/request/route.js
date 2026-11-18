@@ -8,8 +8,8 @@ import { requestPayoutForNode } from "@/lib/data/earnings";
  * POST /api/v1/node/payouts/request  (signed by the node)
  * Body: { amount_usd?: number }   omitted = the whole available balance
  *
- * Queues a withdrawal for admin approval. A request at or below the
- * earnings setting auto_approve_max_usd is sent right away instead.
+ * Sends a withdrawal right away when it is at or below the earnings setting
+ * auto_approve_max_usd ($100 by default); a bigger one waits for an admin.
  */
 export async function POST(request) {
     return handleRoute(async () => {

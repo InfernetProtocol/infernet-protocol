@@ -306,7 +306,16 @@ describe("payout auto-approve", () => {
         await credit("j2");
     });
 
-    it("is off by default: requests wait for an admin", async () => {
+    it("sends at once by default: only requests over $100 wait for an admin", async () => {
+        const send = vi.fn(async () => ({ outcome: "sent", txHash: "0xdefault", payoutId: "cp-d" }));
+        const out = await earnings.requestPayout({ providerId: "p1", send });
+        expect(out).toMatchObject({ auto_approved: true, outcome: "sent" });
+        expect(out.request).toMatchObject({ status: "sent", approved_by: "auto-approve" });
+        expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it("an admin can still switch auto-approve off", async () => {
+        await earnings.updateEarningsConfig({ auto_approve_max_usd: 0 });
         const send = vi.fn();
         const { request } = await earnings.requestPayout({ providerId: "p1", send });
         expect(request.status).toBe("requested");
