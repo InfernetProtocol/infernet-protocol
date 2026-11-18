@@ -9,6 +9,7 @@ const BASE_URL =
 const ROUTES = [
     { path: "/", priority: 1.0, changeFrequency: "daily" },
     { path: "/getting-started", priority: 0.9, changeFrequency: "weekly" },
+    { path: "/pricing", priority: 0.9, changeFrequency: "weekly" },
     { path: "/protocol", priority: 0.9, changeFrequency: "weekly" },
     { path: "/docs", priority: 0.9, changeFrequency: "weekly" },
     { path: "/docs/managed-endpoints", priority: 0.7, changeFrequency: "monthly" },

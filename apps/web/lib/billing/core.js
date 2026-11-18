@@ -26,6 +26,11 @@ export const ROLES = new Set(["system", "user", "assistant"]);
 export const DEFAULT_INFERENCE_PRICING = Object.freeze({
     enabled: true,
     models: {
+        // The GPU-served uncensored 9B, a fixed list price (not market-scaled)
+        // set so an average chat costs about $0.005 and the GPU pays for
+        // itself (Anthony, 2026-11-18). From the 7-day mix of 547 jobs:
+        // ~46.9k input + ~339 output tokens a chat -> $0.0048.
+        "eriktonon/qwen3.8-uncensored:9b": { input_per_m_usd: 0.1, output_per_m_usd: 0.4, fixed: true },
         "qwen2.5:7b": { input_per_m_usd: 0.05, output_per_m_usd: 0.2 },
         "qwen2.5:1.5b": { input_per_m_usd: 0.02, output_per_m_usd: 0.08 },
         "qwen2.5:0.5b": { input_per_m_usd: 0.01, output_per_m_usd: 0.04 }

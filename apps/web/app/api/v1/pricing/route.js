@@ -42,6 +42,7 @@ export async function GET(request) {
                     output_per_m_usd: d.output_per_m_usd,
                     per_1k_output_usd: d.per_1k_output_usd,
                     source: d.source,
+                    ...(d.fixed ? { fixed: true } : {}),
                     ...(d.dynamic ? { market: d.dynamic } : {}),
                     live: live.includes(model)
                 };

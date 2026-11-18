@@ -786,6 +786,20 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
                         Liquid Agent
                     </Link>.
                 </p>
+                <p>
+                    Paid use: <Link href="/auth/signup" className="text-[var(--accent)] hover:underline">sign up</Link>,
+                    top up and create an <code>ik_live_</code> API key on{" "}
+                    <Link href="/dashboard/billing" className="text-[var(--accent)] hover:underline">Billing</Link>, then call
+                    the OpenAI-compatible endpoint. Prices per model are on{" "}
+                    <Link href="/pricing" className="text-[var(--accent)] hover:underline">/pricing</Link>; the featured
+                    model is Uncensored Qwen3.8 9B · GPU:
+                </p>
+                <CodeBlock>
+{`curl https://infernetprotocol.com/v1/chat/completions \\
+  -H "Authorization: Bearer $INFERNET_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"eriktonon/qwen3.8-uncensored:9b","messages":[{"role":"user","content":"hello"}]}'`}
+                </CodeBlock>
                 <p>Submit a chat job (anonymous, IP-rate-limited):</p>
                 <CodeBlock>
 {`curl -sS -X POST https://infernetprotocol.com/api/chat \\
