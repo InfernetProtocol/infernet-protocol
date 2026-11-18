@@ -5,7 +5,7 @@ import { rebalanceChatJob } from "@/lib/data/chat-rebalance";
 import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapter";
 import { makeStreamSanitizer, sanitizeText } from "@/lib/sanitize-stream";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
-import { c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
+import { c0mputeErrorData, c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
 import { assignC0mputeJob, routeC0mputeMiss, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
 
 /**
@@ -187,12 +187,14 @@ async function* runC0mputeFallback({ supabase, job, sanitizer }) {
         } else if (ev.type === "c0mpute_failed") {
             // The queue gave up (wait budget spent, or nothing serves the
             // model): the billed hosted fallback if the job allowed it.
-            const next = await routeC0mputeMiss(supabase, job);
+            // `final`: out of requeues, or nothing serves the model; tell the
+            // caller and end ("Network is busy. Run a node or wait.").
+            const next = ev.data?.final ? null : await routeC0mputeMiss(supabase, job);
             if (next?.kind === "nim") {
                 yield* runNimFallback({ supabase, job: next.job });
                 return;
             }
-            const data = { message: ev.data?.message ?? "c0mpute worker failed" };
+            const data = c0mputeErrorData(ev.data);
             const persisted = await insertJobEvent(supabase, job.id, "error", data);
             await finalizeJob(supabase, job.id, { status: "failed", error: data.message });
             yield { type: "error", data, id: persisted?.id };

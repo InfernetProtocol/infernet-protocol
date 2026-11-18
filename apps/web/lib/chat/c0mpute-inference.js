@@ -18,6 +18,7 @@
 
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { maxRequeues as defaultMaxRequeues, NETWORK_BUSY_MESSAGE, RUN_A_NODE_URL } from "../routing/requeue.js";
 
 export const WORKLOAD = "infernet.inference";
 export const ROLE_TAG = "infernet:inference";
@@ -41,17 +42,14 @@ const STATUS_TTL_MS = 30_000;
 // node:http (undici fetch dies at 300 s waiting for headers).
 export const DEFAULT_TIMEOUT_MS = 420_000;
 
-// How long a chat may wait on the c0mpute network in all, from job creation:
-// busy workers mean wait for a free slot (the bridge re-queues a turned-away
-// job at the head), not move it to a slower node (Anthony, 2026-11-18: "if it
-// turns away a job send it back to the front of the queue"). 9 min leaves a
-// 10 min client (moshcode) time to read the error. INFERNET_C0MPUTE_WAIT_MS.
+// The most a chat may spend in the queue, from job creation, besides the
+// requeue cap (c0mputeJobEvents). 9 min leaves a 10 min client (moshcode)
+// time to read the error. INFERNET_C0MPUTE_WAIT_MS.
 export const DEFAULT_WAIT_MS = 540_000;
 // Below this much time left, another bridge attempt cannot finish.
 export const MIN_ATTEMPT_MS = 20_000;
-// A worker that "failed" without saying why is retried this many times (it
-// is usually a runtime under load), then the job gives up.
-export const MAX_WORKER_FAILURES = 3;
+// Pause before a requeued job is dispatched again.
+export const REQUEUE_PAUSE_MS = 5_000;
 // Bridge answers that mean "busy, try again", not "cannot serve this"
 // (see isRetryable for worker_failed).
 export const RETRYABLE_CODES = new Set([
@@ -274,6 +272,19 @@ export async function runC0mputeChat({ model, messages, maxTokens, temperature, 
   };
 }
 
+/**
+ * The terminal `error` event for a chat the queue gave up on: the message
+ * (exactly "Network is busy. Run a node or wait." when out of requeues), its
+ * code, and where running a node is explained.
+ */
+export function c0mputeErrorData(failed = {}) {
+  const message = failed?.message ?? "c0mpute worker failed";
+  const data = { message };
+  if (failed?.code) data.code = failed.code === "too_many_requeues" || failed.code === "wait_budget" ? "network_busy" : failed.code;
+  if (message === NETWORK_BUSY_MESSAGE) data.run_a_node = RUN_A_NODE_URL;
+  return data;
+}
+
 /** What the chat routes show for a c0mpute-served job (like nimVirtualProvider). */
 export function c0mputeVirtualProvider(model) {
   return {
@@ -287,21 +298,24 @@ export function c0mputeVirtualProvider(model) {
 }
 
 /**
- * FIFO among chats waiting on c0mpute in this process: a turned-away job
- * re-asks the bridge only once every older waiting job for the same model
- * has, so retries reach the bridge in created_at order (the bridge keeps that
- * order for jobs it queues). Keys are model ids; entries { id, createdAt }.
+ * The line of chats waiting on c0mpute in this process, per model, ordered by
+ * when each (re)joined: a turned-away job rejoins at the BACK. It only gives
+ * each waiting chat its position for the status event; nobody waits for the
+ * head (no head-of-line blocking: every job retries on its own clock).
  */
 export function createWaitQueue() {
   const waiting = new Map();
+  let seq = 0;
   return {
-    join(model, id, createdAt) {
+    /** Join at the back (or move to the back); returns the 0-based position. */
+    join(model, id) {
       const key = model ?? "";
       if (!waiting.has(key)) waiting.set(key, []);
       const list = waiting.get(key);
-      if (!list.some((e) => e.id === id)) list.push({ id, createdAt });
-      list.sort((a, b) => a.createdAt - b.createdAt || String(a.id).localeCompare(String(b.id)));
-      return list.findIndex((e) => e.id === id);
+      const i = list.findIndex((e) => e.id === id);
+      if (i >= 0) list.splice(i, 1);
+      list.push({ id, seq: seq++ });
+      return list.length - 1;
     },
     position(model, id) {
       return (waiting.get(model ?? "") ?? []).findIndex((e) => e.id === id);
@@ -324,27 +338,31 @@ const sharedWaitQueue = createWaitQueue();
  * normalized events as the other paths ({ type: meta|status|token|done|error,
  * data, id }) and persists them through the injected helpers.
  *
- * One queue, two kinds of capable nodes (Anthony, 2026-11-18: "if it turns
- * away a job send it back to the front of the queue", "it should definitely
- * go through the queue again", "it could be a cpu node if that's all that's
- * available"). The job waits in a per-model FIFO (created_at order); at the
- * head it is dispatched to the first capable node with a free slot:
- *   1. the c0mpute auction (the bridge picks a free worker, GPU or CPU);
- *   2. else an Infernet provider daemon with a free slot serving the model
- *      (`assign({ freeSlot: true })`, the fastest free one).
- * A turn-away, a busy or failed worker or a timeout puts it back in line at
- * its old place (the front, ahead of newer jobs), with a `status` event
- * ({ state: "waiting", message, queue_position, attempt, waited_ms }), until
- * the wait budget from job creation (INFERNET_C0MPUTE_WAIT_MS) runs out.
- * Nothing hands the job to a busy node outside this queue.
+ * The queue (Anthony, 2026-11-18): a job is dispatched to the first capable
+ * node with a free slot, the c0mpute auction (the bridge picks a free worker,
+ * GPU or CPU), else an Infernet provider daemon with a free slot serving the
+ * model (`assign({ freeSlot: true })`, the fastest free one). Turned away, a
+ * busy or failed worker or a timeout: back in the queue at the BACK ("just
+ * add it to the back of the queue"), with a `status` event ({ state:
+ * "waiting", message, queue_position, attempt, requeues }), and dispatched
+ * again after a short pause. Nothing hands the job straight to a busy node.
  *
- * When no c0mpute worker serves the model at all, the c0mpute auction drops
- * out and the job is assigned to the best daemon serving it (`assign({
- * freeSlot: false })`, which queues it there oldest first).
+ * Guards against looping forever:
+ *   - no node serves the model at all (no c0mpute worker, no daemon): fail at
+ *     once ("No node serves <model>.");
+ *   - after INFERNET_MAX_REQUEUES (3) requeues with no node taking it, or at
+ *     the wait budget (INFERNET_C0MPUTE_WAIT_MS): end with "Network is busy.
+ *     Run a node or wait." ("if there's no nodes available after 3 queues
+ *     tell the user and end");
+ *   - no head-of-line blocking: other jobs keep dispatching.
+ *
+ * When no c0mpute worker serves the model but a daemon does, the job is
+ * assigned to the best daemon serving it (`assign({ freeSlot: false })`).
  *
  * Yields { type: "assigned", job } when a daemon took it (the caller then
  * streams the provider path, same job id), or { type: "c0mpute_failed",
- * data: { message, code, capable } } (nothing persisted) when it gave up.
+ * data: { message, code, capable, final } } (nothing persisted) when it gave
+ * up; `final` means tell the caller `message` and end (no other fallback).
  */
 export async function* c0mputeJobEvents(job, {
   run = runC0mputeChat,
@@ -355,6 +373,8 @@ export async function* c0mputeJobEvents(job, {
   log = console.log,
   serves = c0mputeServesModel,
   waitMs = c0mputeWaitMs(),
+  maxRequeues = defaultMaxRequeues(),
+  pauseMs = REQUEUE_PAUSE_MS,
   queue = sharedWaitQueue,
   now = () => Date.now(),
   sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -373,67 +393,58 @@ export async function* c0mputeJobEvents(job, {
 
   const createdAt = Date.parse(job.created_at ?? "") || now();
   const deadline = createdAt + waitMs;
+  const busy = (code) => ({ ok: false, code, final: true, error: NETWORK_BUSY_MESSAGE });
   let out = null;
   let capable = null;
-  let workerFailures = 0;
-  queue.join(model, job.id, createdAt);
+  let requeues = 0;
   try {
     for (let attempt = 1; ; attempt += 1) {
-      // Front of the queue first: dispatch once every older waiting chat for
-      // this model has been dispatched (or the budget runs out).
-      while (queue.position(model, job.id) > 0 && deadline - now() > MIN_ATTEMPT_MS) await sleep(500);
       queue.leave(model, job.id);
-
-      if (capable === false) {
-        // No c0mpute worker serves it: a daemon serving it, queued there.
-        const moved = await assign({ freeSlot: false }).catch(() => null);
-        if (moved) { yield { type: "assigned", job: moved }; return; }
-        out = { ok: false, code: "no_capable_node", error: `no node serves ${model ?? "this model"}` };
-        break;
-      }
-
       const remaining = deadline - now();
       const timeoutMs = Math.max(MIN_ATTEMPT_MS, Math.min(DEFAULT_TIMEOUT_MS, remaining));
       out = await run({ model, messages: input.messages ?? [], maxTokens: input.max_tokens, temperature: input.temperature, timeoutMs });
       if (out.ok) break;
       log(`[c0mpute-chat] job ${job.id} model=${model} attempt ${attempt}: ${out.error}`);
-      if (out.code === "worker_failed") workerFailures += 1;
-      if (!isRetryable(out) && !(out.code === "worker_failed" && workerFailures <= MAX_WORKER_FAILURES)) break;
-      capable = await serves(model).catch(() => null);
-      if (capable === false) { attempt -= 1; continue; }
+      if (!isRetryable(out) && out.code !== "worker_failed") break;
 
-      // Turned away: the next capable node with a free slot, CPU included.
+      capable = await serves(model).catch(() => null);
+      if (capable === false) {
+        // No c0mpute worker serves it: a daemon serving it, or nothing does.
+        const moved = await assign({ freeSlot: false }).catch(() => null);
+        if (moved) { yield { type: "assigned", job: moved }; return; }
+        out = { ok: false, code: "no_capable_node", final: true, error: `No node serves ${model ?? "this model"}.` };
+        break;
+      }
+      // The next capable node with a free slot, CPU included.
       const moved = await assign({ freeSlot: true }).catch(() => null);
       if (moved) { yield { type: "assigned", job: moved }; return; }
 
-      const left = deadline - now();
-      if (left < MIN_ATTEMPT_MS) break;
-      // Back in line at its old place.
-      const localPos = queue.join(model, job.id, createdAt);
-      const position = out.queuePosition ?? (localPos >= 0 ? localPos : null);
+      if (requeues >= maxRequeues) { out = busy("too_many_requeues"); break; }
+      if (deadline - now() < MIN_ATTEMPT_MS) { out = busy("wait_budget"); break; }
+      requeues += 1;
+      const position = out.queuePosition ?? queue.join(model, job.id);
+      if (out.queuePosition != null) queue.join(model, job.id);
       const status = {
         state: "waiting",
         route: "queue",
-        message: position != null
-          ? `waiting for a free slot (position ${position + 1} in the queue)`
-          : "waiting for a free slot",
+        message: `no free node; back in the queue (position ${position + 1}, try ${requeues} of ${maxRequeues})`,
         queue_position: position,
         attempt,
+        requeues,
+        max_requeues: maxRequeues,
         waited_ms: now() - createdAt,
         reason: out.code
       };
       const persisted = await insertEvent(job.id, "status", status);
       yield { type: "status", data: persisted?.data ?? status, id: persisted?.id };
-      // A bridge that queues answers when a slot frees; one that turns the job
-      // away at once (no_bids) gets a short pause so we do not hammer it.
-      await sleep(Math.min(5_000, Math.max(0, left - MIN_ATTEMPT_MS)));
+      await sleep(Math.min(pauseMs, Math.max(0, deadline - now() - MIN_ATTEMPT_MS)));
     }
   } finally {
     queue.leave(model, job.id);
   }
   if (!out.ok) {
     if (capable === null && isRetryable(out)) capable = await serves(model).catch(() => null);
-    yield { type: "c0mpute_failed", data: { message: out.error, code: out.code, capable } };
+    yield { type: "c0mpute_failed", data: { message: out.error, code: out.code, capable, final: out.final === true } };
     return;
   }
   log(`[c0mpute-chat] job ${job.id} model=${out.model} worker=${out.worker} c0mpute_job=${out.jobId} price=${out.price} ${out.durationMs}ms`);

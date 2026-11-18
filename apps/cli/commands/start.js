@@ -622,12 +622,12 @@ async function runDaemon(args, ctx) {
             markFinished(job.id);
             const msg = err?.message ?? String(err);
             // Busy (engine queue full, Ollama restarting): hand the job back
-            // to the front of the queue instead of failing it, and leave it
+            // to the queue (at the back) instead of failing it, and leave it
             // alone here for a moment (lib/turn-away.js).
             if (job.type === 'chat' && err?.turnedAway === true && await requeueTurnedAway(client, job.id, msg)) {
                 stats.jobsFailed -= 1;
                 turnedAwayUntil.set(job.id, Date.now() + TURN_AWAY_BACKOFF_MS);
-                process.stdout.write(`[${new Date().toISOString()}] turned away job ${job.id} (${msg}); requeued at the front\n`);
+                process.stdout.write(`[${new Date().toISOString()}] turned away job ${job.id} (${msg}); back to the queue\n`);
                 return;
             }
             process.stderr.write(`job ${job.id} failed: ${msg}\n`);
@@ -1850,8 +1850,8 @@ async function runDaemon(args, ctx) {
         // Release whatever is still running after the drain window.
         for (const jobId of stats.activeJobIds) {
             try {
-                // Not started yet: back to the front of the queue, for the
-                // restarted daemon or a free node (lib/turn-away.js).
+                // Not started yet: back to the queue, for the restarted daemon
+                // or another node (lib/turn-away.js).
                 if (await requeueTurnedAway(client, jobId, 'daemon restarting for self-update')) continue;
                 await client.failJob(jobId, 'daemon restarting for self-update');
             } catch { /* best-effort */ }

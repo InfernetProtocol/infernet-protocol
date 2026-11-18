@@ -195,19 +195,23 @@ describe("c0mputeJobEvents", () => {
             insertEvent: async (jobId, type, data) => { events.push(type); return { id: events.length, data }; },
             finalize: async (jobId, patch) => { calls.finalize.push(patch); },
             charge: async (job, result) => { calls.charge.push(result); },
-            log: () => {}
+            log: () => {},
+            queue: c0.createWaitQueue(),
+            sleep: async () => {}
         };
     };
     const job = { id: "job-1", model_name: "qwen2.5:7b", billed_user_id: "u1", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen2.5:7b", max_tokens: 64 } };
+    const ok = { ok: true, text: "hi!", model: "qwen2.5:7b", worker: "12D3W", jobId: "cj", price: 0.001, durationMs: 5 };
+    const turnedAway = { ok: false, code: "no_bids", error: "no c0mpute worker took the request" };
+    const drain = async (j, opts) => { const out = []; for await (const ev of c0.c0mputeJobEvents(j, opts)) out.push(ev); return out; };
 
     it("emits meta, the answer and done, then completes and bills the job", async () => {
         const d = deps();
         const run = vi.fn(async (args) => {
             expect(args).toMatchObject({ model: "qwen2.5:7b", maxTokens: 64 });
-            return { ok: true, text: "hi!", model: "qwen2.5:7b", worker: "12D3W", jobId: "cj", price: 0.001, durationMs: 5 };
+            return ok;
         });
-        const out = [];
-        for await (const ev of c0.c0mputeJobEvents(job, { ...d, run })) out.push(ev);
+        const out = await drain(job, { ...d, run });
         expect(out.map((e) => e.type)).toEqual(["meta", "token", "done"]);
         expect(out[0].data.provider_node_id).toBe("c0mpute");
         expect(out[2].data).toMatchObject({ text: "hi!", worker: "12D3W", source: "c0mpute" });
@@ -216,128 +220,103 @@ describe("c0mputeJobEvents", () => {
         expect(d.calls.charge).toHaveLength(1);
     });
 
-    it("reports a miss without persisting an error or billing", async () => {
+    // Anthony, 2026-11-18: "just add it to the back of the queue", "if there's
+    // no nodes available after 3 queues tell the user and end".
+    it("turned away: back in the queue with a status event, then served", async () => {
         const d = deps();
-        const run = vi.fn(async () => ({ ok: false, code: "no_bids", error: "no c0mpute worker took the request" }));
-        const out = [];
-        for await (const ev of c0.c0mputeJobEvents(job, { ...d, run, serves: async () => false })) out.push(ev);
-        expect(out.map((e) => e.type)).toEqual(["meta", "c0mpute_failed"]);
-        expect(out[1].data).toMatchObject({ code: "no_capable_node", capable: false });
-        expect(d.events).toEqual(["meta"]);
+        const answers = [turnedAway, { ok: false, code: "worker_failed", error: "the c0mpute worker failed (worker reported the job failed)" }, ok];
+        const run = vi.fn(async () => answers.shift());
+        const out = await drain(job, { ...d, run, serves: async () => true });
+        expect(out.map((e) => e.type)).toEqual(["meta", "status", "status", "token", "done"]);
+        expect(out[1].data).toMatchObject({ state: "waiting", route: "queue", requeues: 1, max_requeues: 3, queue_position: 0 });
+        expect(out[2].data.requeues).toBe(2);
+        expect(run).toHaveBeenCalledTimes(3);
+    });
+
+    it("guard (b): after 3 requeues with no node, ends with 'Network is busy. Run a node or wait.'", async () => {
+        const d = deps();
+        const run = vi.fn(async () => turnedAway);
+        const out = await drain(job, { ...d, run, serves: async () => true });
+        expect(run).toHaveBeenCalledTimes(4); // the first try + 3 requeues
+        expect(out.filter((e) => e.type === "status")).toHaveLength(3);
+        expect(out.at(-1)).toEqual({ type: "c0mpute_failed", data: { message: "Network is busy. Run a node or wait.", code: "too_many_requeues", capable: true, final: true } });
+        expect(c0.c0mputeErrorData(out.at(-1).data)).toEqual({ message: "Network is busy. Run a node or wait.", code: "network_busy", run_a_node: "https://infernetprotocol.com/docs" });
         expect(d.calls.finalize).toEqual([]);
         expect(d.calls.charge).toEqual([]);
     });
 
-    // Anthony, 2026-11-18: "if it turns away a job send it back to the front
-    // of the queue". A busy GPU worker means wait for it, not a CPU node.
-    it("waits on the bridge while a capable worker is busy, with status events", async () => {
+    it("guard (b): the cap is configurable, and the wait budget also ends it", async () => {
         const d = deps();
+        const run = vi.fn(async () => turnedAway);
+        await drain(job, { ...d, run, serves: async () => true, maxRequeues: 1 });
+        expect(run).toHaveBeenCalledTimes(2);
         let t = 0;
-        const answers = [
-            { ok: false, code: "no_bids", error: "busy" },
-            { ok: false, code: "queued", error: "queued", queuePosition: 1 },
-            { ok: true, text: "hi!", model: "qwen2.5:7b", worker: "12D3W", jobId: "cj", price: 0, durationMs: 5 }
-        ];
-        const run = vi.fn(async (args) => { t += 30_000; expect(args.timeoutMs).toBeGreaterThan(0); return answers.shift(); });
-        const out = [];
-        const fresh = { ...job, created_at: new Date(0).toISOString() };
-        for await (const ev of c0.c0mputeJobEvents(fresh, { ...d, run, serves: async () => true, now: () => t, sleep: async () => {}, waitMs: 540_000 })) out.push(ev);
-        expect(out.map((e) => e.type)).toEqual(["meta", "status", "status", "token", "done"]);
-        expect(out[1].data).toMatchObject({ state: "waiting", route: "queue", attempt: 1, queue_position: 0 });
-        expect(out[2].data).toMatchObject({ queue_position: 1, attempt: 2 });
-        expect(out[2].data.message).toMatch(/position 2/);
-        expect(d.events).toEqual(["meta", "status", "status", "token", "done"]);
-        expect(run).toHaveBeenCalledTimes(3);
+        const slow = vi.fn(async () => { t += 300_000; return { ok: false, code: "timeout", error: "slow" }; });
+        const out = await drain({ ...job, created_at: new Date(0).toISOString() }, { ...deps(), run: slow, serves: async () => true, now: () => t, waitMs: 540_000 });
+        expect(out.at(-1).data).toMatchObject({ final: true, code: "wait_budget", message: "Network is busy. Run a node or wait." });
+        expect(slow).toHaveBeenCalledTimes(2);
     });
 
-    it("gives up at the wait budget, reporting a capable but busy network", async () => {
+    it("guard (a): no node serves the model at all: fails at once, no requeue", async () => {
         const d = deps();
-        let t = 0;
-        const run = vi.fn(async () => { t += 200_000; return { ok: false, code: "timeout", error: "slow" }; });
-        const out = [];
-        const fresh = { ...job, created_at: new Date(0).toISOString() };
-        for await (const ev of c0.c0mputeJobEvents(fresh, { ...d, run, serves: async () => true, now: () => t, sleep: async () => {}, waitMs: 540_000 })) out.push(ev);
-        expect(out.at(-1)).toMatchObject({ type: "c0mpute_failed", data: { capable: true, code: "timeout" } });
-        expect(run).toHaveBeenCalledTimes(3);
+        const run = vi.fn(async () => turnedAway);
+        const assign = vi.fn(async () => null);
+        const out = await drain(job, { ...d, run, assign, serves: async () => false });
+        expect(run).toHaveBeenCalledTimes(1);
+        expect(out.map((e) => e.type)).toEqual(["meta", "c0mpute_failed"]);
+        expect(out[1].data).toMatchObject({ code: "no_capable_node", final: true, capable: false, message: "No node serves qwen2.5:7b." });
+        expect(assign).toHaveBeenCalledWith({ freeSlot: false });
     });
 
-    it("turned away, it goes to a provider daemon with a free slot (CPU allowed)", async () => {
+    it("no c0mpute worker serves it but a daemon does: assigned there", async () => {
         const d = deps();
-        const run = vi.fn(async () => ({ ok: false, code: "no_bids", error: "busy" }));
+        const run = vi.fn(async () => turnedAway);
+        const assign = vi.fn(async ({ freeSlot }) => (freeSlot ? null : { ...job, provider_id: "daemon" }));
+        const out = await drain(job, { ...d, run, assign, serves: async () => false });
+        expect(out.map((e) => e.type)).toEqual(["meta", "assigned"]);
+    });
+
+    it("turned away: through the queue to a daemon with a free slot (CPU allowed)", async () => {
+        const d = deps();
+        const run = vi.fn(async () => turnedAway);
         const assign = vi.fn(async ({ freeSlot }) => (freeSlot ? { ...job, provider_id: "cpu-daemon" } : null));
-        const out = [];
-        for await (const ev of c0.c0mputeJobEvents(job, { ...d, run, assign, queue: c0.createWaitQueue(), serves: async () => true, sleep: async () => {} })) out.push(ev);
+        const out = await drain(job, { ...d, run, assign, serves: async () => true });
         expect(out.map((e) => e.type)).toEqual(["meta", "assigned"]);
         expect(out[1].job.provider_id).toBe("cpu-daemon");
-        expect(assign).toHaveBeenCalledWith({ freeSlot: true });
     });
 
-    it("no c0mpute worker serves the model: queued on a daemon serving it", async () => {
-        const d = deps();
-        const run = vi.fn(async () => ({ ok: false, code: "no_bids", error: "none" }));
-        const assign = vi.fn(async ({ freeSlot }) => (freeSlot ? null : { ...job, provider_id: "busy-daemon" }));
-        const out = [];
-        for await (const ev of c0.c0mputeJobEvents(job, { ...d, run, assign, queue: c0.createWaitQueue(), serves: async () => false, sleep: async () => {} })) out.push(ev);
-        expect(out.map((e) => e.type)).toEqual(["meta", "assigned"]);
-        expect(assign).toHaveBeenLastCalledWith({ freeSlot: false });
-        expect(run).toHaveBeenCalledTimes(1);
-    });
-
-    it("a worker that just 'failed' is retried a few times, then given up", async () => {
-        const d = deps();
-        const run = vi.fn(async () => ({ ok: false, code: "worker_failed", error: "the c0mpute worker failed (worker reported the job failed)" }));
-        const out = [];
-        for await (const ev of c0.c0mputeJobEvents(job, { ...d, run, queue: c0.createWaitQueue(), serves: async () => true, sleep: async () => {} })) out.push(ev);
-        expect(run).toHaveBeenCalledTimes(c0.MAX_WORKER_FAILURES + 1);
-        expect(out.at(-1).type).toBe("c0mpute_failed");
-    });
-
-    it("retries reach the bridge oldest first (front of the queue)", async () => {
+    it("guard (c): no head-of-line blocking, a stuck older job does not hold a newer one", async () => {
         const q = c0.createWaitQueue();
-        expect(q.join("m", "new", 2000)).toBe(0);
-        expect(q.join("m", "old", 1000)).toBe(0);
-        expect(q.position("m", "new")).toBe(1);
-        q.leave("m", "old");
-        expect(q.position("m", "new")).toBe(0);
-        q.leave("m", "new");
-        expect(q.position("m", "new")).toBe(-1);
-    });
-
-    it("a younger chat is dispatched only after the older one (front of the queue)", async () => {
-        const q = c0.createWaitQueue();
-        q.join("qwen2.5:7b", "older", -1);
+        q.join("qwen2.5:7b", "older-stuck-job");
         const d = deps();
-        let t = 0;
-        const answers = [
-            { ok: false, code: "no_bids", error: "busy" },
-            { ok: true, text: "hi!", model: "qwen2.5:7b", worker: "W", jobId: "cj", price: 0, durationMs: 1 }
-        ];
-        let slept = 0;
-        const run = vi.fn(async () => { expect(slept).toBeGreaterThanOrEqual(3); return answers.shift(); });
-        const sleep = async () => { slept += 1; t += 500; if (slept === 3) q.leave("qwen2.5:7b", "older"); };
-        const out = [];
-        const fresh = { ...job, created_at: new Date(0).toISOString() };
-        for await (const ev of c0.c0mputeJobEvents(fresh, { ...d, run, queue: q, serves: async () => true, now: () => t, sleep, waitMs: 540_000 })) out.push(ev);
-        expect(out[1].data.queue_position).toBe(0);
-        expect(run).toHaveBeenCalledTimes(2);
+        const out = await drain(job, { ...d, queue: q, run: async () => ok, serves: async () => true });
         expect(out.at(-1).type).toBe("done");
-        expect(q.position("qwen2.5:7b", "job-1")).toBe(-1);
+        expect(q.position("qwen2.5:7b", "older-stuck-job")).toBe(0);
     });
 
-    it("a worker whose runtime timed out counts as busy (2026-11-18 log line)", () => {
-        expect(c0.isRetryable({ ok: false, code: "worker_failed", error: "the c0mpute worker could not answer: reach the local runtime: error sending request for url (http://127.0.0.1:11434/v1/chat/completions): operation timed out" })).toBe(true);
-        expect(c0.isRetryable({ ok: false, code: "unreachable", error: "c0mpute jobs bridge unreachable: socket hang up" })).toBe(true);
-        expect(c0.isRetryable({ ok: false, code: "worker_failed", error: "the c0mpute worker could not answer: malformed result" })).toBe(false);
-        expect(c0.isRetryable({ ok: false, code: "bad_request", error: "x" })).toBe(false);
+    it("a requeued job goes to the BACK of the line", () => {
+        const q = c0.createWaitQueue();
+        expect(q.join("m", "a")).toBe(0);
+        expect(q.join("m", "b")).toBe(1);
+        expect(q.join("m", "a")).toBe(1); // a rejoined behind b
+        expect(q.position("m", "b")).toBe(0);
+        q.leave("m", "a"); q.leave("m", "b");
+        expect(q.position("m", "a")).toBe(-1);
     });
 
     it("does not retry an answer that is not 'busy'", async () => {
         const d = deps();
         const run = vi.fn(async () => ({ ok: false, code: "unauthorized", error: "no" }));
-        const out = [];
-        for await (const ev of c0.c0mputeJobEvents(job, { ...d, run, serves: async () => true, sleep: async () => {} })) out.push(ev);
+        const out = await drain(job, { ...d, run, serves: async () => true });
         expect(out.map((e) => e.type)).toEqual(["meta", "c0mpute_failed"]);
+        expect(out[1].data.final).toBe(false);
         expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it("a worker whose runtime timed out counts as busy (2026-11-18 log line)", () => {
+        expect(c0.isRetryable({ ok: false, code: "worker_failed", error: "the c0mpute worker could not answer: reach the local runtime: error sending request for url (http://127.0.0.1:11434/v1/chat/completions): operation timed out" })).toBe(true);
+        expect(c0.isRetryable({ ok: false, code: "unreachable", error: "c0mpute jobs bridge unreachable: socket hang up" })).toBe(true);
+        expect(c0.isRetryable({ ok: false, code: "bad_request", error: "x" })).toBe(false);
     });
 });
 

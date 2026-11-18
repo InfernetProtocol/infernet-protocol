@@ -4,7 +4,7 @@ import { rebalanceChatJob } from "@/lib/data/chat-rebalance";
 import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapter";
 import { MIN_RPC_PEERS, MAX_RPC_PEERS, ENGINE_ID as RPC_ENGINE_ID } from "@infernetprotocol/rpc-adapter/constants";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
-import { c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
+import { c0mputeErrorData, c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
 import { assignC0mputeJob, routeC0mputeMiss, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
 import {
   selectRpcSlices,
@@ -520,7 +520,7 @@ function providerEndpoint(provider) {
  * A chat sent to c0mpute workers (infernet.inference) through the jobs
  * bridge; c0mpute is tried first for every chat that can run there. One-shot
  * answer: the whole text arrives as one token event. Busy or turned away, the
- * job goes back to the front of the queue and is dispatched to the first
+ * job goes back into the queue (at the back) and is dispatched to the first
  * capable node with a free slot: the c0mpute auction or a provider daemon
  * (returned, so the caller serves it in the provider path). When the queue
  * gives up, the hosted fallback if that was allowed at creation
@@ -546,12 +546,14 @@ async function runC0mputeFallback({ supabase, job, safeEnqueue, sseFrame }) {
     }
     // The queue gave up (wait budget spent, or nothing serves the model):
     // the billed hosted fallback if the job allowed it.
-    const next = await routeC0mputeMiss(supabase, job);
+    // `final`: out of requeues, or nothing serves the model; tell the caller
+    // and end ("Network is busy. Run a node or wait.").
+    const next = ev.data?.final ? null : await routeC0mputeMiss(supabase, job);
     if (next?.kind === "nim") {
       await runNimFallback({ supabase, job: next.job, safeEnqueue, sseFrame });
       return;
     }
-    const data = { message: ev.data?.message ?? "c0mpute worker failed" };
+    const data = c0mputeErrorData(ev.data);
     const persisted = await insertJobEvent(supabase, job.id, "error", data);
     safeEnqueue(sseFrame("error", data, persisted?.id));
     await finalizeJob(supabase, job.id, { status: "failed", error: data.message });
