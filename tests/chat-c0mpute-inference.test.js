@@ -240,6 +240,11 @@ describe("c0mputeModelFor", () => {
     it("gives no model or an alias the best general chat model", () => {
         expect(c0mputeModelFor(served, undefined)).toBe("qwen2.5:7b");
         expect(c0mputeModelFor(served, "gpt-4o-mini")).toBe("qwen2.5:7b");
+        // The house 9B leads when a worker serves it, so alias traffic does
+        // not load a second model next to it on the same GPU (2026-11-18).
+        const withHouse9b = [...served, "eriktonon/qwen3.8-uncensored:9b"];
+        expect(c0mputeModelFor(withHouse9b, undefined)).toBe("eriktonon/qwen3.8-uncensored:9b");
+        expect(c0mputeModelFor(withHouse9b, "gpt-4o-mini")).toBe("eriktonon/qwen3.8-uncensored:9b");
         // Never a single-purpose fine-tune, an uncensored build or a reasoning model by default.
         expect(c0mputeModelFor(["hf.co/x/agent:latest", "huihui_ai/qwen3.5-abliterated:4b", "qwen3:4b", "mistral:7b"], undefined)).toBe("mistral:7b");
         expect(c0mputeModelFor(["hf.co/x/agent:latest", "qwen3:4b"], "auto")).toBeNull();
