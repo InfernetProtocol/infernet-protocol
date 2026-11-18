@@ -5,7 +5,7 @@ import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapte
 import { MIN_RPC_PEERS, MAX_RPC_PEERS, ENGINE_ID as RPC_ENGINE_ID } from "@infernetprotocol/rpc-adapter/constants";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 import { c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
-import { routeC0mputeMiss, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
+import { assignC0mputeJob, routeC0mputeMiss, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
 import {
   selectRpcSlices,
   mergeRpcRouting,
@@ -519,29 +519,34 @@ function providerEndpoint(provider) {
 /**
  * A chat sent to c0mpute workers (infernet.inference) through the jobs
  * bridge; c0mpute is tried first for every chat that can run there. One-shot
- * answer: the whole text arrives as one token event. While workers are busy it
- * waits for a free slot (status events say so). When c0mpute gives up, the
- * job moves to an Infernet daemon only if no c0mpute worker serves the model
- * (returned, so the caller serves it in the provider path), else to the
- * hosted fallback when that was allowed at creation (input_spec.nim_ok).
- * Returns the moved job or null.
+ * answer: the whole text arrives as one token event. Busy or turned away, the
+ * job goes back to the front of the queue and is dispatched to the first
+ * capable node with a free slot: the c0mpute auction or a provider daemon
+ * (returned, so the caller serves it in the provider path). When the queue
+ * gives up, the hosted fallback if that was allowed at creation
+ * (input_spec.nim_ok). Returns the assigned job or null.
  */
 async function runC0mputeFallback({ supabase, job, safeEnqueue, sseFrame }) {
   for await (const ev of c0mputeJobEvents(job, {
     insertEvent: (jobId, type, data) => insertJobEvent(supabase, jobId, type, data),
     finalize: (jobId, patch) => finalizeJob(supabase, jobId, patch),
     // Attributes the job to the winning worker and pays it its share.
-    charge: (j, result) => settleC0mputeJob(supabase, j, result)
+    charge: (j, result) => settleC0mputeJob(supabase, j, result),
+    // The queue's other kind of capable node: a provider daemon.
+    assign: ({ freeSlot }) => assignC0mputeJob(supabase, job, { freeSlot })
   })) {
+    if (ev.type === "assigned") {
+      // The queue gave it to a provider daemon (free slot): the caller serves
+      // it in the provider path, same job id.
+      return ev.job;
+    }
     if (ev.type !== "c0mpute_failed") {
       safeEnqueue(sseFrame(ev.type, ev.data, ev.id));
       continue;
     }
-    // Busy is waited out inside c0mputeJobEvents. A provider daemon only
-    // when no c0mpute worker serves the model (INFERNET_C0MPUTE_PROVIDER_FALLBACK),
-    // then the billed hosted fallback if the job allowed it.
-    const next = await routeC0mputeMiss(supabase, job, ev.data ?? {});
-    if (next?.kind === "provider") return next.job;
+    // The queue gave up (wait budget spent, or nothing serves the model):
+    // the billed hosted fallback if the job allowed it.
+    const next = await routeC0mputeMiss(supabase, job);
     if (next?.kind === "nim") {
       await runNimFallback({ supabase, job: next.job, safeEnqueue, sseFrame });
       return;

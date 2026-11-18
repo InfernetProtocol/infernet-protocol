@@ -518,9 +518,11 @@ export async function createChatJob({
 
   // c0mpute nodes first: every chat that can run peer to peer goes to the
   // c0mpute auction, so any node serving the model can win it and be paid.
-  // Infernet's own provider daemons are the fallback when no c0mpute worker
-  // serves the model, and take a job no worker answered (chat-c0mpute.js
-  // moveC0mputeJobToProvider). Until 2026-11-14 it was the other way round:
+  // Infernet's own provider daemons are the other kind of node in the same
+  // queue: a job turned away by c0mpute goes to the first daemon with a free
+  // slot (chat-c0mpute.js assignC0mputeJob, from the queue in
+  // c0mputeJobEvents), or to one serving the model when no c0mpute worker
+  // does. Until 2026-11-14 it was the other way round:
   // c0mpute only when no daemon served the model, so two daemons took all of
   // it while c0mpute nodes sat idle.
   let c0mputeModel = null;
