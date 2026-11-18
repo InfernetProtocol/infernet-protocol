@@ -6,7 +6,7 @@ import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapte
 import { makeStreamSanitizer, sanitizeText } from "@/lib/sanitize-stream";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 import { c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
-import { moveC0mputeJobToNim, moveC0mputeJobToProvider, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
+import { routeC0mputeMiss, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
 
 /**
  * Async generator that yields normalized job events for a given job:
@@ -111,7 +111,7 @@ export async function* streamJobEvents(jobId) {
     // While nothing has arrived, check now and then whether the job is stuck
     // in a busy node's queue and another node is free (chat-rebalance.js).
     // A moved job keeps its id, so this stream just keeps listening.
-    let started = pre.length > 0;
+    let started = pre.some((ev) => ev.event_type !== "status");
     let nextRebalanceAt = Date.now() + REBALANCE_EVERY_MS;
 
     try {
@@ -133,8 +133,10 @@ export async function* streamJobEvents(jobId) {
                 });
                 continue;
             }
-            started = true;
             const ev = queue.shift();
+            // A status event ("waiting for a free slot") is not the answer
+            // starting: keep checking for a free node meanwhile.
+            if (ev.type !== "status") started = true;
             if (ev.type === "token") {
                 const cleanText = sanitizer.process(ev.data?.text ?? "");
                 if (cleanText) {
@@ -179,14 +181,17 @@ async function* runC0mputeFallback({ supabase, job, sanitizer }) {
             // No worker answered: an Infernet daemon serving the model next
             // (same job id, so this stream carries on in the provider path),
             // and the billed hosted fallback only after that.
-            const moved = await moveC0mputeJobToProvider(supabase, job);
-            if (moved) {
+            // Only when no c0mpute worker serves the model (by default;
+            // INFERNET_C0MPUTE_PROVIDER_FALLBACK): an Infernet daemon next
+            // (same job id, so this stream carries on in the provider path),
+            // then the billed hosted fallback if the job allowed it.
+            const next = await routeC0mputeMiss(supabase, job, ev.data ?? {});
+            if (next?.kind === "provider") {
                 yield* streamJobEvents(job.id);
                 return;
             }
-            const nimJob = await moveC0mputeJobToNim(supabase, job);
-            if (nimJob) {
-                yield* runNimFallback({ supabase, job: nimJob });
+            if (next?.kind === "nim") {
+                yield* runNimFallback({ supabase, job: next.job });
                 return;
             }
             const data = { message: ev.data?.message ?? "c0mpute worker failed" };

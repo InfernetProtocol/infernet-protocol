@@ -5,7 +5,7 @@ import { streamChatCompletion, fallbackName } from "@infernetprotocol/nim-adapte
 import { MIN_RPC_PEERS, MAX_RPC_PEERS, ENGINE_ID as RPC_ENGINE_ID } from "@infernetprotocol/rpc-adapter/constants";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
 import { c0mputeJobEvents } from "@/lib/chat/c0mpute-inference";
-import { moveC0mputeJobToNim, moveC0mputeJobToProvider, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
+import { routeC0mputeMiss, settleC0mputeJob } from "@/lib/data/chat-c0mpute";
 import {
   selectRpcSlices,
   mergeRpcRouting,
@@ -135,9 +135,12 @@ export async function GET(_request, { params }) {
       // stuck in a busy node's queue while another node is free, and move it
       // (lib/data/chat-rebalance.js). The job keeps its id, so this stream
       // just keeps listening.
+      // Status events ("waiting for a free slot", a requeue) are not the
+      // answer starting, so they do not stop the rebalancing.
+      let answerStarted = false;
       let rebalancing = false;
       const rebalanceTimer = setInterval(async () => {
-        if (closed || lastId > 0) { clearInterval(rebalanceTimer); return; }
+        if (closed || answerStarted) { clearInterval(rebalanceTimer); return; }
         if (rebalancing) return;
         rebalancing = true;
         try { await rebalanceChatJob(jobId, { supabase }); } finally { rebalancing = false; }
@@ -152,7 +155,10 @@ export async function GET(_request, { params }) {
           const ev = payload?.new;
           if (!ev || ev.id <= lastId) return;
           lastId = ev.id;
-          clearInterval(rebalanceTimer);
+          if (ev.event_type !== "status") {
+            answerStarted = true;
+            clearInterval(rebalanceTimer);
+          }
           safeEnqueue(sseFrame(ev.event_type, decryptJSON(ev.data), ev.id));
           if (ev.event_type === "done" || ev.event_type === "error") {
             try { supabase.removeChannel(channel); } catch { /* ignore */ }
@@ -177,6 +183,7 @@ export async function GET(_request, { params }) {
         for (const ev of catchup ?? []) {
           if (ev.id <= lastId) continue;
           lastId = ev.id;
+          if (ev.event_type !== "status") answerStarted = true;
           safeEnqueue(sseFrame(ev.event_type, decryptJSON(ev.data), ev.id));
           if (ev.event_type === "done" || ev.event_type === "error") {
             try { supabase.removeChannel(channel); } catch { /* ignore */ }
@@ -512,10 +519,12 @@ function providerEndpoint(provider) {
 /**
  * A chat sent to c0mpute workers (infernet.inference) through the jobs
  * bridge; c0mpute is tried first for every chat that can run there. One-shot
- * answer: the whole text arrives as one token event. When no worker answers,
- * the job moves to an Infernet daemon (returned, so the caller serves it in
- * the provider path), else to the hosted fallback when that was allowed at
- * creation (input_spec.nim_ok). Returns the moved job or null.
+ * answer: the whole text arrives as one token event. While workers are busy it
+ * waits for a free slot (status events say so). When c0mpute gives up, the
+ * job moves to an Infernet daemon only if no c0mpute worker serves the model
+ * (returned, so the caller serves it in the provider path), else to the
+ * hosted fallback when that was allowed at creation (input_spec.nim_ok).
+ * Returns the moved job or null.
  */
 async function runC0mputeFallback({ supabase, job, safeEnqueue, sseFrame }) {
   for await (const ev of c0mputeJobEvents(job, {
@@ -528,11 +537,13 @@ async function runC0mputeFallback({ supabase, job, safeEnqueue, sseFrame }) {
       safeEnqueue(sseFrame(ev.type, ev.data, ev.id));
       continue;
     }
-    const moved = await moveC0mputeJobToProvider(supabase, job);
-    if (moved) return moved;
-    const nimJob = await moveC0mputeJobToNim(supabase, job);
-    if (nimJob) {
-      await runNimFallback({ supabase, job: nimJob, safeEnqueue, sseFrame });
+    // Busy is waited out inside c0mputeJobEvents. A provider daemon only
+    // when no c0mpute worker serves the model (INFERNET_C0MPUTE_PROVIDER_FALLBACK),
+    // then the billed hosted fallback if the job allowed it.
+    const next = await routeC0mputeMiss(supabase, job, ev.data ?? {});
+    if (next?.kind === "provider") return next.job;
+    if (next?.kind === "nim") {
+      await runNimFallback({ supabase, job: next.job, safeEnqueue, sseFrame });
       return;
     }
     const data = { message: ev.data?.message ?? "c0mpute worker failed" };

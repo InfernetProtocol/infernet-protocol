@@ -38,7 +38,7 @@ vi.mock("@/lib/encrypt", () => ({ encryptJSON: (v) => v, decryptJSON: (v) => v }
 
 const c0 = await import("@/lib/chat/c0mpute-inference");
 const { createChatJob, c0mputeModelFor, listChatModels, c0mputeEligible, C0MPUTE_ROUTE } = await import("@/lib/data/chat");
-const { moveC0mputeJobToProvider, settleC0mputeJob, c0mputeNodeId, isPeerId } = await import("@/lib/data/chat-c0mpute");
+const { moveC0mputeJobToProvider, routeC0mputeMiss, settleC0mputeJob, c0mputeNodeId, isPeerId } = await import("@/lib/data/chat-c0mpute");
 const { llmProvidersCard } = await import("@/lib/data/network-nodes");
 
 const STATUS = {
@@ -220,11 +220,115 @@ describe("c0mputeJobEvents", () => {
         const d = deps();
         const run = vi.fn(async () => ({ ok: false, code: "no_bids", error: "no c0mpute worker took the request" }));
         const out = [];
-        for await (const ev of c0.c0mputeJobEvents(job, { ...d, run })) out.push(ev);
+        for await (const ev of c0.c0mputeJobEvents(job, { ...d, run, serves: async () => false })) out.push(ev);
         expect(out.map((e) => e.type)).toEqual(["meta", "c0mpute_failed"]);
+        expect(out[1].data).toMatchObject({ code: "no_bids", capable: false });
         expect(d.events).toEqual(["meta"]);
         expect(d.calls.finalize).toEqual([]);
         expect(d.calls.charge).toEqual([]);
+    });
+
+    // Anthony, 2026-11-18: "if it turns away a job send it back to the front
+    // of the queue". A busy GPU worker means wait for it, not a CPU node.
+    it("waits on the bridge while a capable worker is busy, with status events", async () => {
+        const d = deps();
+        let t = 0;
+        const answers = [
+            { ok: false, code: "no_bids", error: "busy" },
+            { ok: false, code: "queued", error: "queued", queuePosition: 1 },
+            { ok: true, text: "hi!", model: "qwen2.5:7b", worker: "12D3W", jobId: "cj", price: 0, durationMs: 5 }
+        ];
+        const run = vi.fn(async (args) => { t += 30_000; expect(args.timeoutMs).toBeGreaterThan(0); return answers.shift(); });
+        const out = [];
+        const fresh = { ...job, created_at: new Date(0).toISOString() };
+        for await (const ev of c0.c0mputeJobEvents(fresh, { ...d, run, serves: async () => true, now: () => t, sleep: async () => {}, waitMs: 540_000 })) out.push(ev);
+        expect(out.map((e) => e.type)).toEqual(["meta", "status", "status", "token", "done"]);
+        expect(out[1].data).toMatchObject({ state: "waiting", route: "c0mpute", attempt: 1, queue_position: 0 });
+        expect(out[2].data).toMatchObject({ queue_position: 1, attempt: 2 });
+        expect(out[2].data.message).toMatch(/position 2/);
+        expect(d.events).toEqual(["meta", "status", "status", "token", "done"]);
+        expect(run).toHaveBeenCalledTimes(3);
+    });
+
+    it("gives up at the wait budget, reporting a capable but busy network", async () => {
+        const d = deps();
+        let t = 0;
+        const run = vi.fn(async () => { t += 200_000; return { ok: false, code: "timeout", error: "slow" }; });
+        const out = [];
+        const fresh = { ...job, created_at: new Date(0).toISOString() };
+        for await (const ev of c0.c0mputeJobEvents(fresh, { ...d, run, serves: async () => true, now: () => t, sleep: async () => {}, waitMs: 540_000 })) out.push(ev);
+        expect(out.at(-1)).toMatchObject({ type: "c0mpute_failed", data: { capable: true, code: "timeout" } });
+        expect(run).toHaveBeenCalledTimes(3);
+    });
+
+    it("retries reach the bridge oldest first (front of the queue)", async () => {
+        const q = c0.createWaitQueue();
+        expect(q.join("m", "new", 2000)).toBe(0);
+        expect(q.join("m", "old", 1000)).toBe(0);
+        expect(q.position("m", "new")).toBe(1);
+        q.leave("m", "old");
+        expect(q.position("m", "new")).toBe(0);
+        q.leave("m", "new");
+        expect(q.position("m", "new")).toBe(-1);
+    });
+
+    it("a younger waiting chat holds its retry until the older one has asked again", async () => {
+        const q = c0.createWaitQueue();
+        q.join("qwen2.5:7b", "older", -1);
+        const d = deps();
+        let t = 0;
+        const answers = [
+            { ok: false, code: "no_bids", error: "busy" },
+            { ok: true, text: "hi!", model: "qwen2.5:7b", worker: "W", jobId: "cj", price: 0, durationMs: 1 }
+        ];
+        const run = vi.fn(async () => answers.shift());
+        let slept = 0;
+        const sleep = async () => { slept += 1; t += 500; if (slept === 3) q.leave("qwen2.5:7b", "older"); };
+        const out = [];
+        const fresh = { ...job, created_at: new Date(0).toISOString() };
+        for await (const ev of c0.c0mputeJobEvents(fresh, { ...d, run, queue: q, serves: async () => true, now: () => t, sleep, waitMs: 540_000 })) out.push(ev);
+        expect(out[1].data.queue_position).toBe(1);
+        expect(slept).toBeGreaterThanOrEqual(3);
+        expect(out.at(-1).type).toBe("done");
+        expect(q.position("qwen2.5:7b", "job-1")).toBe(-1);
+    });
+
+    it("a worker whose runtime timed out counts as busy (2026-11-18 log line)", () => {
+        expect(c0.isRetryable({ ok: false, code: "worker_failed", error: "the c0mpute worker could not answer: reach the local runtime: error sending request for url (http://127.0.0.1:11434/v1/chat/completions): operation timed out" })).toBe(true);
+        expect(c0.isRetryable({ ok: false, code: "unreachable", error: "c0mpute jobs bridge unreachable: socket hang up" })).toBe(true);
+        expect(c0.isRetryable({ ok: false, code: "worker_failed", error: "the c0mpute worker could not answer: malformed result" })).toBe(false);
+        expect(c0.isRetryable({ ok: false, code: "bad_request", error: "x" })).toBe(false);
+    });
+
+    it("does not retry an answer that is not 'busy'", async () => {
+        const d = deps();
+        const run = vi.fn(async () => ({ ok: false, code: "unauthorized", error: "no" }));
+        const out = [];
+        for await (const ev of c0.c0mputeJobEvents(job, { ...d, run, serves: async () => true, sleep: async () => {} })) out.push(ev);
+        expect(out.map((e) => e.type)).toEqual(["meta", "c0mpute_failed"]);
+        expect(run).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("provider fallback policy", () => {
+    it("defaults to moving only when no c0mpute worker serves the model", () => {
+        expect(c0.providerFallbackPolicy({})).toBe("no-capable");
+        expect(c0.shouldMoveToProvider("no-capable", { capable: false })).toBe(true);
+        expect(c0.shouldMoveToProvider("no-capable", { capable: true })).toBe(false);
+        expect(c0.shouldMoveToProvider("no-capable", { capable: null })).toBe(false);
+    });
+
+    it("INFERNET_C0MPUTE_PROVIDER_FALLBACK=always|never", () => {
+        expect(c0.providerFallbackPolicy({ INFERNET_C0MPUTE_PROVIDER_FALLBACK: "always" })).toBe("always");
+        expect(c0.shouldMoveToProvider("always", { capable: true })).toBe(true);
+        expect(c0.providerFallbackPolicy({ INFERNET_C0MPUTE_PROVIDER_FALLBACK: "NEVER" })).toBe("never");
+        expect(c0.shouldMoveToProvider("never", { capable: false })).toBe(false);
+        expect(c0.providerFallbackPolicy({ INFERNET_C0MPUTE_PROVIDER_FALLBACK: "junk" })).toBe("no-capable");
+    });
+
+    it("wait budget from INFERNET_C0MPUTE_WAIT_MS", () => {
+        expect(c0.c0mputeWaitMs({})).toBe(c0.DEFAULT_WAIT_MS);
+        expect(c0.c0mputeWaitMs({ INFERNET_C0MPUTE_WAIT_MS: "60000" })).toBe(60000);
     });
 });
 
@@ -386,6 +490,32 @@ describe("a c0mpute job no worker answered moves to a daemon", () => {
         state.providers = [];
         const job = { id: "job-9", model_name: "qwen2.5:7b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen2.5:7b" } };
         expect(await moveC0mputeJobToProvider(fakeClient(), job)).toBeNull();
+    });
+});
+
+describe("routeC0mputeMiss: busy is not a reason to move to a CPU daemon", () => {
+    const job = { id: "job-9", model_name: "qwen2.5:7b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen2.5:7b" } };
+    beforeEach(() => { state.providers = [{ id: "p1", name: "bonita", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }]; });
+
+    it("does not move a job whose model a (busy) c0mpute worker serves", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        expect(await routeC0mputeMiss(fakeClient(), job, { capable: true, code: "timeout" }, { policy: "no-capable" })).toBeNull();
+        expect(await routeC0mputeMiss(fakeClient(), job, { capable: null, code: "no_bids" }, { policy: "no-capable" })).toBeNull();
+        warn.mockRestore();
+    });
+
+    it("moves when no c0mpute worker serves the model at all", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const next = await routeC0mputeMiss(fakeClient(), job, { capable: false, code: "no_bids" }, { policy: "no-capable" });
+        expect(next).toMatchObject({ kind: "provider", job: { provider_id: "p1" } });
+        warn.mockRestore();
+    });
+
+    it("policy always restores the old behavior; never never moves", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        expect(await routeC0mputeMiss(fakeClient(), job, { capable: true }, { policy: "always" })).toMatchObject({ kind: "provider" });
+        expect(await routeC0mputeMiss(fakeClient(), job, { capable: false }, { policy: "never" })).toBeNull();
+        warn.mockRestore();
     });
 });
 

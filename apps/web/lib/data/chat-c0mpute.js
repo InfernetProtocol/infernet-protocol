@@ -1,6 +1,7 @@
 import "server-only";
 import { isNimConfigured, nimVirtualProvider } from "@infernetprotocol/nim-adapter";
 import { encryptJSON } from "@/lib/encrypt";
+import { providerFallbackPolicy, shouldMoveToProvider } from "@/lib/chat/c0mpute-inference";
 
 /**
  * A c0mpute chat job no worker answered: hand it to the hosted fallback when
@@ -150,4 +151,25 @@ export async function moveC0mputeJobToProvider(supabase, job) {
     console.warn(`[c0mpute-chat] move to provider failed for job ${job?.id}: ${err?.message ?? err}`);
     return null;
   }
+}
+
+/**
+ * Where a chat goes when c0mpute gave up on it (c0mpute_failed), or null when
+ * it stays failed. A provider daemon only under providerFallbackPolicy (by
+ * default only when no c0mpute worker serves the model at all: a busy GPU
+ * worker was already waited for, and moving to a CPU daemon took ~10 min),
+ * then the billed hosted fallback when the job allowed it.
+ *
+ * @returns {Promise<{ kind: "provider" | "nim", job: object } | null>}
+ */
+export async function routeC0mputeMiss(supabase, job, { capable = null, code = null } = {}, { policy = providerFallbackPolicy() } = {}) {
+  if (shouldMoveToProvider(policy, { capable })) {
+    const moved = await moveC0mputeJobToProvider(supabase, job);
+    if (moved) return { kind: "provider", job: moved };
+  } else {
+    console.warn(`[c0mpute-chat] job ${job?.id}: c0mpute busy (${code ?? "?"}), a worker serves the model; not moving it to a provider (policy ${policy})`);
+  }
+  const nimJob = await moveC0mputeJobToNim(supabase, job);
+  if (nimJob) return { kind: "nim", job: nimJob };
+  return null;
 }

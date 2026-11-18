@@ -3,6 +3,7 @@ import "server-only";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { tableForRole } from "@/lib/auth/verify-signed-request";
 import { encryptJSON, decryptJSON } from "@/lib/encrypt";
+import { requeueDecision } from "@/lib/routing/requeue";
 import { isPublicIp, refreshGeoIfMoved } from "@/lib/geo";
 
 const MAX_SPECS_GPUS = 16;
@@ -590,6 +591,101 @@ export async function getSelfRow({ role, pubkey }) {
 }
 
 const EVENT_BATCH_MAX = 200;
+/**
+ * The node turned this chat job away (busy): put it back at the front of the
+ * queue instead of failing it (lib/routing/requeue.js). Same row, so it keeps
+ * its created_at and its client's stream; moved only to a free node serving
+ * the same model that is at least as fast, else left on this node, which
+ * polls it first. Answers { requeued: false, reason } when it must fail as
+ * before (answer already streaming, too many turn-aways, ...).
+ */
+export async function requeueJobForNode({ pubkey, jobId, body = {} }) {
+    if (!jobId) throw withStatus("jobId is required", 400);
+    const supabase = getSupabaseServerClient();
+    const { data: provider, error: provErr } = await supabase
+        .from("providers")
+        .select("id, specs, trust_tier, disabled_at")
+        .eq("public_key", pubkey)
+        .maybeSingle();
+    if (provErr) throw withStatus(provErr.message, 500);
+    if (!provider) throw withStatus("no provider row for this pubkey", 404);
+
+    const { data: row, error: jobErr } = await supabase
+        .from("jobs")
+        .select("id, type, status, provider_id, model_name, title, input_spec, reservation_id, client_pubkey, batch_item_id, created_at")
+        .eq("id", jobId)
+        .maybeSingle();
+    if (jobErr) throw withStatus(jobErr.message, 500);
+    if (!row) throw withStatus("job not found", 404);
+    if (row.provider_id !== provider.id) throw withStatus("job not assigned to this provider", 403);
+    const job = { ...row, input_spec: decryptJSON(row.input_spec) ?? {} };
+
+    const { count: tokens, error: evErr } = await supabase
+        .from("job_events")
+        .select("id", { count: "exact", head: true })
+        .eq("job_id", jobId)
+        .eq("event_type", "token");
+    if (evErr) throw withStatus(evErr.message, 500);
+
+    let target = null;
+    const pinned = Boolean(job.reservation_id || job.client_pubkey || job.batch_item_id);
+    if (!pinned && !provider.disabled_at) {
+        try {
+            const { pickChatProvider } = await import("@/lib/data/chat");
+            const minTrustTier = provider.trust_tier && provider.trust_tier !== "public" ? provider.trust_tier : undefined;
+            target = await pickChatProvider({
+                modelName: job.model_name ?? undefined,
+                minTrustTier,
+                excludeProviderIds: [provider.id],
+                requireFreeSlot: true
+            });
+        } catch {
+            target = null;
+        }
+    }
+    const decision = requeueDecision({ job, tokens: tokens ?? 0, provider, target });
+    if (!decision.requeue) return { id: jobId, requeued: false, reason: decision.reason };
+
+    let modelName = job.model_name;
+    if (decision.moved && job.model_name) {
+        const { matchServedModel } = await import("@/lib/model-names");
+        modelName = matchServedModel(target?.specs?.served_models, job.model_name) ?? job.model_name;
+    }
+    const requeues = (Number(job.input_spec?.requeues) || 0) + 1;
+    const now = new Date().toISOString();
+    const { data: updated, error: upErr } = await supabase
+        .from("jobs")
+        .update({
+            provider_id: decision.to,
+            status: "assigned",
+            assigned_at: now,
+            updated_at: now,
+            model_name: modelName ?? null,
+            title: modelName ? `chat:${modelName}` : job.title,
+            input_spec: encryptJSON({ ...job.input_spec, requeues })
+        })
+        .eq("id", jobId)
+        .eq("provider_id", provider.id)
+        .in("status", ["assigned", "running"])
+        .select("id");
+    if (upErr) throw withStatus(upErr.message, 500);
+    if (!updated || updated.length === 0) return { id: jobId, requeued: false, reason: "changed_meanwhile" };
+
+    const reason = typeof body?.reason === "string" ? body.reason.slice(0, 300) : null;
+    const status = {
+        state: "requeued",
+        message: decision.moved
+            ? "the node was busy; moved to a free node, keeping its place"
+            : "the node was busy; back at the front of its queue",
+        moved: Boolean(decision.moved),
+        requeues,
+        reason
+    };
+    await supabase.from("job_events").insert({ job_id: jobId, event_type: "status", data: encryptJSON(status) });
+    console.warn(`[requeue] job ${jobId}: turned away by ${provider.id} (${reason ?? "busy"}); ${decision.reason} -> ${decision.to}`);
+    return { id: jobId, requeued: true, provider_id: decision.to, moved: Boolean(decision.moved), requeues };
+}
+
 const EVENT_TYPES = new Set(["meta", "token", "done", "error"]);
 
 export async function emitJobEvents({ pubkey, jobId, events }) {
