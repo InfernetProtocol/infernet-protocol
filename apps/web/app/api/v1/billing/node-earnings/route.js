@@ -1,8 +1,9 @@
 import { ok, fail } from "@/lib/reservations/http";
 import { requireCaller, failFrom } from "@/lib/billing/http";
-import { getEarningsBuckets } from "@/lib/data/earnings";
+import { getEarningsBuckets, getC0mputeProviders } from "@/lib/data/earnings";
 import { getUserProviders } from "@/lib/data/dashboard";
-import { resolveEarningsSince } from "@/lib/earnings/core";
+import { resolveEarningsSince, parseC0mputeNodeIds, c0mputeNodeOf, ownPayerIds } from "@/lib/earnings/core";
+import { isAdminUser } from "@/lib/auth/admin";
 import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor, billedSubjectFrom } from "@/lib/trusted-clients";
 import { userIdForCoinpaySubject } from "@/lib/data/interactive-billing";
@@ -30,12 +31,22 @@ export const dynamic = "force-dynamic";
  * and spent_on_compute rows (spend, not earnings) are excluded; pending and
  * pending_approval rows are included, as that money is still on its way.
  *
+ * own_jobs/own_usd: the part paid by the operator's own account (or, for an
+ * admin, by any admin account): jobs they paid themselves, not income.
+ *
+ * A trusted client may add `c0mpute_nodes=<id>,<id>` (c0mpute board ids, the
+ * last 8 characters of a peer id): the providers Infernet opened for those
+ * c0mpute nodes (node_id `c0mpute:<peer>`) are included, each with
+ * `c0mpute_node`. The client vouches that those nodes are the person's.
+ *
  * Auth mirrors /api/v1/billing/balance: a trusted client names the person
  * with X-Infernet-Billed-Subject (their CoinPay sub), or a signed-in caller
  * reads their own.
  */
 export async function GET(request) {
-    const since = new URL(request.url).searchParams.get("since");
+    const url = new URL(request.url);
+    const since = url.searchParams.get("since");
+    const c0mputeNodes = parseC0mputeNodeIds(url.searchParams.get("c0mpute_nodes"));
     const trusted = trustedClientFor(bearerFrom(request.headers.get("authorization")));
     const subject = billedSubjectFrom(request, trusted);
     if (trusted && subject) {
@@ -50,7 +61,7 @@ export async function GET(request) {
                     buckets: []
                 });
             }
-            return ok(await earningsFor(userId, since));
+            return ok(await earningsFor(userId, since, c0mputeNodes));
         } catch (e) {
             return failFrom(e);
         }
@@ -64,9 +75,15 @@ export async function GET(request) {
     try { return ok(await earningsFor(user.id, since)); } catch (e) { return failFrom(e); }
 }
 
-async function earningsFor(userId, since) {
-    const providers = await getUserProviders(userId, { includeArchived: true });
-    const { since: from, buckets } = await getEarningsBuckets(providers.map((p) => p.id), { since });
+async function earningsFor(userId, since, c0mputeNodes = []) {
+    const own = await getUserProviders(userId, { includeArchived: true });
+    const bridged = c0mputeNodes.length ? await getC0mputeProviders(c0mputeNodes) : [];
+    const providers = [...own, ...bridged.filter((b) => !own.some((p) => p.id === b.id))];
+    const ownPayers = ownPayerIds(userId, {
+        isAdmin: isAdminUser({ id: userId }),
+        adminIds: String(process.env.INFERNET_ADMIN_USER_IDS ?? "").split(",").map((s) => s.trim())
+    });
+    const { since: from, buckets } = await getEarningsBuckets(providers.map((p) => p.id), { since, ownPayers });
     return {
         linked: true,
         since: from,
@@ -78,7 +95,8 @@ async function earningsFor(userId, since) {
             node_id: p.node_id ?? null,
             public_key: p.public_key ?? null,
             status: p.status ?? null,
-            archived_at: p.archived_at ?? null
+            archived_at: p.archived_at ?? null,
+            c0mpute_node: c0mputeNodeOf(p.node_id)
         })),
         buckets
     };

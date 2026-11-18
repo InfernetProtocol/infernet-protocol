@@ -555,14 +555,18 @@ export function hourStartIso(at) {
 
 /**
  * Fold provider_earnings rows into hourly buckets per provider:
- *   { provider_id, at, jobs, amount_usd, fee_usd, gross_usd }
+ *   { provider_id, at, jobs, amount_usd, fee_usd, gross_usd, own_jobs, own_usd }
  * `jobs` counts rows with a job_id (a reservation row has none); amount_usd
  * is the operator's net credit, fee_usd the house fee, gross_usd their sum.
- * Rows that do not count (see countsTowardEarningsSeries) or carry no usable
- * earned_at are skipped. Sorted by hour, then provider_id. Empty hours are
- * not emitted: the chart fills its own gaps.
+ * own_* is the part of that paid by one of `ownPayers` (the operator's own
+ * account, or the platform's when the operator is the platform): money that
+ * went round in a circle, not income. Rows that do not count (see
+ * countsTowardEarningsSeries) or carry no usable earned_at are skipped.
+ * Sorted by hour, then provider_id. Empty hours are not emitted: the chart
+ * fills its own gaps.
  */
-export function bucketEarningsHourly(rows = []) {
+export function bucketEarningsHourly(rows = [], { ownPayers = [] } = {}) {
+    const own = new Set((ownPayers ?? []).map((x) => String(x).toLowerCase()));
     const buckets = new Map();
     for (const row of rows ?? []) {
         if (!countsTowardEarningsSeries(row)) continue;
@@ -571,7 +575,7 @@ export function bucketEarningsHourly(rows = []) {
         const key = `${at}|${row.provider_id}`;
         let b = buckets.get(key);
         if (!b) {
-            b = { provider_id: row.provider_id, at, jobs: 0, amount_usd: 0, fee_usd: 0, gross_usd: 0 };
+            b = { provider_id: row.provider_id, at, jobs: 0, amount_usd: 0, fee_usd: 0, gross_usd: 0, own_jobs: 0, own_usd: 0 };
             buckets.set(key, b);
         }
         const amount = Number(row.amount_usd) || 0;
@@ -580,7 +584,43 @@ export function bucketEarningsHourly(rows = []) {
         b.amount_usd = roundUsd(b.amount_usd + amount);
         b.fee_usd = roundUsd(b.fee_usd + fee);
         b.gross_usd = roundUsd(b.gross_usd + amount + fee);
+        const payer = row.metadata?.billed_user_id;
+        if (payer && own.has(String(payer).toLowerCase())) {
+            if (row.job_id) b.own_jobs += 1;
+            b.own_usd = roundUsd(b.own_usd + amount);
+        }
     }
     return [...buckets.values()].sort((a, b) =>
         a.at < b.at ? -1 : a.at > b.at ? 1 : String(a.provider_id).localeCompare(String(b.provider_id)));
+}
+
+/**
+ * c0mpute board ids (the last 8 characters of a node's peer id) from a comma
+ * list; anything else is dropped. Infernet names the provider it opens for a
+ * c0mpute node `c0mpute:<peer id>`, so the id finds that provider.
+ */
+export function parseC0mputeNodeIds(raw, max = 200) {
+    const out = [];
+    for (const s of String(raw ?? "").split(",")) {
+        const id = s.trim();
+        if (/^[1-9A-HJ-NP-Za-km-z]{8}$/.test(id) && !out.includes(id)) out.push(id);
+        if (out.length >= max) break;
+    }
+    return out;
+}
+
+/** The board id of a c0mpute-bridged provider (`c0mpute:<peer>`), else null. */
+export function c0mputeNodeOf(nodeId) {
+    const m = /^c0mpute:([1-9A-HJ-NP-Za-km-z]{8,128})$/.exec(String(nodeId ?? ""));
+    return m ? m[1].slice(-8) : null;
+}
+
+/**
+ * Whose payments count as the operator's own money: their account, plus every
+ * admin account when they are an admin (platform nodes run the platform's jobs).
+ */
+export function ownPayerIds(userId, { isAdmin = false, adminIds = [] } = {}) {
+    const ids = new Set([String(userId ?? "").toLowerCase()].filter(Boolean));
+    if (isAdmin) for (const a of adminIds) if (a) ids.add(String(a).toLowerCase());
+    return [...ids];
 }

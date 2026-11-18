@@ -316,21 +316,37 @@ export async function getEarningsForProviders(providerIds, { recent = 20 } = {})
  * earnings over time reads. The folding is bucketEarningsHourly() in
  * lib/earnings/core.js, which also says which rows count.
  */
-export async function getEarningsBuckets(providerIds, { since } = {}) {
+export async function getEarningsBuckets(providerIds, { since, ownPayers = [] } = {}) {
     const ids = (providerIds ?? []).filter(Boolean);
     const from = resolveEarningsSince(since);
     if (ids.length === 0) return { since: from, buckets: [] };
     const supabase = db();
     const rows = await selectAll(() => supabase
         .from("provider_earnings")
-        .select("id, job_id, provider_id, kind, status, amount_usd, fee_usd, earned_at")
+        .select("id, job_id, provider_id, kind, status, amount_usd, fee_usd, earned_at, metadata")
         .in("provider_id", ids)
         .gte("earned_at", from)
         .not("status", "in", `(${EARNINGS_SERIES_EXCLUDED_STATUSES.join(",")})`)
         .not("kind", "in", `(${EARNINGS_SERIES_EXCLUDED_KINDS.join(",")})`)
         .order("earned_at", { ascending: true })
         .order("id", { ascending: true }));
-    return { since: from, buckets: bucketEarningsHourly(rows) };
+    return { since: from, buckets: bucketEarningsHourly(rows, { ownPayers }) };
+}
+
+/**
+ * The providers Infernet opened for c0mpute nodes (node_id `c0mpute:<peer>`),
+ * found by the board id c0mpute shows (the peer id's last 8 characters).
+ * Public identifiers only.
+ */
+export async function getC0mputeProviders(boardIds) {
+    const ids = (boardIds ?? []).filter((x) => /^[1-9A-HJ-NP-Za-km-z]{8}$/.test(x));
+    if (ids.length === 0) return [];
+    const { data, error } = await db()
+        .from("providers")
+        .select("id, name, node_id, public_key, status, archived_at")
+        .or(ids.map((x) => `node_id.like.c0mpute:%${x}`).join(","));
+    if (error) throw withStatus(error.message, 500);
+    return (data ?? []).filter((p) => ids.some((x) => String(p.node_id ?? "").endsWith(x)));
 }
 
 /** Per-job earned amounts for a list of jobs (dashboard + node page tables). */
