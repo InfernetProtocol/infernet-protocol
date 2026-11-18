@@ -15,7 +15,13 @@
  *   credit); a RENTED order (SaladCloud, Vast.ai, Thunder Compute) keeps its
  *   whole total, because no operator is paid out of it and the cloud's own
  *   bill is not in this ledger — so this figure is gross of what we pay the
- *   cloud, not profit; a paid job keeps the fee_usd on its 'paid' credits.
+ *   cloud, not profit; a paid job keeps its house fee, read from the
+ *   'platform_fee' ledger rows (2026-11-18) and only from fee_usd for a job
+ *   with none, so a fee is never counted twice.
+ * Interactive charges (chat paid from a compute balance or node earnings):
+ *   their house fee is the platform_fee rows of jobs that are neither
+ *   CoinPay-paid jobs nor batch items. Fees on jobs the platform account
+ *   paid for itself are internal usage, reported but not counted.
  * Refunds: due (owed, not yet paid back) and refunded.
  * Provider payouts: payout requests marked sent in the window.
  *
@@ -47,9 +53,11 @@ export function isInternalOrder(order, internal = {}) {
  * @param {Array} [p.subsidy]     subsidy credits earned in the window { amount_usd, status } (reported as excluded)
  * @param {object} p.config       resolveEarningsConfig() output (house_fee_pct fallback)
  * @param {object} [p.internal]   { emails: [], payers: [] }
- * @param {Array} [p.batchCharges] settled batch items { cost_usd, provider_usd|null, email }
+ * @param {Array} [p.batchCharges] settled batch items { job_id, cost_usd, provider_usd|null, email }
+ * @param {Array} [p.platformFees] platform_fee credits earned in the window
+ *                                { job_id, source_kind, amount_usd, status, internal }
  */
-export function summariseRevenue({ orders = [], jobs = [], earnings = [], payouts = [], subsidy = [], config = {}, internal = {}, batchCharges = [] } = {}) {
+export function summariseRevenue({ orders = [], jobs = [], earnings = [], payouts = [], subsidy = [], config = {}, internal = {}, batchCharges = [], platformFees = [] } = {}) {
     const sum = (rows, f) => roundUsd(rows.reduce((a, r) => a + (Number(f(r)) || 0), 0));
     const feePct = Number(config.house_fee_pct) || 0;
     const live = earnings.filter((e) => e.status !== "void");
@@ -83,7 +91,20 @@ export function summariseRevenue({ orders = [], jobs = [], earnings = [], payout
     const jobGmv = sum(paidJobs, (j) => j.payment_offer);
     const nodeFee = roundUsd(sum(node, (o) => o.total_usd) - sum(node, nodeOperatorShare));
     const rentedFee = sum(rented, (o) => o.total_usd);
-    const jobFee = sum(paidJobs, (j) => (jobFees.has(j.id) ? jobFees.get(j.id) : Number(j.payment_offer) * (feePct / 100)));
+    // House fee per job from the platform_fee ledger, else fee_usd, else the %.
+    const fees = platformFees.filter((f) => f.status === "confirmed");
+    const ledgerFeeByJob = new Map();
+    for (const f of fees.filter((x) => x.source_kind === "paid" && x.job_id)) {
+        ledgerFeeByJob.set(f.job_id, (ledgerFeeByJob.get(f.job_id) ?? 0) + (Number(f.amount_usd) || 0));
+    }
+    const jobFee = sum(paidJobs, (j) => (ledgerFeeByJob.has(j.id) ? ledgerFeeByJob.get(j.id)
+        : jobFees.has(j.id) ? jobFees.get(j.id) : Number(j.payment_offer) * (feePct / 100)));
+    const coinpayJobIds = new Set(paidJobs.map((j) => j.id));
+    const batchJobIds = new Set(batchCharges.map((c) => c.job_id).filter(Boolean));
+    const interactive = fees.filter((f) => f.source_kind === "paid" && f.job_id
+        && !coinpayJobIds.has(f.job_id) && !batchJobIds.has(f.job_id));
+    const interactiveFee = sum(interactive.filter((f) => !f.internal), (f) => f.amount_usd);
+    const internalInteractiveFee = sum(interactive.filter((f) => f.internal), (f) => f.amount_usd);
 
     const internalEmails = (internal.emails ?? []).map(lower);
     const isInternalBatch = (c) => Boolean(lower(c?.email) && internalEmails.includes(lower(c.email)));
@@ -106,7 +127,7 @@ export function summariseRevenue({ orders = [], jobs = [], earnings = [], payout
             operator_share_usd: sum(node, nodeOperatorShare)
         },
         jobs: { paid_count: paidJobs.length, gmv_usd: jobGmv },
-        platform_fee_usd: roundUsd(nodeFee + rentedFee + jobFee + batchFee),
+        platform_fee_usd: roundUsd(nodeFee + rentedFee + jobFee + batchFee + interactiveFee),
         batches: {
             charged_items: extBatch.length,
             gmv_usd: batchGmv,
@@ -115,7 +136,15 @@ export function summariseRevenue({ orders = [], jobs = [], earnings = [], payout
             internal_items: intBatch.length,
             internal_usd: sum(intBatch, (c) => c.cost_usd)
         },
-        platform_fee: { node_orders_usd: nodeFee, rented_orders_usd: rentedFee, paid_jobs_usd: jobFee },
+        platform_fee: {
+            node_orders_usd: nodeFee,
+            rented_orders_usd: rentedFee,
+            paid_jobs_usd: jobFee,
+            interactive_usd: interactiveFee,
+            // Every house fee credited in the window, internal included: what
+            // the platform account's balance gained.
+            ledger_credited_usd: sum(fees, (f) => f.amount_usd)
+        },
         refunds: {
             due_count: due.length,
             due_usd: sum(due, (o) => o.total_usd),
@@ -129,7 +158,8 @@ export function summariseRevenue({ orders = [], jobs = [], earnings = [], payout
             subsidy_credits: subsidy.length,
             nim_fallback_jobs: nimJobs.length,
             internal_orders: internalOrders.length,
-            internal_orders_usd: sum(internalOrders, (o) => o.total_usd)
+            internal_orders_usd: sum(internalOrders, (o) => o.total_usd),
+            internal_interactive_fee_usd: internalInteractiveFee
         }
     };
 }
