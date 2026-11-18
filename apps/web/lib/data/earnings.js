@@ -9,7 +9,11 @@ import {
     summariseBalance,
     checkPayoutRequest,
     isAutoApprovable,
-    OPEN_PAYOUT_STATUSES
+    OPEN_PAYOUT_STATUSES,
+    bucketEarningsHourly,
+    resolveEarningsSince,
+    EARNINGS_SERIES_EXCLUDED_STATUSES,
+    EARNINGS_SERIES_EXCLUDED_KINDS
 } from "@/lib/earnings/core";
 
 /**
@@ -304,6 +308,29 @@ export async function getEarningsForProviders(providerIds, { recent = 20 } = {})
         payouts: payouts.slice(0, 20),
         config: publicConfig(config)
     };
+}
+
+/**
+ * Hourly earnings buckets for a set of providers since `since` (ISO 8601,
+ * clamped to the last 31 days, default 24h): what a chart of an operator's
+ * earnings over time reads. The folding is bucketEarningsHourly() in
+ * lib/earnings/core.js, which also says which rows count.
+ */
+export async function getEarningsBuckets(providerIds, { since } = {}) {
+    const ids = (providerIds ?? []).filter(Boolean);
+    const from = resolveEarningsSince(since);
+    if (ids.length === 0) return { since: from, buckets: [] };
+    const supabase = db();
+    const rows = await selectAll(() => supabase
+        .from("provider_earnings")
+        .select("id, job_id, provider_id, kind, status, amount_usd, fee_usd, earned_at")
+        .in("provider_id", ids)
+        .gte("earned_at", from)
+        .not("status", "in", `(${EARNINGS_SERIES_EXCLUDED_STATUSES.join(",")})`)
+        .not("kind", "in", `(${EARNINGS_SERIES_EXCLUDED_KINDS.join(",")})`)
+        .order("earned_at", { ascending: true })
+        .order("id", { ascending: true }));
+    return { since: from, buckets: bucketEarningsHourly(rows) };
 }
 
 /** Per-job earned amounts for a list of jobs (dashboard + node page tables). */
