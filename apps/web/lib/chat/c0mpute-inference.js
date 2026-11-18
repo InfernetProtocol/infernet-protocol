@@ -117,12 +117,26 @@ export function bridgeFetch(url, init = {}) {
       },
       (res) => {
         const chunks = [];
-        res.on("data", (c) => chunks.push(c));
+        // NDJSON progress (c0mpute >= 0.3.85 with stream: true): hand each
+        // complete line to init.onLine as it arrives.
+        let pending = "";
+        res.on("data", (c) => {
+          chunks.push(c);
+          if (typeof init.onLine !== "function") return;
+          pending += c.toString("utf8");
+          let nl;
+          while ((nl = pending.indexOf("\n")) >= 0) {
+            const line = pending.slice(0, nl).trim();
+            pending = pending.slice(nl + 1);
+            if (line) { try { init.onLine(line); } catch { /* a bad line is skipped */ } }
+          }
+        });
         res.on("error", reject);
         res.on("end", () => {
           const text = Buffer.concat(chunks).toString("utf8");
           const status = res.statusCode ?? 0;
-          resolve({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(text), text: async () => text });
+          const contentType = String(res.headers?.["content-type"] ?? "");
+          resolve({ ok: status >= 200 && status < 300, status, contentType, json: async () => JSON.parse(text), text: async () => text });
         });
       }
     );
@@ -225,6 +239,8 @@ export function buildSpec({ model, messages, maxTokens, temperature }) {
 }
 
 const BRIDGE_ERRORS = {
+  network_busy: NETWORK_BUSY_MESSAGE,
+  no_capable_node: "no node serves this model",
   no_bids: "no c0mpute worker took the request",
   timeout: "the c0mpute worker did not answer in time",
   worker_failed: "the c0mpute worker failed",
@@ -237,29 +253,98 @@ const BRIDGE_ERRORS = {
  * { ok: true, text, model, worker, jobId, price, durationMs } or
  * { ok: false, error, code, status }.
  */
-export async function runC0mputeChat({ model, messages, maxTokens, temperature, timeoutMs = DEFAULT_TIMEOUT_MS }, { fetchImpl = bridgeFetch, env } = {}) {
+/**
+ * A bridge progress line -> what the chat stream shows, or null. c0mpute
+ * >= 0.3.85 streams `queued` ({ position (1-based), queue_length, status,
+ * requeues, reason, waited_ms }) and `running` ({ worker, eta_s }) before the
+ * final `result` / `error` line.
+ */
+export function bridgeProgress(ev, { maxRequeues = 3 } = {}) {
+  if (ev?.event === "queued") {
+    const position = Number(ev.position);
+    const length = Number(ev.queue_length);
+    const requeues = Number(ev.requeues) || 0;
+    const tryN = Math.min(requeues + 1, maxRequeues);
+    const pos = Number.isFinite(position) && position > 0 ? position : null;
+    return {
+      state: "waiting",
+      stage: "waiting",
+      route: "c0mpute",
+      message: `${typeof ev.status === "string" && ev.status ? ev.status : "waiting for a free slot"}`
+        + `${pos ? ` (position ${pos}${Number.isFinite(length) && length > 0 ? ` of ${length}` : ""}` : " ("}${pos ? ", " : ""}try ${tryN} of ${maxRequeues})`,
+      queue_position: pos ? pos - 1 : null,
+      queue_length: Number.isFinite(length) ? length : null,
+      requeues,
+      try: tryN,
+      max_requeues: maxRequeues,
+      waited_ms: Number(ev.waited_ms) || 0,
+      reason: typeof ev.reason === "string" ? ev.reason : null
+    };
+  }
+  if (ev?.event === "running") {
+    const eta = Number(ev.eta_s);
+    return {
+      state: "running",
+      stage: "running",
+      route: "c0mpute",
+      message: Number.isFinite(eta) && eta > 0 ? `running on a node (about ${Math.round(eta)} s)` : "running on a node",
+      worker: typeof ev.worker === "string" ? ev.worker : null,
+      eta_s: Number.isFinite(eta) ? eta : null
+    };
+  }
+  return null;
+}
+
+export async function runC0mputeChat({ model, messages, maxTokens, temperature, timeoutMs = DEFAULT_TIMEOUT_MS, onProgress = null }, { fetchImpl = bridgeFetch, env } = {}) {
   const bridge = c0mputeJobsBridge(env);
   if (!bridge) return { ok: false, code: "off", error: "c0mpute chat is not configured" };
   const spec = buildSpec({ model, messages, maxTokens, temperature });
   if (!spec) return { ok: false, code: "bad_request", error: "nothing to send: no user message" };
   const started = Date.now();
   let res;
+  let final = null;
   try {
     res = await fetchImpl(`${bridge.baseUrl}/v1/jobs`, {
       method: "POST",
-      headers: { authorization: `Bearer ${bridge.token}`, "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ workload: WORKLOAD, spec, timeout_ms: timeoutMs }),
+      headers: { authorization: `Bearer ${bridge.token}`, "content-type": "application/json", accept: "application/x-ndjson, application/json" },
+      // stream: true -> NDJSON progress (queue position, running) then the
+      // usual body as a `result` / `error` line. An older bridge ignores it
+      // and answers plain JSON, which is handled the same as before.
+      body: JSON.stringify({ workload: WORKLOAD, spec, timeout_ms: timeoutMs, stream: true }),
       signal: AbortSignal.timeout(timeoutMs + 10_000),
-      cache: "no-store"
+      cache: "no-store",
+      onLine: (line) => {
+        let ev;
+        try { ev = JSON.parse(line); } catch { return; }
+        if (ev?.event === "result" || ev?.event === "error") { final = ev; return; }
+        const p = bridgeProgress(ev);
+        if (p && typeof onProgress === "function") onProgress(p);
+      }
     });
   } catch (e) {
     return { ok: false, code: "unreachable", error: `c0mpute jobs bridge unreachable: ${e?.message ?? e}` };
   }
   let body = null;
-  try { body = await res.json(); } catch { /* not JSON */ }
+  let status = res.status;
+  if (String(res.contentType ?? "").includes("ndjson") || final) {
+    // Streamed: the last line carries the real status and body.
+    if (!final) {
+      try {
+        const lines = (await res.text()).split("\n").map((l) => l.trim()).filter(Boolean);
+        for (const l of lines) { try { const v = JSON.parse(l); if (v?.event === "result" || v?.event === "error") final = v; } catch { /* skip */ } }
+      } catch { /* no body */ }
+    }
+    if (!final) return { ok: false, code: "unreachable", error: "c0mpute jobs bridge closed the stream without an answer" };
+    status = Number(final.status) || (final.event === "result" ? 200 : 502);
+    body = final.body ?? null;
+  } else {
+    try { body = await res.json(); } catch { /* not JSON */ }
+  }
+  res = { ok: status >= 200 && status < 300, status };
   if (!res.ok) {
     const code = typeof body?.error === "string" ? body.error : `http_${res.status}`;
-    const detail = typeof body?.detail === "string" ? ` (${body.detail})` : "";
+    // network_busy carries the bridge's own copy of the message as detail.
+    const detail = typeof body?.detail === "string" && code !== "network_busy" ? ` (${body.detail})` : "";
     const position = Number(body?.queue_position ?? body?.position);
     return {
       ok: false, code, status: res.status,
@@ -409,20 +494,51 @@ export async function* c0mputeJobEvents(job, {
   const createdAt = Date.parse(job.created_at ?? "") || now();
   const deadline = createdAt + waitMs;
   const busy = (code) => ({ ok: false, code, final: true, error: NETWORK_BUSY_MESSAGE });
-  const attempt = async (n) => {
+  // One bridge attempt. Yields the bridge's progress (queue position,
+  // running) as persisted `status` events while it waits, then
+  // { result } with the answer.
+  const attempt = async function* (n) {
     const timeoutMs = Math.max(MIN_ATTEMPT_MS, Math.min(DEFAULT_TIMEOUT_MS, deadline - now()));
-    const r = await run({ model, messages: input.messages ?? [], maxTokens: input.max_tokens, temperature: input.temperature, timeoutMs });
+    const progress = [];
+    let wake = null;
+    const pending = run({
+      model, messages: input.messages ?? [], maxTokens: input.max_tokens, temperature: input.temperature, timeoutMs,
+      onProgress: (p) => { progress.push(p); if (wake) { const w = wake; wake = null; w(); } }
+    }).then((r) => ({ done: r }), (e) => ({ done: { ok: false, code: "unreachable", error: String(e?.message ?? e) } }));
+    let settled = null;
+    pending.then((v) => { settled = v; if (wake) { const w = wake; wake = null; w(); } });
+    while (true) {
+      while (progress.length > 0) {
+        const data = progress.shift();
+        const persisted = await insertEvent(job.id, "status", data);
+        yield { type: "status", data: persisted?.data ?? data, id: persisted?.id };
+      }
+      if (settled) break;
+      await new Promise((r) => { wake = r; if (settled || progress.length > 0) { wake = null; r(); } });
+    }
+    const r = settled.done;
     if (!r.ok) log(`[c0mpute-chat] job ${job.id} model=${model} attempt ${n}: ${r.error}`);
-    return r;
+    yield { result: r };
   };
-  const turnedAway = (r) => isRetryable(r) || r.code === "worker_failed";
+  // The bridge itself requeues and gives up after its own tries
+  // (network_busy, c0mpute >= 0.3.83) or when nothing serves the model
+  // (no_capable_node); both are handled below rather than as plain failures.
+  const turnedAway = (r) => isRetryable(r) || ["worker_failed", "network_busy", "no_capable_node"].includes(r.code);
   let attempts = 1;
-  let out = await attempt(attempts);
+  let out = null;
+  for await (const ev of attempt(attempts)) { if (ev.result) out = ev.result; else yield ev; }
   let capable = null;
   let requeues = 0;
   try {
     outer: while (!out.ok && turnedAway(out)) {
-      capable = await serves(model).catch(() => null);
+      capable = out.code === "no_capable_node" ? false : await serves(model).catch(() => null);
+      if (out.code === "network_busy" && capable !== false) {
+        // The bridge already waited its tries: a free daemon now, else end.
+        const freeNow = await assign({ freeSlot: true }).catch(() => null);
+        if (freeNow) { yield { type: "assigned", job: freeNow }; return; }
+        out = busy("network_busy");
+        break;
+      }
       if (capable === false) {
         // No c0mpute worker serves it: a daemon serving it, or nothing does.
         const moved = await assign({ freeSlot: false }).catch(() => null);
@@ -463,9 +579,10 @@ export async function* c0mputeJobEvents(job, {
         if (moved) { yield { type: "assigned", job: moved }; return; }
         // ...or a c0mpute worker that bids now.
         attempts += 1;
-        out = await attempt(attempts);
+        for await (const ev of attempt(attempts)) { if (ev.result) out = ev.result; else yield ev; }
         if (out.ok) break outer;
         if (!turnedAway(out)) break outer;
+        if (out.code === "network_busy" || out.code === "no_capable_node") continue outer;
       }
       // The window ended with no taker: that try is used.
     }
