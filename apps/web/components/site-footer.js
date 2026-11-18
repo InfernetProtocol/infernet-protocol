@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Footer as ProfullstackFooter } from "@profullstack/footer/react";
 
 const LINKS = [
+    { href: "/pricing", label: "Pricing" },
     { href: "/docs", label: "Docs" },
     { href: "/book", label: "Book" },
     { href: "/status", label: "Status" },

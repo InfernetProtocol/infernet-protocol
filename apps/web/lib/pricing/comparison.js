@@ -35,7 +35,7 @@ export const REFERENCE_PRICES = Object.freeze([
 ]);
 
 /** Display order for our own models (largest first); others follow alphabetically. */
-const OUR_ORDER = ["qwen2.5:7b", "qwen2.5:1.5b", "qwen2.5:0.5b"];
+const OUR_ORDER = ["eriktonon/qwen3.8-uncensored:9b", "qwen2.5:7b", "qwen2.5:1.5b", "qwen2.5:0.5b"];
 
 /** The worked example: one batch job priced on every model. */
 export const EXAMPLE_JOB = Object.freeze({

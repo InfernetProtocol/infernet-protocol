@@ -102,14 +102,22 @@ export default function GettingStartedPage() {
             <Section id="use" kicker="Track 1" title="Use the network — chat / completions">
                 <p>
                     The public endpoint is OpenAI-compatible. If you've ever called
-                    OpenAI's API, you already know how to use it. Try it in 30 seconds:
+                    OpenAI's API, you already know how to use it. Without a key you get a
+                    few free queries a day; for real use{" "}
+                    <Link href="/auth/signup" className="text-[var(--accent)] hover:underline">sign up</Link>, top up and
+                    create an API key on{" "}
+                    <Link href="/dashboard/billing" className="text-[var(--accent)] hover:underline">Billing</Link>.
+                    The featured model is <strong className="text-white">Uncensored Qwen3.8 9B · GPU</strong>{" "}
+                    (<code>eriktonon/qwen3.8-uncensored:9b</code>, about $0.005 a typical chat:{" "}
+                    <Link href="/pricing" className="text-[var(--accent)] hover:underline">pricing</Link>):
                 </p>
 
                 <h3 className="mt-6 text-base font-semibold text-white">curl</h3>
                 <Code>{`curl https://infernetprotocol.com/v1/chat/completions \\
+    -H "Authorization: Bearer $INFERNET_API_KEY" \\
     -H "Content-Type: application/json" \\
     -d '{
-        "model": "qwen2.5:7b",
+        "model": "eriktonon/qwen3.8-uncensored:9b",
         "messages": [{"role": "user", "content": "What is Bitcoin?"}],
         "stream": false
     }'`}</Code>
@@ -123,7 +131,7 @@ const client = new OpenAI({
 });
 
 const res = await client.chat.completions.create({
-    model: "qwen2.5:7b",
+    model: "eriktonon/qwen3.8-uncensored:9b",
     messages: [{ role: "user", content: "Explain Schnorr signatures in 3 lines." }]
 });
 console.log(res.choices[0].message.content);`}</Code>
@@ -137,7 +145,7 @@ client = OpenAI(
 )
 
 stream = client.chat.completions.create(
-    model="qwen2.5:7b",
+    model="eriktonon/qwen3.8-uncensored:9b",
     messages=[{"role": "user", "content": "Who built Linux?"}],
     stream=True,
 )

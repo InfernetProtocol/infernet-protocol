@@ -168,11 +168,15 @@ export function effectivePrice({ model, pricing, defaults, operatorPrice = null,
     // single base would have thrown away the per-model-size differences the
     // rate card exists to express. An OPERATOR's own price is never scaled:
     // they set that number deliberately.
-    if (dynamic?.scale) {
+    //
+    // A house entry with `fixed: true` is a deliberate list price (the GPU
+    // 9B, priced to pay for its GPU: Anthony, 2026-11-18) and is never scaled.
+    const fixed = Boolean(house && pricing?.models?.[model]?.fixed === true);
+    if (dynamic?.scale && !fixed) {
         const scaled = dynamic.scale(base);
         if (scaled) return { ...scaled, base_source: baseSource };
     }
-    return toMicro(base, baseSource);
+    return fixed ? { ...toMicro(base, baseSource), fixed: true } : toMicro(base, baseSource);
 }
 
 /** Display helper: the three layers for one model, for the API and the CLI. */
@@ -183,6 +187,7 @@ export function describePrice({ model, pricing, defaults, operatorPrice = null, 
         input_per_m_usd: eff.input_per_m_usd,
         output_per_m_usd: eff.output_per_m_usd,
         source: eff.source,
+        ...(eff.fixed ? { fixed: true } : {}),
         clamped: eff.clamped,
         house: cleanPricePair(pricing?.models?.[model]) ?? null,
         default: cleanPricePair(defaults.default_model_price) ?? DEFAULT_MODEL_PRICE,
