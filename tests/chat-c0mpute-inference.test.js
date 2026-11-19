@@ -143,7 +143,7 @@ describe("buildSpec", () => {
         });
     });
 
-    it("drops the oldest turns past 64 messages or 64 KiB, keeping the system prompt", () => {
+    it("drops the oldest turns past 64 messages or 256 KiB, keeping the system prompt", () => {
         const many = [{ role: "system", content: "sys" }];
         for (let i = 0; i < 80; i += 1) many.push({ role: i % 2 ? "assistant" : "user", content: `m${i}` });
         many.push({ role: "user", content: "last" });
@@ -152,14 +152,23 @@ describe("buildSpec", () => {
         expect(fitted[0]).toEqual({ role: "system", content: "sys" });
         expect(fitted.at(-1)).toEqual({ role: "user", content: "last" });
 
-        const big = [{ role: "user", content: "a".repeat(40_000) }, { role: "user", content: "b".repeat(40_000) }];
-        expect(c0.fitMessages(big)).toEqual([{ role: "user", content: "b".repeat(40_000) }]);
-        expect(c0.fitMessages([{ role: "user", content: "c".repeat(70_000) }])).toBeNull();
+        // A 100 KB prompt (a long agent turn) now fits whole.
+        expect(c0.fitMessages([{ role: "user", content: "p".repeat(100_000) }])).toEqual([{ role: "user", content: "p".repeat(100_000) }]);
+        const big = [{ role: "user", content: "a".repeat(160_000) }, { role: "user", content: "b".repeat(160_000) }];
+        expect(c0.fitMessages(big)).toEqual([{ role: "user", content: "b".repeat(160_000) }]);
+        expect(c0.fitMessages([{ role: "user", content: "c".repeat(270_000) }])).toBeNull();
         expect(c0.buildSpec({ messages: [{ role: "assistant", content: "x" }] })).toBeNull();
     });
 });
 
 describe("runC0mputeChat", () => {
+    it("says a prompt is too large instead of 'no user message'", async () => {
+        const fetchImpl = vi.fn();
+        const r = await c0.runC0mputeChat({ messages: [{ role: "user", content: "z".repeat(300_000) }] }, { fetchImpl });
+        expect(r).toMatchObject({ ok: false, code: "prompt_too_large" });
+        expect(r.error).toMatch(/256 KiB/);
+        expect(fetchImpl).not.toHaveBeenCalled();
+    });
     it("posts infernet.inference to the bridge and returns the answer and worker", async () => {
         const fetchImpl = vi.fn(async (url, init) => {
             expect(url).toBe("http://c0mpute-jobs-infernet:8788/v1/jobs");

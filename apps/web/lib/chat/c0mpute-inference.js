@@ -26,7 +26,8 @@ const MODEL_TAG_PREFIX = `${ROLE_TAG}:model:`;
 
 // Spec limits enforced by c0mpute-core/src/inference.rs (parse_spec).
 export const MAX_MESSAGES = 64;
-export const MAX_PROMPT_BYTES = 64 * 1024;
+// c0mpute >= 0.3.86 takes 256 KiB inference prompts (the 9B serves 32k ctx).
+export const MAX_PROMPT_BYTES = 256 * 1024;
 export const MAX_TOKENS = 4096;
 const MODEL_ID_RE = /^[A-Za-z0-9\-_.:/@]{1,128}$/;
 
@@ -207,7 +208,7 @@ export async function c0mputeChatModels(deps = {}) {
 
 /**
  * Fit chat messages to the worker's spec rules: only system/user/assistant
- * string turns, at most 64 of them and 64 KiB of text (oldest non-system turns
+ * string turns, at most 64 of them and 256 KiB of text (oldest non-system turns
  * dropped first), never ending on an assistant turn. Null when nothing is left.
  */
 export function fitMessages(messages) {
@@ -299,7 +300,12 @@ export async function runC0mputeChat({ model, messages, maxTokens, temperature, 
   const bridge = c0mputeJobsBridge(env);
   if (!bridge) return { ok: false, code: "off", error: "c0mpute chat is not configured" };
   const spec = buildSpec({ model, messages, maxTokens, temperature });
-  if (!spec) return { ok: false, code: "bad_request", error: "nothing to send: no user message" };
+  if (!spec) {
+    const hasUser = Array.isArray(messages) && messages.some((m) => m?.role === "user" && typeof m.content === "string" && m.content);
+    return hasUser
+      ? { ok: false, code: "prompt_too_large", error: `prompt too large: the c0mpute network takes up to ${MAX_PROMPT_BYTES / 1024} KiB per chat` }
+      : { ok: false, code: "bad_request", error: "nothing to send: no user message" };
+  }
   const started = Date.now();
   let res;
   let final = null;
