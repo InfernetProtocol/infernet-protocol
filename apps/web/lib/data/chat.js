@@ -337,6 +337,19 @@ export function noProviderError(modelName) {
  */
 const MODEL_ALIAS_RE = /^(?:auto(?:[/:-].*)?|default|any|gpt-(?!oss)[\w.:-]+|chatgpt[\w.:-]*|o[1-9](?:-[\w.:-]+)?|text-davinci[\w.:-]*|claude[\w.:-]*|gemini[\w.:-]*)$/i;
 
+// Retired house models -> what replaced them. Clients built on older
+// @profullstack/ai-providers (or with a pinned C0MPUTE_MODEL) still send these;
+// on 2026-11-18 about half of all chats asked for qwen2.5:7b and failed.
+export const RETIRED_MODELS = Object.freeze({
+  "qwen2.5:7b": "eriktonon/qwen3.8-uncensored:9b",
+  "huihui_ai/qwen3.5-abliterated:9b": "eriktonon/qwen3.8-uncensored:9b"
+});
+
+export function currentModelName(modelName) {
+  if (typeof modelName !== "string") return modelName;
+  return RETIRED_MODELS[modelName.trim()] ?? modelName;
+}
+
 export function isModelAlias(modelName) {
   return typeof modelName === "string" && MODEL_ALIAS_RE.test(modelName.trim());
 }
@@ -478,6 +491,9 @@ export async function createChatJob({
   // (app/v1/chat/completions fails over before the first token).
   excludeProviderIds = []
 }) {
+  // Old clients still name retired house models: run the current one instead
+  // of failing (a pinned reservation keeps the exact name it asked for).
+  if (!pinned) modelName = currentModelName(modelName);
   const supabase = getSupabaseServerClient();
   const now = new Date().toISOString();
 

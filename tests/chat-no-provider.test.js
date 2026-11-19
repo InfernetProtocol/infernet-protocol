@@ -36,7 +36,7 @@ function fakeClient() {
 vi.mock("@/lib/supabase/server", () => ({ getSupabaseServerClient: () => fakeClient() }));
 vi.mock("@/lib/encrypt", () => ({ encryptJSON: (v) => v, decryptJSON: (v) => v }));
 
-const { createChatJob, noProviderError, isModelAlias, aliasTargetFor, hostedFallbackDailyLimit } = await import("@/lib/data/chat");
+const { createChatJob, noProviderError, isModelAlias, aliasTargetFor, hostedFallbackDailyLimit, currentModelName } = await import("@/lib/data/chat");
 
 const messages = [{ role: "user", content: "hi" }];
 
@@ -155,13 +155,13 @@ describe("model aliases", () => {
         for (const m of ["gpt-4o-mini", "GPT-4o", "gpt-3.5-turbo", "chatgpt-4o-latest", "o1", "o3-mini", "auto", "auto/best-fast", "default", "claude-3-haiku", "gemini-1.5-flash"]) {
             expect(isModelAlias(m), m).toBe(true);
         }
-        for (const m of ["qwen2.5:7b", "llama3.2:1b", "gemma3:4b", "gpt-oss:20b", "gpt-oss:120b", "autoencoder:1b", "", undefined, null]) {
+        for (const m of ["llama3.1:8b", "llama3.2:1b", "gemma3:4b", "gpt-oss:20b", "gpt-oss:120b", "autoencoder:1b", "", undefined, null]) {
             expect(isModelAlias(m), String(m)).toBe(false);
         }
     });
 
     it("picks the preferred served model, else the first served", () => {
-        expect(aliasTargetFor({ specs: { served_models: ["qwen2.5:0.5b", "qwen2.5:7b"] } })).toBe("qwen2.5:7b");
+        expect(aliasTargetFor({ specs: { served_models: ["qwen2.5:0.5b", "llama3.1:8b"] } })).toBe("llama3.1:8b");
         expect(aliasTargetFor({ specs: { served_models: ["mystery:1b", "other:2b"] } })).toBe("mystery:1b");
         // cullen3 on 2026-10-07: qwen3:4b answered gpt-4o-mini with an empty reply.
         expect(aliasTargetFor({ specs: { served_models: ["qwen3:4b", "qwen2.5:0.5b", "qwen2.5:3b", "gemma3:4b"] } })).toBe("gemma3:4b");
@@ -176,11 +176,11 @@ describe("hosted fallback", () => {
     it("runs its configured model, never the name the caller sent", async () => {
         process.env.NVIDIA_NIM_API_KEY = "k";
         process.env.NVIDIA_NIM_DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-        const { job, source, requestedModel } = await createChatJob({ messages, modelName: "qwen2.5:7b" });
+        const { job, source, requestedModel } = await createChatJob({ messages, modelName: "llama3.1:8b" });
         expect(source).toBe("nim");
         expect(job.model_name).toBe("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
-        expect(job.input_spec.requested_model).toBe("qwen2.5:7b");
-        expect(requestedModel).toBe("qwen2.5:7b");
+        expect(job.input_spec.requested_model).toBe("llama3.1:8b");
+        expect(requestedModel).toBe("llama3.1:8b");
     });
 
     it("stops at the daily cap and answers like no node is live", async () => {
@@ -205,5 +205,14 @@ describe("hosted fallback", () => {
         expect(hostedFallbackDailyLimit({})).toBe(300);
         expect(hostedFallbackDailyLimit({ HOSTED_FALLBACK_DAILY_LIMIT: "abc" })).toBe(300);
         expect(hostedFallbackDailyLimit({ HOSTED_FALLBACK_DAILY_LIMIT: "50" })).toBe(50);
+    });
+});
+
+describe("currentModelName", () => {
+    it("maps retired house models to the GPU 9B and leaves others alone", () => {
+        expect(currentModelName("qwen2.5:7b")).toBe("eriktonon/qwen3.8-uncensored:9b");
+        expect(currentModelName("huihui_ai/qwen3.5-abliterated:9b")).toBe("eriktonon/qwen3.8-uncensored:9b");
+        expect(currentModelName("qwen3:4b")).toBe("qwen3:4b");
+        expect(currentModelName(undefined)).toBe(undefined);
     });
 });
