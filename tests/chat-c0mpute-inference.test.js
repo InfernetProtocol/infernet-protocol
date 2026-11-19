@@ -382,24 +382,24 @@ describe("c0mputeModelFor", () => {
 describe("createChatJob and c0mpute", () => {
     it("sends a model no Infernet provider serves to c0mpute workers", async () => {
         state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:0.5b"] } }];
-        const { job, source, route, provider } = await createChatJob({ messages, modelName: "qwen2.5:7b" });
+        const { job, source, route, provider } = await createChatJob({ messages, modelName: "qwen3:4b" });
         expect(source).toBe("p2p");
         expect(route).toBe("c0mpute");
         expect(job.status).toBe("running");
         expect(job.provider_id).toBeNull();
-        expect(job.model_name).toBe("qwen2.5:7b");
-        expect(job.input_spec).toMatchObject({ fallback: "c0mpute", c0mpute_model: "qwen2.5:7b" });
+        expect(job.model_name).toBe("qwen3:4b");
+        expect(job.input_spec).toMatchObject({ fallback: "c0mpute", c0mpute_model: "qwen3:4b" });
         expect(job.input_spec.nim_ok).toBeUndefined();
-        expect(provider).toMatchObject({ node_id: "c0mpute", model: "qwen2.5:7b" });
+        expect(provider).toMatchObject({ node_id: "c0mpute", model: "qwen3:4b" });
     });
 
     it("goes to c0mpute nodes first even when an Infernet daemon serves the model", async () => {
-        state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }];
-        const { source, job, route } = await createChatJob({ messages, modelName: "qwen2.5:7b" });
+        state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen3:4b"] } }];
+        const { source, job, route } = await createChatJob({ messages, modelName: "qwen3:4b" });
         expect(source).toBe("p2p");
         expect(route).toBe("c0mpute");
         expect(job.provider_id).toBeNull();
-        expect(job.input_spec).toMatchObject({ fallback: "c0mpute", c0mpute_model: "qwen2.5:7b" });
+        expect(job.input_spec).toMatchObject({ fallback: "c0mpute", c0mpute_model: "qwen3:4b" });
     });
 
     it("uses an Infernet daemon when no c0mpute node serves the model", async () => {
@@ -411,8 +411,8 @@ describe("createChatJob and c0mpute", () => {
     });
 
     it("a retry that excludes c0mpute lands on a daemon", async () => {
-        state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }];
-        const { source, job, route } = await createChatJob({ messages, modelName: "qwen2.5:7b", excludeProviderIds: [C0MPUTE_ROUTE] });
+        state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen3:4b"] } }];
+        const { source, job, route } = await createChatJob({ messages, modelName: "qwen3:4b", excludeProviderIds: [C0MPUTE_ROUTE] });
         expect(source).toBe("p2p");
         expect(route).toBe("daemon");
         expect(job.provider_id).toBe("p1");
@@ -451,12 +451,12 @@ describe("createChatJob and c0mpute", () => {
 
     it("routes as before when the bridge is not configured", async () => {
         delete process.env.C0MPUTE_JOBS_TOKEN;
-        expect((await createChatJob({ messages, modelName: "qwen2.5:7b" })).source).toBe("none");
+        expect((await createChatJob({ messages, modelName: "qwen3:4b" })).source).toBe("none");
     });
 
     it("lists c0mpute models in the public model list", async () => {
         const names = (await listChatModels()).map((m) => m.name);
-        expect(names).toContain("qwen2.5:7b");
+        expect(names).toContain("qwen3:4b");
     });
 });
 
@@ -501,27 +501,27 @@ describe("c0mputeEligible", () => {
 
 describe("the queue assigns a c0mpute job to a provider daemon", () => {
     it("reassigns the same job to a provider serving the model, without the c0mpute fallback", async () => {
-        state.providers = [{ id: "p1", name: "bonita", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }];
-        const job = { id: "job-9", model_name: "qwen2.5:7b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen2.5:7b", nim_ok: true } };
+        state.providers = [{ id: "p1", name: "bonita", reputation: 50, specs: { served_models: ["qwen3:4b"] } }];
+        const job = { id: "job-9", model_name: "qwen3:4b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen3:4b", nim_ok: true } };
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
         const moved = await assignC0mputeJob(fakeClient(), job, { freeSlot: true });
         warn.mockRestore();
-        expect(moved).toMatchObject({ id: "job-9", provider_id: "p1", status: "assigned", model_name: "qwen2.5:7b" });
+        expect(moved).toMatchObject({ id: "job-9", provider_id: "p1", status: "assigned", model_name: "qwen3:4b" });
         expect(moved.input_spec.fallback).toBeUndefined();
         expect(moved.input_spec.nim_ok).toBeUndefined();
         expect(moved.input_spec.messages).toEqual(messages);
     });
     it("returns null when no daemon serves it, so the hosted fallback can still take it", async () => {
         state.providers = [];
-        const job = { id: "job-9", model_name: "qwen2.5:7b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen2.5:7b" } };
+        const job = { id: "job-9", model_name: "qwen3:4b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen3:4b" } };
         expect(await assignC0mputeJob(fakeClient(), job, { freeSlot: true })).toBeNull();
     });
 });
 
 describe("routeC0mputeMiss: never a direct hand-off to a provider", () => {
     it("only the hosted fallback, and only when the job allowed it", async () => {
-        state.providers = [{ id: "p1", name: "bonita", reputation: 50, specs: { served_models: ["qwen2.5:7b"] } }];
-        const job = { id: "job-9", model_name: "qwen2.5:7b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen2.5:7b" } };
+        state.providers = [{ id: "p1", name: "bonita", reputation: 50, specs: { served_models: ["qwen3:4b"] } }];
+        const job = { id: "job-9", model_name: "qwen3:4b", input_spec: { messages, fallback: "c0mpute", c0mpute_model: "qwen3:4b" } };
         expect(await routeC0mputeMiss(fakeClient(), job)).toBeNull();
     });
 });
@@ -545,7 +545,7 @@ describe("the winning c0mpute worker is recorded as a provider", () => {
 
 describe("source stays p2p for c0mpute nodes", () => {
     it("tells p2p_only clients a c0mpute job is a peer job, so they stream it", async () => {
-        const { source, route } = await createChatJob({ messages, modelName: "qwen2.5:7b", noFallback: true });
+        const { source, route } = await createChatJob({ messages, modelName: "qwen3:4b", noFallback: true });
         expect(source).toBe("p2p");
         expect(route).toBe("c0mpute");
     });
