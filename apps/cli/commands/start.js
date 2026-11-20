@@ -1138,20 +1138,25 @@ async function runDaemon(args, ctx) {
         // mapping (model_id → absolute path) into the inference state
         // file; fall back to ~/.infernet/models/<id>.gguf for the
         // ad-hoc case.
-        const path = await import('node:path');
         const fsp = await import('node:fs/promises');
+        const { resolveRpcModelPath } = await import('../lib/rpc-model-path.js');
         const inf = await readInferenceState();
-        let modelPath = inf?.rpc_primary?.gguf_paths?.[model] ?? null;
+        const modelPath = resolveRpcModelPath(model, {
+            ggufPaths: inf?.rpc_primary?.gguf_paths ?? null,
+            home: process.env.HOME ?? '/tmp'
+        });
         if (!modelPath) {
-            modelPath = model.startsWith('/')
-                ? model
-                : path.join(process.env.HOME ?? '/tmp', '.infernet', 'models', `${model}.gguf`);
+            res.writeHead(400, { 'content-type': 'text/plain' });
+            res.end('invalid model id\n');
+            return true;
         }
         try {
             await fsp.access(modelPath);
         } catch {
+            // Do not echo the resolved path: it turned this endpoint into a
+            // file-existence oracle for the provider's filesystem.
             res.writeHead(404, { 'content-type': 'text/plain' });
-            res.end(`gguf not found at ${modelPath}\n`);
+            res.end('model not found\n');
             return true;
         }
 
