@@ -28,8 +28,14 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * at most that many free queries rather than an unlimited supply of fresh
  * allowances.
  *
- * Plain CoinPay subjects (no origin prefix) are unchanged: they resolve
- * through coinpay_identities as before and need no signature.
+ * Every OTHER subject a trusted key sends (a CoinPay sub) is signed the same
+ * way with that client's own secret (subjectSecretFor). While
+ * INFERNET_REQUIRE_SIGNED_SUBJECTS is off (the default, a soak) an unsigned
+ * one is still accepted and logged; once it is on, an unsigned or invalid
+ * subject is ignored and the request is metered by address, never refused.
+ *
+ * A request id is accepted once (lib/data/subject-replay.js): a captured,
+ * still-fresh signed request cannot be replayed.
  */
 
 export const SIGNED_SUBJECT_MAX_SKEW_MS = 5 * 60 * 1000;
@@ -54,6 +60,30 @@ export const SIGNED_SUBJECT_ORIGINS = Object.freeze({
 const SUBJECT_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const HEX_SIG = /^[0-9a-f]{64}$/;
+
+/**
+ * The signing secret for one trusted client (its label in
+ * INFERNET_TRUSTED_CLIENT_KEYS): INFERNET_SUBJECT_SECRET_<LABEL> (upper case,
+ * non-alphanumerics as _), else the secret of an origin that lists the client
+ * (c0mpute-chat -> C0MPUTE_INFERNET_SUBJECT_SECRET). Null when none, or when
+ * it is too short to be a real secret.
+ */
+export function subjectSecretFor(trustedName, env = process.env) {
+    if (typeof trustedName !== "string" || !trustedName) return null;
+    const own = env?.[`INFERNET_SUBJECT_SECRET_${trustedName.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`];
+    if (typeof own === "string" && own.length >= 32) return own;
+    for (const cfg of Object.values(SIGNED_SUBJECT_ORIGINS)) {
+        if (!originClients(cfg, env).includes(trustedName)) continue;
+        const shared = env?.[cfg.secretEnv];
+        if (typeof shared === "string" && shared.length >= 32) return shared;
+    }
+    return null;
+}
+
+/** INFERNET_REQUIRE_SIGNED_SUBJECTS: off (log-only) unless 1/true/yes/on. */
+export function requireSignedSubjects(env = process.env) {
+    return /^(1|true|yes|on)$/i.test(String(env?.INFERNET_REQUIRE_SIGNED_SUBJECTS ?? "").trim());
+}
 
 /** The origin a subject claims (`c0mpute:<id>` -> "c0mpute"), or null for any other subject. */
 export function signedSubjectOrigin(subject) {
@@ -86,11 +116,13 @@ function originClients(cfg, env) {
 }
 
 /**
- * Check a signed subject. Never throws.
+ * Check the signature on any billed subject from a trusted client. Never throws.
+ * A `c0mpute:` (origin-minted) subject must also come from one of that
+ * origin's clients.
  *
- * @returns {{ok: true, origin: string} | {ok: false, reason: string, origin?: string}}
+ * @returns {{ok: true, origin: string|null} | {ok: false, reason: string, origin?: string|null}}
  */
-export function verifySignedSubject({
+export function verifySubjectSignature({
     subject,
     ts,
     requestId,
@@ -99,13 +131,15 @@ export function verifySignedSubject({
     env = process.env,
     now = Date.now()
 } = {}) {
-    const origin = signedSubjectOrigin(subject);
-    if (!origin) return { ok: false, reason: "not_signed_origin" };
-    const cfg = SIGNED_SUBJECT_ORIGINS[origin];
-    const secret = env?.[cfg.secretEnv];
+    if (typeof subject !== "string" || subject.length === 0 || subject.length > 200) return { ok: false, reason: "bad_subject" };
+    const minted = claimsSignedOrigin(subject);
+    const origin = minted ? signedSubjectOrigin(subject) : null;
+    if (minted && !origin) return { ok: false, reason: "bad_subject" };
+    if (typeof sig !== "string" || sig.trim() === "") return { ok: false, reason: "unsigned", origin };
     // A short or missing secret is a misconfiguration, never "accept anything".
-    if (typeof secret !== "string" || secret.length < 32) return { ok: false, reason: "not_configured", origin };
-    if (typeof trustedName !== "string" || !originClients(cfg, env).includes(trustedName)) {
+    const secret = minted ? originSecret(origin, env) : subjectSecretFor(trustedName, env);
+    if (!secret) return { ok: false, reason: "not_configured", origin };
+    if (minted && (typeof trustedName !== "string" || !originClients(SIGNED_SUBJECT_ORIGINS[origin], env).includes(trustedName))) {
         return { ok: false, reason: "wrong_client", origin };
     }
     const tsStr = typeof ts === "string" ? ts.trim() : "";
@@ -113,11 +147,48 @@ export function verifySignedSubject({
     if (Math.abs(now - Number(tsStr) * 1000) > SIGNED_SUBJECT_MAX_SKEW_MS) return { ok: false, reason: "stale", origin };
     const rid = typeof requestId === "string" ? requestId.trim() : "";
     if (!REQUEST_ID.test(rid)) return { ok: false, reason: "bad_request_id", origin };
-    const given = typeof sig === "string" ? sig.trim().toLowerCase() : "";
+    const given = sig.trim().toLowerCase();
     if (!HEX_SIG.test(given)) return { ok: false, reason: "bad_sig", origin };
     const want = subjectSignature(secret, subject, tsStr, rid);
     const ok = timingSafeEqual(Buffer.from(given, "hex"), Buffer.from(want, "hex"));
     return ok ? { ok: true, origin } : { ok: false, reason: "bad_sig", origin };
+}
+
+function originSecret(origin, env) {
+    const v = env?.[SIGNED_SUBJECT_ORIGINS[origin]?.secretEnv];
+    return typeof v === "string" && v.length >= 32 ? v : null;
+}
+
+/** verifySubjectSignature for an origin-minted (`c0mpute:`) subject only. */
+export function verifySignedSubject(args = {}) {
+    if (!signedSubjectOrigin(args.subject)) return { ok: false, reason: "not_signed_origin" };
+    return verifySubjectSignature(args);
+}
+
+/**
+ * Remember request ids for the signature window, so each is accepted once.
+ * In-memory and bounded (oldest dropped first); `claim(key)` is true the first
+ * time a key is seen within ttlMs, false on a replay. The TTL covers the whole
+ * accepted window: a ts up to five minutes ahead stays valid for ten.
+ */
+export function createReplayCache({ ttlMs = 2 * SIGNED_SUBJECT_MAX_SKEW_MS + 60_000, max = 200_000, now = () => Date.now() } = {}) {
+    const seen = new Map();
+    return {
+        claim(key) {
+            const t = now();
+            for (const [k, until] of seen) {
+                if (until > t && seen.size < max) break;
+                seen.delete(k);
+            }
+            const hit = seen.get(key);
+            if (hit && hit > t) return false;
+            seen.set(key, t + ttlMs);
+            return true;
+        },
+        get size() {
+            return seen.size;
+        }
+    };
 }
 
 /** Today's free-query ceiling for everything one origin's signed subjects spend. */

@@ -427,7 +427,7 @@ export async function resolveBillingCaller(request, { trusted = null } = {}) {
     }
     if (trusted) {
         const { billedSubjectFrom } = await import("@/lib/trusted-clients");
-        const sub = billedSubjectFrom(request, trusted);
+        const sub = await billedSubjectFrom(request, trusted);
         if (sub) {
             // A signed client-minted subject (`c0mpute:<id>`) is a person with
             // no CoinPay identity, so there is no account to look up: free

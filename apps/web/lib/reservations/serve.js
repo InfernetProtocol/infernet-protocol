@@ -154,7 +154,7 @@ async function authorizeHouseLane(request, model) {
     if (!trusted) {
         return { error: err(403, "a house-lane reservation serves only a trusted client (X-Infernet-Client-Key)", "house_lane_client_required") };
     }
-    const sub = billedSubjectFrom(request, trusted);
+    const sub = await billedSubjectFrom(request, trusted);
     if (!sub) {
         return { error: err(403, "a house-lane request must name who pays (X-Infernet-Billed-Subject)", "house_lane_subject_required") };
     }

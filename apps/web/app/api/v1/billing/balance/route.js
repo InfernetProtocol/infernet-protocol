@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request) {
     const trusted = trustedClientFor(bearerFrom(request.headers.get("authorization")));
-    const subject = billedSubjectFrom(request, trusted);
+    const subject = await billedSubjectFrom(request, trusted);
     if (trusted && subject) {
         try {
             const userId = await userIdForCoinpaySubject(subject);

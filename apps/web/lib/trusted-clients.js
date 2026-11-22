@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { rateLimit } from "@/lib/rate-limit";
-import { claimsSignedOrigin, logSubject, verifySignedSubject } from "@/lib/billing/signed-subject";
+import { claimsSignedOrigin, logSubject, requireSignedSubjects, verifySubjectSignature } from "@/lib/billing/signed-subject";
 
 /**
  * Trusted clients: our own apps calling the open-market chat API.
@@ -82,32 +82,81 @@ export function wantsP2pOnly(body) {
  *
  * Only a trusted key may do this. Otherwise any caller could name a stranger
  * and spend their balance.
+ *
+ * And the subject must be signed by that client (lib/billing/signed-subject.js):
+ * subject|ts|request id, five-minute window, each request id once. A subject
+ * the client minted itself (`c0mpute:<id>`) is never taken unsigned. Any other
+ * unsigned or invalid subject is, for now, still taken and logged
+ * (INFERNET_REQUIRE_SIGNED_SUBJECTS off: the soak); with the flag on it is
+ * ignored and the request metered by address. Never a hard failure.
+ *
+ * Async (the replay check may ask the database). Memoised per request, so a
+ * route that resolves the subject twice does not see its own id as a replay.
+ *
+ * @returns {Promise<string|null>}
  */
-export function billedSubjectFrom(request, trusted) {
-    if (!trusted) return null;
+const decided = new WeakMap();
+
+export function billedSubjectFrom(request, trusted, { env = process.env, claim } = {}) {
+    if (!trusted) return Promise.resolve(null);
+    const memoable = request && typeof request === "object";
+    if (memoable && decided.has(request)) return decided.get(request);
+    const p = decideSubject(request, trusted, env, claim).catch((err) => {
+        console.warn(`[billed-subject] check failed, metering by address: ${err?.message ?? err}`);
+        return null;
+    });
+    if (memoable) decided.set(request, p);
+    return p;
+}
+
+async function decideSubject(request, trusted, env, claim) {
     const raw = request?.headers?.get?.("x-infernet-billed-subject") ?? null;
     if (typeof raw !== "string") return null;
     const sub = raw.trim();
     // CoinPay subjects are opaque ids; bound so a header cannot carry a payload.
     if (!(sub.length > 0 && sub.length <= 200)) return null;
-    // A subject the client minted itself (`c0mpute:<user id>`, for a person
-    // with no CoinPay identity) is only taken with a valid signature from that
-    // client (lib/billing/signed-subject.js). Otherwise it is ignored and the
-    // request is metered by address, as if no subject had been sent.
-    if (claimsSignedOrigin(sub)) {
-        const v = verifySignedSubject({
-            subject: sub,
-            ts: request.headers.get("x-infernet-subject-ts"),
-            requestId: request.headers.get("x-infernet-request-id"),
-            sig: request.headers.get("x-infernet-subject-sig"),
-            trustedName: trusted.name
-        });
-        if (!v.ok) {
-            console.warn(`[billed-subject] ignoring ${logSubject(sub)} from ${trusted.name}: ${v.reason}; metering by address`);
+    const requestId = request.headers.get("x-infernet-request-id");
+    const v = verifySubjectSignature({
+        subject: sub,
+        ts: request.headers.get("x-infernet-subject-ts"),
+        requestId,
+        sig: request.headers.get("x-infernet-subject-sig"),
+        trustedName: trusted.name,
+        env
+    });
+    if (v.ok) {
+        const claimFn = claim ?? (await import("@/lib/data/subject-replay")).claimRequestId;
+        if (!(await claimFn(`${trusted.name}:${requestId.trim()}`))) {
+            noteSubject(trusted.name, "replayed", sub, "ignored");
             return null;
         }
+        return sub;
     }
+    if (claimsSignedOrigin(sub) || requireSignedSubjects(env)) {
+        noteSubject(trusted.name, v.reason, sub, "ignored; metering by address");
+        return null;
+    }
+    noteSubject(trusted.name, v.reason, sub, "accepted (log-only: INFERNET_REQUIRE_SIGNED_SUBJECTS off)");
     return sub;
+}
+
+// One log line per client+reason+outcome a minute, with how many it covers:
+// the soak reads these to see that no trusted key still sends unsigned
+// subjects, without a line per chat message.
+const NOTE_EVERY_MS = 60_000;
+const notes = new Map();
+function noteSubject(client, reason, sub, outcome) {
+    const key = `${client}|${reason}|${outcome}`;
+    const t = Date.now();
+    const n = notes.get(key) ?? { at: 0, count: 0 };
+    n.count += 1;
+    if (t - n.at >= NOTE_EVERY_MS) {
+        console.warn(`[billed-subject] ${reason === "unsigned" ? "unsigned" : "invalid"} subject from ${client}: ${reason}, ${outcome} `
+            + `(${n.count} in the last minute; e.g. ${logSubject(sub)})`);
+        n.at = t;
+        n.count = 0;
+    }
+    notes.set(key, n);
 }
 
 /** Hourly budget for a caller paying from a balance: not the stranger limit. */

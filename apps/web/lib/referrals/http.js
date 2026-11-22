@@ -18,7 +18,7 @@ import { publicOrigin } from "@/lib/credits/core";
 export async function referralCaller(request) {
     const trusted = trustedClientFor(bearerFrom(request.headers.get("authorization")));
     if (trusted) {
-        const subject = billedSubjectFrom(request, trusted);
+        const subject = await billedSubjectFrom(request, trusted);
         if (!subject) return { error: jsonError(400, "name the person with X-Infernet-Billed-Subject (their CoinPay sub)") };
         const userId = await userIdForCoinpaySubject(subject);
         if (!userId) return { error: jsonError(404, "no Infernet account is linked to that CoinPay account yet") };

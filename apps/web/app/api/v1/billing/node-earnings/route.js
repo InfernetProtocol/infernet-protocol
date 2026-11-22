@@ -48,7 +48,7 @@ export async function GET(request) {
     const since = url.searchParams.get("since");
     const c0mputeNodes = parseC0mputeNodeIds(url.searchParams.get("c0mpute_nodes"));
     const trusted = trustedClientFor(bearerFrom(request.headers.get("authorization")));
-    const subject = billedSubjectFrom(request, trusted);
+    const subject = await billedSubjectFrom(request, trusted);
     if (trusted && subject) {
         try {
             const userId = await userIdForCoinpaySubject(subject);
