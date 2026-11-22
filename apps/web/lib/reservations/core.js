@@ -87,6 +87,13 @@ export function validateReservationInput(body) {
     }
     value.endpoint_api_key = typeof b.endpoint_api_key === "string" && b.endpoint_api_key ? b.endpoint_api_key : null;
 
+    // House lane: per-user billed, pinned, no content kept (serve.js, migration
+    // 20261122220000). Only a registered node can be a house target: an
+    // endpoint is someone else's server, which is exactly what it must not be.
+    const houseLane = b.house_lane === true || b.house_lane === "true";
+    value.house_lane = houseLane;
+    if (houseLane && value.target_kind !== "node") errors.push("house_lane needs a node target (provider_id)");
+
     const start = new Date(b.start_at ?? "");
     if (Number.isNaN(start.getTime())) {
         errors.push("start_at is required (ISO timestamp)");
@@ -96,7 +103,8 @@ export function validateReservationInput(body) {
     value.start_at = Number.isNaN(start.getTime()) ? null : start.toISOString();
 
     const ints = {
-        hours: [b.hours ?? 1, 1, 720],
+        // A standing house lane (house_lane) may run a year; resold capacity 30 days.
+        hours: [b.hours ?? 1, 1, houseLane ? MAX_HOUSE_LANE_HOURS : 720],
         included_tokens: [b.included_tokens ?? 0, 0, Number.MAX_SAFE_INTEGER],
         per_key_rps: [b.per_key_rps ?? 1, 1, 10000],
         per_key_concurrency: [b.per_key_concurrency ?? 1, 1, 10000],
@@ -151,6 +159,9 @@ export function validateReservationInput(body) {
 
     return errors.length ? { ok: false, errors } : { ok: true, value };
 }
+
+/** The longest a house-lane reservation may run (366 days). */
+export const MAX_HOUSE_LANE_HOURS = 8784;
 
 export function windowOf(res) {
     const start = new Date(res.start_at).getTime();

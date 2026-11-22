@@ -212,3 +212,42 @@ window.
 - **Neither account exists yet.** No Vast.ai or Thunder Compute credentials are in any vault, so
   both read as `available: false` and orders get 503 until a funded account's key is set. Both are
   prepaid, like Salad.
+
+## House lane (2026-11-22)
+
+A reservation with `house_lane: true` is a confidential, per-user-billed lane on a node
+the house operates (first user: c0mpute's `x-c0mpute-lane: house`, for tleehealth's
+"Ask AI about my records").
+
+- **Who may call it:** only a trusted client. The bearer is the reservation key
+  (`ifr_res_`); the trusted key rides `X-Infernet-Client-Key: ifc_...` and the payer
+  `X-Infernet-Billed-Subject: <CoinPay sub>`. Anything else is 403.
+- **Paid only:** each request is charged to that person's compute balance at the
+  ordinary per-token price (`billed_user_id` on the job, settled at completion like any
+  billed chat, node paid from the charge). No account, no balance, a free or degraded
+  billing lookup = **402 `balance_required`**. Never the free tier.
+- **Fail closed:** the job is pinned to the reservation's `provider_id` (no re-pick,
+  no c0mpute auction, no hosted/NIM fallback, no rebalance). If that node cannot take
+  it: **503 `pinned_node_unavailable`**. Nothing else is tried.
+- **Nothing kept:** jobs carry `no_retain = true`. The daemon needs the prompt
+  (`jobs.input_spec`, encrypted at rest) and streams tokens through `job_events`, so
+  both exist while the request runs; when it ends the prompt, the answer (`result` is
+  stored as `{redacted:true}`) and every `job_events` row are purged
+  (`lib/data/job-retention.js`), and the per-minute reservations cron sweeps anything a
+  crash left behind. Kept: model, node, timestamps, token counts, the ledger charge.
+- **Who sees plaintext:** the calling app, Infernet's server process while it relays
+  (memory only; never logged), and the pinned house node (its Ollama). No third-party
+  operator. Database backups taken while a request is in flight can hold the encrypted
+  prompt until they rotate.
+- Up to 8784 hours (366 days) per house-lane reservation; other reservations stay at 720.
+- Responses carry `X-Infernet-Lane: house` and `x_infernet: {lane, operator, model,
+  billed, charged_usd}` (JSON) or a final `{"object":"infernet.house"}` chunk (stream).
+
+Create one (admin):
+
+    curl -X POST https://infernetprotocol.com/api/v1/reservations \
+      -H "Authorization: Bearer $INFERNET_ADMIN_TOKEN" -H 'content-type: application/json' \
+      -d '{"name":"house-lane","operator_name":"Profullstack","provider_id":"<node id>",
+           "models":["<model>"],"start_at":"<whole UTC hour>","hours":8784,"house_lane":true,
+           "per_key_rps":5,"per_key_concurrency":4,"shared_rps":5,"shared_concurrency":4}'
+    # then POST /api/v1/reservations/<id>/keys for the ifr_res_ key
