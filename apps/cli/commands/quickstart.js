@@ -43,7 +43,7 @@ sign-in and key creation and only runs the test call.
 
 API:  https://infernetprotocol.com/v1  (OpenAI-compatible, Bearer ik_live_...)
 Free: 10 requests a day on small models; paid use spends your compute balance
-      (\`infernet billing topup <usd>\`). No paid fallback is ever used for you.
+      (\`infernet billing topup <usd>\`). The CLI never switches you to another provider.
 `;
 
 const DEFAULT_PROMPT = 'Say hello in one short, friendly sentence.';

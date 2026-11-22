@@ -172,7 +172,7 @@ describe("infernet quickstart", () => {
         expect(code).toBe(1);
         expect(result.test.status).toBe(402);
         expect(err.text).toMatch(/billing topup/);
-        expect(err.text).toMatch(/never falls back to a paid provider/);
+        expect(err.text).toMatch(/never switches you to another paid provider/);
         expect(readConfig().api.key).toBe(KEY);
     });
 

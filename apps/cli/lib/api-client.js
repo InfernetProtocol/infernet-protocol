@@ -63,7 +63,7 @@ export function explainApiError(status, body) {
             return `${msg}\n  fix: the key is missing, wrong or revoked. Run \`infernet quickstart\` for a new one.`;
         case 402:
             return `${msg}\n  fix: add funds with \`infernet billing topup 5\` (or move node earnings: \`infernet billing spend-earnings\`), `
-                + 'or use a free model of 4B or under. Infernet never falls back to a paid provider for you.';
+                + 'or use a free model of 4B or under. The CLI never switches you to another paid provider.';
         case 429:
             if (e.free_limit_per_day) {
                 return `${msg}\n  free requests used today: ${e.used_today}/${e.free_limit_per_day}. `
