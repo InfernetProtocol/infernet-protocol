@@ -1,8 +1,10 @@
 /**
  * `infernet mcp` — Model Context Protocol server over stdio.
  *
- * Exposes managed-endpoint reservations (docs/prd/16-managed-endpoints.md) as
- * MCP tools so an agent can book, key, monitor and reconcile reservations.
+ * Exposes chat completions + live models (the OpenAI-compatible API) and
+ * managed-endpoint reservations (docs/prd/16-managed-endpoints.md) as MCP
+ * tools, so an agent can ask models and book, key, monitor and reconcile
+ * reservations.
  * Same auth as `infernet reservation` (INFERNET_ADMIN_TOKEN / login bearer, or
  * INFERNET_BUYER_TOKEN for the read-only buyer tools).
  *
@@ -16,6 +18,7 @@ import { createOrdersClient, x402KeyFrom, DEFAULT_MAX_USD } from '../lib/orders-
 import { resolveCreditsOptions, createCreditsClient } from '../lib/credits-client.js';
 import { resolveBatchOptions, createBatchClient } from '../lib/batch-client.js';
 import { resolvePluginsOptions, createPluginsClient } from '../lib/plugins-client.js';
+import { resolveApiOptions, createApiClient } from '../lib/api-client.js';
 import { CURRENT_VERSION } from '../lib/version.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -48,6 +51,34 @@ const batchId = { type: 'string', description: 'batch id (uuid)' };
 const orderInput = (a) => Object.fromEntries(['gpu_class', 'models', 'hours', 'start_at', 'email', 'name'].filter((k) => a[k] !== undefined).map((k) => [k, a[k]]));
 
 export const TOOLS = [
+    // The OpenAI-compatible API (key: INFERNET_API_KEY or `infernet quickstart`).
+    {
+        name: 'chat_completion',
+        description: 'Ask an open model on the Infernet network (POST /v1/chat/completions). model "auto" (default) picks a live model; models_list has the ids. Free: 10 requests a day on small models; paid use spends the account balance, and no paid third-party fallback is ever used. Needs an API key: run `infernet quickstart` once.',
+        inputSchema: {
+            type: 'object',
+            required: ['prompt'],
+            properties: {
+                prompt: { type: 'string', description: 'the user message' },
+                system: { type: 'string', description: 'optional system message' },
+                model: { type: 'string', description: 'model id, default "auto"' },
+                max_tokens: { type: 'integer', minimum: 1 }
+            }
+        },
+        run: async (c, a) => {
+            const messages = [];
+            if (a.system) messages.push({ role: 'system', content: String(a.system) });
+            messages.push({ role: 'user', content: String(a.prompt) });
+            return c.api.chat({ messages, model: a.model || 'auto', maxTokens: a.max_tokens });
+        }
+    },
+    {
+        name: 'models_list',
+        description: 'Models live on the Infernet network right now (GET /v1/models). No key needed.',
+        inputSchema: { type: 'object', properties: {} },
+        annotations: { readOnlyHint: true },
+        run: (c) => c.api.models()
+    },
     {
         name: 'reservation_list',
         description: 'List managed-endpoint reservations (admin).',
@@ -245,7 +276,7 @@ export async function handleMessage(msg, client) {
 
 export default async function mcp(args) {
     if (args.has('help') || args.has('h')) {
-        process.stdout.write('infernet mcp — MCP server (stdio): self-serve orders, managed-endpoint reservations, credits, invites, paid batch inference and chat plugins\n\n  claude mcp add infernet -- infernet mcp\n');
+        process.stdout.write('infernet mcp — MCP server (stdio): chat completions and live models, self-serve orders, managed-endpoint reservations, credits, invites, paid batch inference and chat plugins\n\n  claude mcp add infernet -- npx -y @infernetprotocol/cli mcp\n');
         return 0;
     }
     const client = createReservationsClient(await resolveClientOptions({ url: args.get('url'), token: args.get('token'), buyerToken: args.get('buyer-token') }));
@@ -253,6 +284,7 @@ export default async function mcp(args) {
     client.credits = createCreditsClient(await resolveCreditsOptions({ url: args.get('url'), token: args.get('token') }));
     client.batch = createBatchClient(await resolveBatchOptions({ url: args.get('url'), key: args.get('key'), token: args.get('token') }));
     client.plugins = createPluginsClient(await resolvePluginsOptions({ url: args.get('url'), token: args.get('token') }));
+    client.api = createApiClient(await resolveApiOptions({ url: args.get('url'), key: args.get('key') }));
     const rl = createInterface({ input: process.stdin });
     for await (const line of rl) {
         if (!line.trim()) continue;

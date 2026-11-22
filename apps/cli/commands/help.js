@@ -9,6 +9,12 @@ Usage:
   infernet <command> [args]             Run an explicit subcommand
   echo "..." | infernet                 Chat with the piped input
 
+Use the API (start here):
+  quickstart   Sign in, create + store an API key, test it, print curl/JS/Python code
+               (also: quickstart status, quickstart key)
+  models       Models live on the network right now
+  chat         One-line chat: infernet chat "..." (uses your API key when set)
+
 Setup:
   setup        Bootstrap environment (Ollama + model + firewall + config)
   model        Manage models (list / pull / remove / use / hf: prefix for HuggingFace)
@@ -16,7 +22,7 @@ Setup:
 
 Node lifecycle:
   init         Configure this node (control-plane URL, role, Nostr identity)
-  login        Update the control-plane URL
+  login        Sign in (browser device code); --url sets the control-plane URL
   register     Register this node with the control plane (signed)
   update       Push current capability/status to the control plane (signed)
   upgrade      Re-run the curl installer to pull the latest CLI, then re-register
@@ -49,13 +55,13 @@ Payments:
 Paid inference:
   batch        Paid batch inference from a JSONL file: quote, submit, status, results
   billing      Compute balance: node earnings, prepaid top-ups, funding order
-  keys         API keys (ik_live_...) for the batch API
+  keys         API keys (ik_live_...): create, list, revoke
 
 Managed endpoints:
   reservation  Book a pinned operator + exact model by the hour; keys, limits,
                per-minute availability report, post-paid invoice data
   order        Order a dedicated model endpoint yourself: pay by x402 or CoinPay
-  mcp          MCP server (stdio): order, reservation, credit, invite and batch tools
+  mcp          MCP server (stdio): chat, models, batch, billing, order, reservation tools
 
 Other:
   help         Show this help

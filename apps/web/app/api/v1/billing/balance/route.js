@@ -5,6 +5,7 @@ import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor, billedSubjectFrom } from "@/lib/trusted-clients";
 import { userIdForCoinpaySubject } from "@/lib/data/interactive-billing";
 import { isAdminUser } from "@/lib/auth/admin";
+import { peekFreeQuery } from "@/lib/data/free-tier";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,5 +53,12 @@ export async function GET(request) {
 
     const { user, error } = await requireCaller(request);
     if (error) return error;
-    try { return ok({ linked: true, ...(await getBalance(user)) }); } catch (e) { return failFrom(e); }
+    try {
+        // free_today: what is left of the daily free allowance (counted, never
+        // spent, by this read), so `infernet quickstart status` can show it.
+        const freeToday = await peekFreeQuery({ userId: user.id })
+            .then(({ limit, used, remaining }) => ({ limit, used, remaining }))
+            .catch(() => null);
+        return ok({ linked: true, ...(await getBalance(user)), ...(freeToday ? { free_today: freeToday } : {}) });
+    } catch (e) { return failFrom(e); }
 }

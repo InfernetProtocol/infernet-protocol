@@ -8,7 +8,8 @@ export const metadata = {
 };
 
 const TOC = [
-    { id: "quick-start",   label: "Quick start" },
+    { id: "quickstart",    label: "API quickstart (one command)" },
+    { id: "quick-start",   label: "Quick start (run a node)" },
     { id: "cli-overview",  label: "CLI overview" },
     { id: "cli-setup",     label: "infernet setup" },
     { id: "cli-chat",      label: "infernet (chat)" },
@@ -24,7 +25,7 @@ const TOC = [
     { id: "dashboard",     label: "Dashboard" },
     { id: "interconnects", label: "Interconnects (NVLink / xGMI / IB / EFA)" },
     { id: "api-keys",      label: "API keys" },
-    { id: "api",           label: "Public API endpoints" },
+    { id: "api",           label: "API endpoint reference" },
     { id: "self-host",     label: "Self-host the control plane" },
     { id: "architecture",  label: "Architecture" },
     { id: "troubleshoot",  label: "Troubleshooting" }
@@ -66,6 +67,14 @@ export default function DocsPage() {
                 </p>
             </header>
 
+            <div className="mb-10 rounded-[1.5rem] border border-[var(--accent)]/30 bg-[var(--accent)]/10 p-6">
+                <p className="text-sm font-semibold text-white">Just want to call the API?</p>
+                <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+                    One command signs you in, creates a key, runs a test call and prints code for curl, JavaScript and
+                    Python. <a href="#quickstart" className="text-[var(--accent)] hover:underline">API quickstart →</a>
+                </p>
+            </div>
+
             {/* TOC */}
             <nav className="mb-16 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6 backdrop-blur">
                 <p className="mb-4 text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">
@@ -85,6 +94,64 @@ export default function DocsPage() {
                     ))}
                 </ol>
             </nav>
+
+            {/* API QUICKSTART */}
+            <Section id="quickstart" title="API quickstart">
+                <p>
+                    Infernet is an OpenAI-compatible API for open models served by a peer-to-peer GPU network. Three
+                    steps, one of them a command:
+                </p>
+                <p className="!mb-1 text-sm font-semibold text-white">1. Run the quickstart</p>
+                <CodeBlock>{"npx @infernetprotocol/cli quickstart"}</CodeBlock>
+                <p>
+                    It opens your browser to sign in (sign up there if you are new), creates an <code>ik_live_</code>{" "}
+                    API key, saves it in <code>~/.config/infernet/config.json</code> (never in your project), sends one
+                    test request with model <code>auto</code> and prints the answer. Run it again any time; with a key
+                    already set it only runs the test. Have a key already? <code>npx @infernetprotocol/cli quickstart --key ik_live_...</code>
+                </p>
+                <p className="!mb-1 text-sm font-semibold text-white">2. Put the key in your environment</p>
+                <CodeBlock>{"export INFERNET_API_KEY=\"$(npx @infernetprotocol/cli quickstart key)\""}</CodeBlock>
+                <p className="!mb-1 text-sm font-semibold text-white">3. Call it</p>
+                <ApiSnippets />
+                <p>
+                    <code>auto</code> picks a model a live node serves; any id from{" "}
+                    <code>GET https://infernetprotocol.com/v1/models</code> (or <code>infernet models</code>) works too.
+                    Add <code>&quot;stream&quot;: true</code> for server-sent events. From a terminal it is one line:{" "}
+                    <code>infernet chat &quot;your prompt&quot;</code>.
+                </p>
+                <p>
+                    Every account gets 10 free requests a day on small models (4B parameters or under). Paid requests
+                    spend your prepaid balance or what your own nodes earned, priced per token on{" "}
+                    <Link href="/pricing" className="text-[var(--accent)] hover:underline">/pricing</Link>; top up with{" "}
+                    <code>infernet billing topup 5</code> or on{" "}
+                    <Link href="/dashboard/billing" className="text-[var(--accent)] hover:underline">Billing</Link>.{" "}
+                    <code>infernet quickstart status</code> shows your key, balance, free requests left and live models.
+                </p>
+                <div className="my-4 rounded-[1rem] border border-white/10 bg-[var(--panel)] p-5">
+                    <p className="mb-2 text-sm font-semibold text-white">Use from Claude Code or any agent</p>
+                    <p className="mb-2 text-sm leading-6 text-[var(--muted)]">
+                        The Claude Code plugin adds <code>/infernet:setup</code>, <code>/infernet:chat</code>,{" "}
+                        <code>/infernet:models</code>, <code>/infernet:status</code>, a skill that teaches the agent the
+                        API, and the Infernet MCP tools:
+                    </p>
+                    <CodeBlock>{"claude plugin marketplace add InfernetProtocol/infernet-protocol\nclaude plugin install infernet@infernet"}</CodeBlock>
+                    <p className="text-sm leading-6 text-[var(--muted)]">
+                        Any other MCP client: run <code>npx -y @infernetprotocol/cli mcp</code> as a stdio server
+                        (tools <code>chat_completion</code>, <code>models_list</code>, <code>billing_balance</code>,{" "}
+                        <code>batch_*</code> and more). In Claude Code without the plugin:{" "}
+                        <code>claude mcp add infernet -- npx -y @infernetprotocol/cli mcp</code>.
+                    </p>
+                </div>
+                <Table
+                    columns={["Status", "Meaning", "Fix"]}
+                    rows={[
+                        ["401", "missing, wrong or revoked key", "run the quickstart again for a new key"],
+                        ["402", "balance empty, or a GPU model on the free tier", "top up, or use a model of 4B or under"],
+                        ["429", "free requests used today (free_limit_per_day in the body), or a rate limit", "top up, or wait until 00:00 UTC"],
+                        ["503", "no live node serves that model", "use auto, or an id from /v1/models (listed in the error)"]
+                    ]}
+                />
+            </Section>
 
             {/* QUICK START */}
             <Section id="quick-start" title="Quick start">
@@ -713,28 +780,41 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
 
             <Section id="api-keys" title="API keys">
                 <p>
-                    Sign in and create a key in{" "}
+                    The quickstart makes a key for you. To manage keys yourself, sign in on the site and use{" "}
                     <Link href="/dashboard/billing" className="text-[var(--accent)] hover:underline">
                         Dashboard → Billing
-                    </Link>{" "}
-                    or run <code>infernet keys create --name quickstart</code>. Copy the <code>ik_live_</code> key when
-                    it is shown; the full value is displayed once. Set it in <code>INFERNET_API_KEY</code> before using
-                    this request:
-                </p>
-                <CodeBlock>{"curl -sS https://infernetprotocol.com/v1/chat/completions \\\n  -H \"Authorization: Bearer $INFERNET_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"model\":\"auto\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK.\"}]}'"}</CodeBlock>
-                <p>
-                    The key identifies your account; it does not add funds. An eligible account can use its remaining
-                    free daily requests. Paid requests use your node earnings or prepaid balance; add funds from{" "}
-                    <Link href="/dashboard/billing" className="text-[var(--accent)] hover:underline">
-                        Billing
                     </Link>
-                    . The <code>auto</code> model alias chooses a model a live provider serves.
+                    , or from a terminal:
+                </p>
+                <CodeBlock>{"infernet login                        # browser sign-in, once\ninfernet keys create --name my-app    # prints the ik_live_ key once\ninfernet keys list\ninfernet keys revoke <key id>"}</CodeBlock>
+                <p>
+                    The full key is shown once. A key identifies your account; it does not add funds. Free daily
+                    requests and paid requests both count against the account that owns the key.
                 </p>
             </Section>
 
             {/* API */}
-            <Section id="api" title="Public API endpoints">
+            <Section id="api" title="API">
                 <p>
+                    Start with the <a href="#quickstart" className="text-[var(--accent)] hover:underline">API quickstart</a>:{" "}
+                    <code>npx @infernetprotocol/cli quickstart</code>. The inference API is OpenAI-compatible at{" "}
+                    <code>https://infernetprotocol.com/v1</code>:
+                </p>
+                <Table
+                    columns={["Endpoint", "Method", "Auth", "What"]}
+                    rows={[
+                        ["/v1/chat/completions", "POST", "Bearer ik_live_", "Chat completion; model auto or an id; stream: true for SSE"],
+                        ["/v1/models",           "GET",  "none",            "Models live on the network now"],
+                        ["/api/v1/billing/balance", "GET", "Bearer ik_live_", "Balance, funding order, free requests left today"],
+                        ["/api/v1/billing/topup", "POST", "Bearer ik_live_", "CoinPay checkout to add funds"],
+                        ["/api/v1/batches",      "POST", "Bearer ik_live_", "Paid batch inference (many requests, one job)"]
+                    ]}
+                />
+                <details className="group my-6 rounded-[1rem] border border-white/10 bg-[var(--panel)] p-5 [&>p>code]:rounded [&>p>code]:bg-[var(--panel-strong)] [&>p>code]:px-1.5 [&>p>code]:py-0.5 [&>p>code]:text-[var(--accent)]">
+                    <summary className="cursor-pointer text-sm font-semibold text-white">
+                        Full endpoint reference (protocol, node operators, managed endpoints)
+                    </summary>
+                <p className="mt-4">
                     These are the wire surfaces. Two auth tiers — the protocol (Nostr-signed) and the dashboard
                     (cookie session) — plus a small public-read surface that's IP-rate-limited.
                 </p>
@@ -787,12 +867,8 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
                     </Link>.
                 </p>
                 <p>
-                    Paid use: <Link href="/auth/signup" className="text-[var(--accent)] hover:underline">sign up</Link>,
-                    top up and create an <code>ik_live_</code> API key on{" "}
-                    <Link href="/dashboard/billing" className="text-[var(--accent)] hover:underline">Billing</Link>, then call
-                    the OpenAI-compatible endpoint. Prices per model are on{" "}
-                    <Link href="/pricing" className="text-[var(--accent)] hover:underline">/pricing</Link>; the featured
-                    model is Uncensored Qwen3.8 9B · GPU:
+                    GPU models are paid only; the featured one is Uncensored Qwen3.8 9B · GPU (prices on{" "}
+                    <Link href="/pricing" className="text-[var(--accent)] hover:underline">/pricing</Link>):
                 </p>
                 <CodeBlock>
 {`curl https://infernetprotocol.com/v1/chat/completions \\
@@ -836,6 +912,7 @@ infernet gpu --json | jq .interconnects # raw detected shape`}
 # Use the publicKeyMultibase to verify any Receipt signed by
 # did:web:infernetprotocol.com.`}
                 </CodeBlock>
+                </details>
             </Section>
 
             {/* SELF-HOST */}
@@ -1095,6 +1172,58 @@ function CodeBlock({ children }) {
             <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-[1rem] border border-white/10 bg-[var(--panel-strong)] p-5 pr-20 font-mono text-sm leading-6 text-[var(--accent)]">
                 <code>{children}</code>
             </pre>
+        </div>
+    );
+}
+
+const API_SNIPPETS = [
+    {
+        label: "curl",
+        code: `curl https://infernetprotocol.com/v1/chat/completions \\
+  -H "Authorization: Bearer $INFERNET_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'`
+    },
+    {
+        label: "JavaScript (fetch)",
+        code: `const res = await fetch("https://infernetprotocol.com/v1/chat/completions", {
+  method: "POST",
+  headers: {
+    Authorization: \`Bearer \${process.env.INFERNET_API_KEY}\`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({ model: "auto", messages: [{ role: "user", content: "Hello" }] })
+});
+console.log((await res.json()).choices[0].message.content);`
+    },
+    {
+        label: "JavaScript (OpenAI SDK)",
+        code: `// npm i openai
+import OpenAI from "openai";
+const client = new OpenAI({ baseURL: "https://infernetprotocol.com/v1", apiKey: process.env.INFERNET_API_KEY });
+const r = await client.chat.completions.create({ model: "auto", messages: [{ role: "user", content: "Hello" }] });
+console.log(r.choices[0].message.content);`
+    },
+    {
+        label: "Python (OpenAI SDK)",
+        code: `# pip install openai
+import os
+from openai import OpenAI
+client = OpenAI(base_url="https://infernetprotocol.com/v1", api_key=os.environ["INFERNET_API_KEY"])
+r = client.chat.completions.create(model="auto", messages=[{"role": "user", "content": "Hello"}])
+print(r.choices[0].message.content)`
+    }
+];
+
+function ApiSnippets() {
+    return (
+        <div className="grid gap-x-4 lg:grid-cols-2">
+            {API_SNIPPETS.map((s) => (
+                <div key={s.label} className="min-w-0">
+                    <p className="mt-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">{s.label}</p>
+                    <CodeBlock>{s.code}</CodeBlock>
+                </div>
+            ))}
         </div>
     );
 }

@@ -1,0 +1,10 @@
+{
+  "name": "infernet",
+  "version": "0.1.0",
+  "description": "Use the Infernet API (open models on a peer-to-peer GPU network, OpenAI-compatible) from Claude Code: one-command setup, chat, live models, balance and free requests left.",
+  "author": { "name": "Infernet Protocol", "url": "https://infernetprotocol.com" },
+  "homepage": "https://infernetprotocol.com/docs#quickstart",
+  "repository": "https://github.com/InfernetProtocol/infernet-protocol",
+  "license": "MIT",
+  "keywords": ["inference", "llm", "openai-compatible", "p2p", "gpu", "infernet"]
+}

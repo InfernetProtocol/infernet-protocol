@@ -158,8 +158,8 @@ async function tokenCmd(config, tokenStr) {
     return 0;
 }
 
-async function deviceCodeFlow(config) {
-    const baseUrl = config?.controlPlane?.url;
+export async function deviceCodeFlow(config, { baseUrl: fallbackUrl = null, out = process.stdout } = {}) {
+    const baseUrl = config?.controlPlane?.url || fallbackUrl;
     if (!baseUrl) {
         process.stderr.write(
             "error: no control plane configured. Run `infernet init` first (or pass --url <url>).\n"
@@ -186,10 +186,10 @@ async function deviceCodeFlow(config) {
     const verifyUrl = startResp.verify_url;
     const pollUrl = new URL(startResp.poll_url, baseUrl).toString();
 
-    process.stdout.write(`\nOpen this URL to sign in:\n  ${verifyUrl}\n`);
-    process.stdout.write(`(expires ${startResp.expires_at})\n\n`);
+    out.write(`\nOpen this URL to sign in:\n  ${verifyUrl}\n`);
+    out.write(`(expires ${startResp.expires_at})\n\n`);
     tryOpenBrowser(verifyUrl);
-    process.stdout.write("Waiting for browser sign-in...\n");
+    out.write("Waiting for browser sign-in...\n");
 
     const startedAt = Date.now();
     const timeoutMs = 10 * 60 * 1000;
@@ -226,14 +226,14 @@ async function deviceCodeFlow(config) {
                 email: body.email ?? null,
                 expiresAt: body.expiresAt ?? null
             });
-            process.stdout.write(`\n✓ Signed in${body.email ? ` as ${body.email}` : ""}\n  saved to ${path}\n`);
+            out.write(`\n✓ Signed in${body.email ? ` as ${body.email}` : ""}\n  saved to ${path}\n`);
             await autoLinkPubkey();
             return 0;
         }
 
         // pending — show a heartbeat dot every 6 seconds
         dotted += 1;
-        if (dotted % 3 === 0) process.stdout.write(".");
+        if (dotted % 3 === 0) out.write(".");
     }
     process.stderr.write("\nLogin timed out after 10 minutes.\n");
     return 1;
@@ -301,5 +301,5 @@ export default async function login(args) {
     const tokenArg = args.get("token");
     if (tokenArg) return tokenCmd(config, String(tokenArg));
 
-    return deviceCodeFlow(config);
+    return deviceCodeFlow(config, { baseUrl: "https://infernetprotocol.com" });
 }

@@ -16,7 +16,8 @@ export async function resolveBatchOptions(opts = {}) {
     const bearer = config?.auth?.bearerToken || null;
     return {
         baseUrl: String(opts.url || process.env.INFERNET_URL || config?.controlPlane?.url || DEFAULT_URL).replace(/\/+$/, ''),
-        apiKey: opts.key || process.env.INFERNET_API_KEY || null,
+        // config.api.key: the key `infernet quickstart` stored.
+        apiKey: opts.key || process.env.INFERNET_API_KEY || config?.api?.key || null,
         userToken: opts.token || bearer
     };
 }

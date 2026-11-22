@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "infernet": {
+      "command": "npx",
+      "args": ["-y", "@infernetprotocol/cli@latest", "mcp"]
+    }
+  }
+}
