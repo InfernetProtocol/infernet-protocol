@@ -9,6 +9,8 @@ export const metadata = {
 };
 
 const ALL = "All";
+// One submission flow for both galleries: c0mpute.com owns the list.
+const SUBMIT_URL = "https://c0mpute.com/gallery/submit";
 
 function hostOf(url) {
     try {
@@ -44,12 +46,12 @@ export default async function GalleryPage({ searchParams }) {
                     the live site and, where there is one, its copy on the c0mpute network.
                 </p>
                 <div className="flex flex-wrap gap-3 pt-2">
-                    <Link
-                        href="/contact?subject=Gallery%20submission"
+                    <a
+                        href={SUBMIT_URL}
                         className="rounded-full bg-[var(--accent-strong)] px-5 py-2.5 text-sm font-semibold text-[var(--bg)] transition hover:bg-[var(--accent)]"
                     >
                         Submit your build
-                    </Link>
+                    </a>
                     <Link
                         href="/docs#api"
                         className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-white/10"
@@ -145,16 +147,17 @@ export default async function GalleryPage({ searchParams }) {
             <section className="mt-16 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-8">
                 <h2 className="text-2xl font-semibold text-white">Built something on Infernet or c0mpute?</h2>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)]">
-                    Send us the link, a line about what it does and what it runs on (Infernet chat or API, c0mpute
-                    hosting, CoinPay). Listed builds show here and on c0mpute.com.
+                    Submit the link on c0mpute.com: free with the c0mpute gallery badge on your site (or after a
+                    30-day queue), or priority review with one CoinPay payment. Listed builds show here and on
+                    c0mpute.com.
                 </p>
                 <div className="mt-5 flex flex-wrap gap-3">
-                    <Link
-                        href="/contact?subject=Gallery%20submission"
+                    <a
+                        href={SUBMIT_URL}
                         className="rounded-full bg-[var(--accent-strong)] px-5 py-2.5 text-sm font-semibold text-[var(--bg)] transition hover:bg-[var(--accent)]"
                     >
                         Submit your build
-                    </Link>
+                    </a>
                     <a
                         href="https://c0mpute.com"
                         className="rounded-full border border-white/15 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-white/10"
