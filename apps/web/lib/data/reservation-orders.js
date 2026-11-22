@@ -1,4 +1,5 @@
 import "server-only";
+import { coinpayFetch } from "../coinpay-ua.js";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { createReservation, issueKey, publicReservation, getReservation } from "@/lib/data/reservations";
 import { newBuyerToken, sha256 } from "@/lib/reservations/core";
@@ -285,7 +286,7 @@ export async function verifyOrderAtCoinpayDetail(order, ref = order?.payment_ref
     // COINPAY_API_URL carries an /api suffix; checkout paths add their own.
     const baseUrl = (process.env.COINPAY_API_URL || "https://coinpayportal.com").replace(/\/+$/, "").replace(/\/api$/, "");
     if (!apiKey) return { verdict: "unknown", txHash: null };
-    const client = checkoutClient({ apiKey, baseUrl });
+    const client = checkoutClient({ apiKey, baseUrl, fetch: coinpayFetch });
     return verifyOrderPaymentDetail(ref, order.total_usd, {
         getSession: (r) => client.get(r),
         sessionState,
