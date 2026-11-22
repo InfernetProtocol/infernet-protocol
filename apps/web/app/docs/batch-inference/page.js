@@ -109,6 +109,15 @@ export default function BatchInferencePage() {
                 <code>infernet billing balance|topup</code>. The MCP server (<code>infernet mcp</code>) has batch_quote,
                 batch_submit, batch_status and batch_results; only batch_submit spends, and only up to the max_cost_usd you pass.
             </P>
+            <P>
+                Our own apps (trusted clients, <code>Bearer ifc_...</code>) open and poll a top-up for one of their signed-in
+                people the way they read that person&apos;s balance: add <code>X-Infernet-Billed-Subject: &lt;CoinPay sub&gt;</code>{" "}
+                to <code>POST /api/v1/billing/topup</code> and <code>GET /api/v1/billing/topup/:id</code>. Only they may send{" "}
+                <code>success_url</code> and <code>cancel_url</code>, each an https URL on an allowed origin
+                (<code>TOPUP_RETURN_ORIGINS</code>, default https://c0mpute.com); from any other caller the two are ignored.
+                Errors: 400 <code>missing_subject</code>, 404 <code>subject_not_linked</code> (link the account with{" "}
+                <code>POST /api/v1/coinpay/link-trusted</code>, then retry), 400 <code>return_url_not_allowed</code>.
+            </P>
 
             <H2 id="rules">Rules</H2>
             <ul className="mt-4 list-disc space-y-2 pl-6 text-[var(--muted)]">

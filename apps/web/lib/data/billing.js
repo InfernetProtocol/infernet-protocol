@@ -263,8 +263,13 @@ export async function getBalance(user, { recent = 25 } = {}) {
     };
 }
 
-/** Open a top-up checkout. Shared with the batch submit's checkout path. */
-export async function openTopup(user, amountUsd, { minUsd } = {}) {
+/**
+ * Open a top-up checkout. Shared with the batch submit's checkout path.
+ * `successUrl` / `cancelUrl` are where CoinPay sends the buyer back; the
+ * caller must have checked them (lib/billing/topup-return.js). `accountId`
+ * names our account to CoinPay when there is no email to give it.
+ */
+export async function openTopup(user, amountUsd, { minUsd, successUrl, cancelUrl, accountId } = {}) {
     const pricing = await getInferencePricing();
     const amount = parseTopupAmount(amountUsd, minUsd ?? pricing.min_topup_usd);
     if (!amount.ok) throw Object.assign(new Error(amount.error), { status: 400 });
@@ -276,9 +281,10 @@ export async function openTopup(user, amountUsd, { minUsd } = {}) {
             orderId: topup.id,
             description: `Infernet compute balance top-up: $${amount.usd}`,
             email: user.email ?? undefined,
+            ...(accountId ? { accountId: String(accountId) } : {}),
             metadata: { billing_topup_id: topup.id },
-            successUrl: `${siteUrl()}/docs/batch-inference#topup`,
-            cancelUrl: `${siteUrl()}/docs/batch-inference`,
+            successUrl: successUrl || `${siteUrl()}/docs/batch-inference#topup`,
+            cancelUrl: cancelUrl || `${siteUrl()}/docs/batch-inference`,
             idempotencyKey: `topup:${topup.id}`
         });
     } catch (e) {
