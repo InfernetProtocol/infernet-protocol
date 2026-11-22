@@ -26,8 +26,10 @@ export const gateway = createGateway({
     // the crawl manifests are never charged. Invite links (/i/<code>) are never
     // gated either: a shared invite must always reach signup.
     openPaths: ["/api/", "/i/", "/r/", "/install.sh", "/robots.txt", "/sitemap.xml", "/llms.txt", "/.well-known/"],
-    // Signed-in users (Supabase auth cookie) are never charged.
-    exempt: (request) => /(?:^|;\s*)sb-[^=]*-auth-token/.test(request.headers.get("cookie") ?? "")
+    // A session cookie that is merely present is a hint, never a pass (x402-gateway
+    // 0.18.3): it spares a signed-in reader's odd browser string, but GPTBot with a
+    // made-up cookie is still charged. It used to be `exempt`, which let it read free.
+    sessionCookie: /^sb-.*-auth-token/
 });
 
 /** Resolves to a Response for a refused crawler, or undefined to carry on. */
