@@ -15,6 +15,13 @@ import {
     DEFAULT_OPERATOR_FREE_SONGS_PER_DAY
 } from "@/lib/billing/free-tier";
 import { identifyVisitor } from "@/lib/data/fingerprint";
+import {
+    signedSubjectOrigin,
+    originFreeCeiling,
+    originCounterSubject,
+    logSubject,
+    ORIGIN_CEILING_WARN_AT
+} from "@/lib/billing/signed-subject";
 
 /**
  * Spend one free query, or refuse.
@@ -140,7 +147,7 @@ export async function consumeFreeQuery({
         });
         if (error) throw error;
         const out = data ?? {};
-        return {
+        const result = {
             ok: Boolean(out.allowed),
             used: Number(out.used ?? 0),
             remaining: Number(out.remaining ?? 0),
@@ -149,6 +156,12 @@ export async function consumeFreeQuery({
             subject,
             ...info
         };
+        // A signed client-minted subject (`c0mpute:<id>`): per person, and
+        // also against that client's daily ceiling, so a leaked signing
+        // secret cannot mint unlimited fresh allowances.
+        const origin = !userId ? signedSubjectOrigin(clientSubject) : null;
+        if (origin) return await spendOriginCeiling({ supabase, origin, result });
+        return result;
     } catch (err) {
         console.warn(`[free-tier] ledger unavailable, falling back in memory: ${err?.message ?? err}`);
         const r = fallback.check(subject);
@@ -162,6 +175,48 @@ export async function consumeFreeQuery({
             ...info
         };
     }
+}
+
+/**
+ * After a signed subject's own allowance said yes, spend one from its origin's
+ * daily ceiling too. Only an allowed query counts against the ceiling, so one
+ * person hammering past their ten does not eat everyone else's headroom.
+ * Logs every metered query (subject + both counters), and warns once the
+ * origin is at ORIGIN_CEILING_WARN_AT of its ceiling.
+ */
+async function spendOriginCeiling({ supabase, origin, result }) {
+    const ceiling = originFreeCeiling(origin);
+    const tag = `[free-tier] metered ${logSubject(result.subject)} ${result.ok ? "allowed" : "refused"} `
+        + `${result.used}/${result.limit}`;
+    if (!result.ok) {
+        console.info(tag);
+        return result;
+    }
+    let o;
+    try {
+        const { data, error } = await db(supabase).rpc("free_query_consume", {
+            p_subject: originCounterSubject(origin),
+            p_max: ceiling
+        });
+        if (error) throw error;
+        o = data ?? {};
+    } catch (err) {
+        // The person's own counter already said yes and still caps them;
+        // a ceiling we cannot read this once does not refuse them.
+        console.warn(`${tag}; origin ${origin} ceiling unreadable: ${err?.message ?? err}`);
+        return result;
+    }
+    const used = Number(o.used ?? 0);
+    console.info(`${tag} (origin ${origin} ${used}/${ceiling})`);
+    if (!o.allowed) {
+        console.warn(`[free-tier] origin ${origin} reached its free ceiling (${ceiling} a day); refusing its signed subjects until UTC midnight`);
+        return { ...result, ok: false, reason: "origin_ceiling", origin, originCeiling: ceiling };
+    }
+    const warnAt = Math.max(1, Math.floor(ceiling * ORIGIN_CEILING_WARN_AT));
+    if (used >= warnAt && (used === warnAt || used % 100 === 0)) {
+        console.warn(`[free-tier] origin ${origin} near its free ceiling: ${used}/${ceiling} today`);
+    }
+    return { ...result, origin, originUsed: used, originCeiling: ceiling };
 }
 
 /**

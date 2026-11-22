@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { rateLimit } from "@/lib/rate-limit";
+import { claimsSignedOrigin, logSubject, verifySignedSubject } from "@/lib/billing/signed-subject";
 
 /**
  * Trusted clients: our own apps calling the open-market chat API.
@@ -88,7 +89,25 @@ export function billedSubjectFrom(request, trusted) {
     if (typeof raw !== "string") return null;
     const sub = raw.trim();
     // CoinPay subjects are opaque ids; bound so a header cannot carry a payload.
-    return sub.length > 0 && sub.length <= 200 ? sub : null;
+    if (!(sub.length > 0 && sub.length <= 200)) return null;
+    // A subject the client minted itself (`c0mpute:<user id>`, for a person
+    // with no CoinPay identity) is only taken with a valid signature from that
+    // client (lib/billing/signed-subject.js). Otherwise it is ignored and the
+    // request is metered by address, as if no subject had been sent.
+    if (claimsSignedOrigin(sub)) {
+        const v = verifySignedSubject({
+            subject: sub,
+            ts: request.headers.get("x-infernet-subject-ts"),
+            requestId: request.headers.get("x-infernet-request-id"),
+            sig: request.headers.get("x-infernet-subject-sig"),
+            trustedName: trusted.name
+        });
+        if (!v.ok) {
+            console.warn(`[billed-subject] ignoring ${logSubject(sub)} from ${trusted.name}: ${v.reason}; metering by address`);
+            return null;
+        }
+    }
+    return sub;
 }
 
 /** Hourly budget for a caller paying from a balance: not the stranger limit. */
