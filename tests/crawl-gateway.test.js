@@ -33,6 +33,11 @@ describe("crawl gateway", () => {
     expect(String(body.accepts[0].amount)).toBe("1000000");
   });
 
+  it("does not let a forged Supabase cookie exempt a training crawler (x402-gateway 0.18.3 sessionCookie)", async () => {
+    const res = await gateway.handle(new Request("https://infernetprotocol.com/", { headers: { "user-agent": GPTBOT, "x-real-ip": "203.0.113.10", cookie: "sb-abc-auth-token=forged" } }));
+    expect(res?.status).toBe(402);
+  });
+
   it("lets browsers and the API through", async () => {
     expect(await gateway.handle(new Request("https://infernetprotocol.com/", { headers: HUMAN }))).toBeNull();
     expect(await gateway.handle(new Request("https://infernetprotocol.com/api/v1/node/heartbeat", { headers: { "user-agent": GPTBOT } }))).toBeNull();

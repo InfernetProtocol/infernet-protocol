@@ -35,7 +35,7 @@
     "@profullstack/profile": "0.1.8",
     "@profullstack/redeem-credits": "0.2.0",
     "@profullstack/sealed-secrets": "0.1.0",
-    "@profullstack/x402-gateway": "^0.13.1",
+    "@profullstack/x402-gateway": "^0.18.3",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
     "clsx": "^2.1.1",
