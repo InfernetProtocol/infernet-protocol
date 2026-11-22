@@ -74,6 +74,9 @@
 #   INFERNET_PUBLIC_PORT=port     P2P port (default 46337)
 #   INFERNET_AUTOSTART=0          set to 0 to install only, skip setup+start
 #   INFERNET_NO_AUTOUPDATE=1       skip the hourly per-user CLI update check
+#   INFERNET_REFERRAL=code          or  --referral <code>: the node referral code
+#                                   (infernetprotocol.com/r/<code>), sent when the
+#                                   node registers; set once, never changed after
 #
 # House models (ON by default): provider nodes pull and serve the models
 # listed at https://infernetprotocol.com/house-models.json that fit the box
@@ -1605,15 +1608,25 @@ force_wipe() {
 
 main() {
     # Flag parsing — the script is usually piped (curl | sh -s -- --force).
+    _next_is_referral=0
     for _arg in "$@"; do
+        if [ "$_next_is_referral" = 1 ]; then INFERNET_REFERRAL="$_arg"; _next_is_referral=0; continue; fi
         case "$_arg" in
             --force) INFERNET_FORCE=1 ;;
             --no-house-models) INFERNET_NO_HOUSE_MODELS=1 ;;
             --no-uncensored-models) INFERNET_NO_UNCENSORED_MODELS=1 ;;
+            --referral=*|--ref-code=*) INFERNET_REFERRAL="${_arg#*=}" ;;
+            --referral|--ref-code) _next_is_referral=1 ;;
             *) : ;;
         esac
     done
-    unset _arg
+    unset _arg _next_is_referral
+    # A referral code rides into `infernet register` (run by setup below),
+    # which saves it with the node and sends it once at registration.
+    if [ -n "${INFERNET_REFERRAL:-}" ]; then
+        export INFERNET_REFERRAL
+        info "referral code: $INFERNET_REFERRAL (applied when this node registers)"
+    fi
 
     printf '\n'
     printf '%sInfernet Protocol installer%s\n' "$BOLD" "$RESET"

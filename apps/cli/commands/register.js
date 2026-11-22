@@ -87,8 +87,21 @@ Flags:
   --gpu-model <name>  GPU model (providers only)
   --price <n>         Price offer (providers only)
   --no-advertise      Don't send address / port
+  --ref <code>        Node referral code (infernetprotocol.com/r/<code>).
+                      Also INFERNET_REFERRAL. Set once, at this node's first
+                      registration, before its first paid job; never changes.
   --help              Show this help
 `;
+
+/** The referral code to send: --ref, else INFERNET_REFERRAL, else one saved but never answered. */
+export function referralCodeToSend(args, node, env = process.env) {
+    const flag = args.get('ref') ?? args.get('referral');
+    const raw = typeof flag === 'string' && flag ? flag : (env.INFERNET_REFERRAL || null);
+    if (raw) return String(raw).trim();
+    // Saved by an earlier register whose answer never came back (offline).
+    if (node?.referral?.code && node.referral.attributed === undefined) return node.referral.code;
+    return null;
+}
 
 function vramTier(vramMb) {
     if (!Number.isFinite(vramMb) || vramMb <= 0) return 'unknown';
@@ -246,6 +259,12 @@ export default async function register(args, ctx) {
     if (address) payload.address = address;
     if (Number.isFinite(port) && port > 0) payload.port = port;
 
+    const referralCode = node.role === 'provider' ? referralCodeToSend(args, node) : null;
+    // A node that already has an answer (attributed or refused) does not ask
+    // again unless --ref is given: attribution is set once.
+    const sendReferral = referralCode && (args.get('ref') || args.get('referral') || node?.referral?.attributed === undefined);
+    if (sendReferral) payload.referral_code = referralCode;
+
     if (node.role === 'provider') {
         const specs = await gatherCoarseSpecs();
         payload.specs = specs;
@@ -268,9 +287,19 @@ export default async function register(args, ctx) {
     try {
         row = await client.register(payload);
     } catch (err) {
+        // Keep the code so the next register (setup, a restart) sends it.
+        if (sendReferral && node?.referral?.code !== referralCode) {
+            await saveConfig({ ...config, node: { ...node, referral: { code: referralCode } } }).catch(() => {});
+        }
         process.stderr.write(`Register failed: ${err?.message ?? err}\n`);
         return 1;
     }
+    const referral = sendReferral
+        ? (row?.referral
+            ? { code: referralCode, attributed: Boolean(row.referral.attributed), reason: row.referral.reason ?? null }
+            // An older control plane ignores the field: keep it unanswered.
+            : { code: referralCode })
+        : node.referral;
 
     // The register response can be terse on older deployments
     // (sometimes just { node_id }, no id). Fetch the canonical row
@@ -294,7 +323,8 @@ export default async function register(args, ctx) {
             ...node,
             id: canonicalId ?? node.id ?? null,
             address: noAdvertise ? null : (address ?? node.address ?? null),
-            port: noAdvertise ? null : (Number.isFinite(port) ? port : node.port ?? null)
+            port: noAdvertise ? null : (Number.isFinite(port) ? port : node.port ?? null),
+            ...(referral ? { referral } : {})
         }
     };
     await saveConfig(nextConfig);
@@ -302,6 +332,11 @@ export default async function register(args, ctx) {
     const displayId = canonicalId ?? "(server did not return one)";
     const displayNodeId = canonical?.node_id ?? row?.node_id ?? node.nodeId;
     process.stdout.write(`Registered. id=${displayId} node_id=${displayNodeId}\n`);
+    if (sendReferral && row?.referral) {
+        process.stdout.write(row.referral.attributed
+            ? `Referral: this node is credited to code ${referralCode}.\n`
+            : `Referral not applied: ${row.referral.message ?? row.referral.reason}\n`);
+    }
     if (canonicalId) {
         process.stdout.write(`Config updated with assigned uuid at ${configPath}\n`);
     } else {

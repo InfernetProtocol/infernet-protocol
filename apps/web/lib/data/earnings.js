@@ -478,16 +478,20 @@ export async function listPayoutRequests({ status = "requested", limit = 100 } =
     const { data, error } = await q;
     if (error) throw withStatus(error.message, 500);
     const rows = data ?? [];
-    const balances = rows.length
-        ? (await getEarningsForProviders([...new Set(rows.map((r) => r.provider_id))])).per_provider
-        : {};
+    const providerIds = [...new Set(rows.map((r) => r.provider_id).filter(Boolean))];
+    const balances = providerIds.length ? (await getEarningsForProviders(providerIds)).per_provider : {};
+    const referrerBalances = {};
+    for (const uid of new Set(rows.map((r) => r.referrer_user_id).filter(Boolean))) {
+        referrerBalances[uid] = await referralBalance(supabase, uid);
+    }
     return {
         rows: rows.map((r) => ({
             ...r,
-            provider_name: r.providers?.name ?? null,
+            // A referral-commission payout has a referrer instead of a node.
+            provider_name: r.referrer_user_id ? "referral commissions" : r.providers?.name ?? null,
             provider_node_id: r.providers?.node_id ?? null,
             providers: undefined,
-            balance: balances[r.provider_id] ?? null
+            balance: r.referrer_user_id ? referrerBalances[r.referrer_user_id] ?? null : balances[r.provider_id] ?? null
         }))
     };
 }
@@ -531,6 +535,26 @@ async function ownerEmail(supabase, providerId) {
     return `provider-${providerId}@payouts.infernetprotocol.com`;
 }
 
+/** A referrer's commission balance (lib/referrals/core summariseCommissions). */
+async function referralBalance(supabase, userId) {
+    const { summariseCommissions } = await import("@/lib/referrals/core");
+    const [commissions, payouts] = await Promise.all([
+        selectAll(() => supabase.from("referral_commissions").select("amount_usd, status").eq("referrer_user_id", userId).order("id")),
+        selectAll(() => supabase.from("payout_requests").select("amount_usd, status").eq("referrer_user_id", userId).order("id"))
+    ]);
+    return summariseCommissions(commissions, payouts);
+}
+
+async function referrerEmail(supabase, userId) {
+    try {
+        const { data } = await supabase.auth.admin.getUserById(userId);
+        if (data?.user?.email) return data.user.email;
+    } catch {
+        /* fall through */
+    }
+    return `referrer-${userId}@payouts.infernetprotocol.com`;
+}
+
 /**
  * Admin approves one request: re-checks the balance, then sends it through
  * CoinPay. An unknown outcome (timeout, 5xx) stays 'sending' so nobody can
@@ -544,7 +568,9 @@ export async function approvePayoutRequest(id, { actor, send } = {}) {
     if (reqRow.status !== "requested") throw withStatus(`payout request is ${reqRow.status}, not requested`, 409);
 
     // Balance excluding this request itself must still cover it.
-    const { balance } = await getEarningsForProviders([reqRow.provider_id]);
+    const { balance } = reqRow.referrer_user_id
+        ? { balance: await referralBalance(supabase, reqRow.referrer_user_id) }
+        : await getEarningsForProviders([reqRow.provider_id]);
     const coverable = Number(balance.available_usd) + Number(reqRow.amount_usd);
     if (Number(reqRow.amount_usd) > coverable + 1e-9) {
         throw withStatus(`balance no longer covers $${reqRow.amount_usd}`, 409);
@@ -573,11 +599,15 @@ export async function approvePayoutRequest(id, { actor, send } = {}) {
     let outcome;
     try {
         outcome = await sender({
-            recipientEmail: await ownerEmail(supabase, reqRow.provider_id),
+            recipientEmail: reqRow.referrer_user_id
+                ? await referrerEmail(supabase, reqRow.referrer_user_id)
+                : await ownerEmail(supabase, reqRow.provider_id),
             recipientWallet: reqRow.address,
             amountUsd: Number(reqRow.amount_usd),
             cryptocurrency,
-            metadata: { payout_request_id: id, provider_id: reqRow.provider_id },
+            metadata: reqRow.referrer_user_id
+                ? { payout_request_id: id, referrer_user_id: reqRow.referrer_user_id, kind: "referral_commission" }
+                : { payout_request_id: id, provider_id: reqRow.provider_id },
             idempotencyKey: `payout:${id}`
         });
     } catch (err) {
@@ -631,7 +661,9 @@ export async function approvePayoutRequest(id, { actor, send } = {}) {
             status: "confirmed",
             provider_gateway: "coinpayportal",
             confirmed_at: done,
-            metadata: { payout_request_id: id }
+            metadata: reqRow.referrer_user_id
+                ? { payout_request_id: id, referrer_user_id: reqRow.referrer_user_id, kind: "referral_commission" }
+                : { payout_request_id: id }
         }).then(({ error: e }) => e && console.warn(`payout audit row failed: ${e.message}`));
     }
     return { request: updated, outcome: notSent ? "not_sent" : outcome.outcome };
