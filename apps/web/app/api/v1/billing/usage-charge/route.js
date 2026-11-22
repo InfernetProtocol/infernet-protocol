@@ -42,7 +42,7 @@ export async function POST(request) {
     const trusted = trustedClientFor(bearer);
     if (!trusted) return fail(403, "this endpoint is for trusted clients only");
 
-    const subject = billedSubjectFrom(request, trusted);
+    const subject = await billedSubjectFrom(request, trusted);
     if (!subject) return fail(400, "name the person to charge with X-Infernet-Billed-Subject (their CoinPay sub)");
 
     let body;

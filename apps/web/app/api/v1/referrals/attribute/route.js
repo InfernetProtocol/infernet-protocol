@@ -46,7 +46,7 @@ export async function POST(request) {
     const check = verifyC0mputeClaim({ peerId, code, ts: body.ts, sig: body.sig });
     if (!check.ok) return NextResponse.json({ error: check.error, reason: "bad_signature" }, { status: 401 });
 
-    const subject = billedSubjectFrom(request, trusted);
+    const subject = await billedSubjectFrom(request, trusted);
     const ownerUserId = subject ? await userIdForCoinpaySubject(subject) : null;
     try {
         const out = await attributeNode({ nodeKey: `c0mpute:${peerId}`, code, via: "c0mpute-node", ip, ownerUserId });

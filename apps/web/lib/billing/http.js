@@ -35,7 +35,7 @@ export async function requireCaller(request) {
 export async function trustedSubjectCaller(request) {
     const trusted = trustedClientFor(bearerFrom(request.headers.get("authorization")));
     if (!trusted) return null;
-    const subject = billedSubjectFrom(request, trusted);
+    const subject = await billedSubjectFrom(request, trusted);
     if (!subject) {
         return { error: fail(400, "missing_subject", { message: "name the person with X-Infernet-Billed-Subject (their CoinPay sub)" }) };
     }
