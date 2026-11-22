@@ -23,6 +23,7 @@ import { loadConfig } from "../lib/config.js";
 import { submitChatJob, streamChatEvents } from "../lib/remote-chat.js";
 import { createPluginsClient, readSse } from "../lib/plugins-client.js";
 import { createInterface } from "node:readline/promises";
+import { createApiClient, resolveApiKey, resolveBaseUrl } from "../lib/api-client.js";
 
 const HELP = `infernet chat — run a chat inference (P2P network or local)
 
@@ -31,10 +32,13 @@ Usage:
   echo "..." | infernet chat [flags]
 
 Routing:
-  --remote               Force the P2P network (control plane required).
+  (default)              With an API key (INFERNET_API_KEY, or one stored by
+                         \`infernet quickstart\`): the OpenAI-compatible API,
+                         model "auto" unless --model. Otherwise the network if
+                         config.controlPlane.url is set, else the local engine.
+  --remote               Force the P2P job path (/api/chat, control plane required).
   --local                Force the local engine (Ollama / Mojo / stub).
-  (default)              Use the network if config.controlPlane.url is
-                         set; otherwise fall back to the local engine.
+  --key <ik_live_...>    Use this API key for this call.
 
 Common flags:
   --model <name>         Model id (e.g. qwen2.5:7b). $INFERNET_ENGINE_MODEL fallback.
@@ -132,6 +136,29 @@ async function runRemote({ baseUrl, messages, model, temperature, maxTokens, jso
         process.off("SIGINT", onSigint);
     }
     return exitCode;
+}
+
+/** The API-key path: POST /v1/chat/completions, streamed. */
+async function runApi({ baseUrl, apiKey, messages, model, temperature, maxTokens, jsonMode }) {
+    const ctrl = new AbortController();
+    const onSigint = () => { process.stderr.write("\n[cancelled]\n"); ctrl.abort(); };
+    process.on("SIGINT", onSigint);
+    try {
+        const api = createApiClient({ baseUrl, apiKey });
+        const r = await api.chat({
+            messages, model, temperature, maxTokens, signal: ctrl.signal,
+            onToken: jsonMode ? (t) => emitJson({ type: "token", text: t }) : (t) => process.stdout.write(t)
+        });
+        if (jsonMode) emitJson({ type: "done", model: r.model, source: r.source, text: r.text });
+        else if (process.stdout.isTTY || !r.text.endsWith("\n")) process.stdout.write("\n");
+        return 0;
+    } catch (err) {
+        if (jsonMode) emitJson({ type: "error", status: err?.status ?? null, message: err?.message ?? String(err) });
+        else process.stderr.write(`error: ${err?.message ?? err}\n`);
+        return 1;
+    } finally {
+        process.off("SIGINT", onSigint);
+    }
 }
 
 async function askApproval(call) {
@@ -304,6 +331,27 @@ export default async function chat(args) {
     const maxTokens =
         args.get("max-tokens") != null ? Number(args.get("max-tokens")) : undefined;
     const jsonMode = args.has("json");
+
+    // An API key (env, --key, or stored by `infernet quickstart`): the
+    // OpenAI-compatible endpoint, billed to that key's account. Plugin turns
+    // still win for a signed-in person who has plugins on.
+    const apiKey = resolveApiKey({ flag: args.get("key"), config }).key;
+    if (apiKey && !wantLocal && !wantRemote) {
+        const baseUrl = resolveBaseUrl({ flag: urlArg, config });
+        const token = config.auth?.bearerToken ?? null;
+        if (token && !args.has("no-plugins")) {
+            try {
+                const d = await createPluginsClient({ baseUrl, token }).list();
+                const usable = (d.plugins ?? []).filter((p) => p.enabled && !p.needs_sign_in);
+                if (usable.length) {
+                    return runPluginChat({ baseUrl, token, messages, model, maxTokens, jsonMode, autoYes: args.has("yes") });
+                }
+            } catch {
+                /* plugins unavailable: plain API turn */
+            }
+        }
+        return runApi({ baseUrl, apiKey, messages, model: args.get("model") ?? "auto", temperature, maxTokens, jsonMode });
+    }
 
     if (mode === "remote") {
         if (!remoteUrl) {

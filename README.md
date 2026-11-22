@@ -30,6 +30,27 @@ Canonical links:
 
 ---
 
+## Use the API (one command)
+
+```bash
+npx @infernetprotocol/cli quickstart
+```
+
+Signs you in, creates an `ik_live_` key (stored in `~/.config/infernet/config.json`, never your
+project), runs a test completion with model `auto` and prints curl / JavaScript / Python code for
+the OpenAI-compatible API at `https://infernetprotocol.com/v1`. Then `infernet chat "..."` works in
+one line. Docs: https://infernetprotocol.com/docs#quickstart
+
+In Claude Code:
+
+```bash
+claude plugin marketplace add InfernetProtocol/infernet-protocol
+claude plugin install infernet@infernet
+```
+
+That adds `/infernet:setup`, `/infernet:chat`, `/infernet:models`, `/infernet:status`, an
+`infernet` skill and the Infernet MCP tools. Any MCP client: `npx -y @infernetprotocol/cli mcp`.
+
 ## Getting started
 
 Two lines on Linux, macOS, or Windows (WSL2):

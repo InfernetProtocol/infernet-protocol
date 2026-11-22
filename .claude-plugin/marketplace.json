@@ -1,0 +1,16 @@
+{
+  "name": "infernet",
+  "owner": { "name": "Infernet Protocol", "url": "https://infernetprotocol.com" },
+  "metadata": {
+    "description": "Infernet Protocol plugins for Claude Code: open models on a peer-to-peer GPU network through an OpenAI-compatible API."
+  },
+  "plugins": [
+    {
+      "name": "infernet",
+      "source": "./claude-plugin",
+      "description": "Use the Infernet API from Claude Code: /infernet:setup gets a key in one command, then chat, list live models and check your balance. Skill + MCP tools included.",
+      "category": "ai",
+      "homepage": "https://infernetprotocol.com/docs#quickstart"
+    }
+  ]
+}
