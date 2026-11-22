@@ -210,8 +210,8 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0
       '@profullstack/chat-plugins':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.2.0
+        version: 0.2.0
       '@profullstack/coinpay-onboard':
         specifier: 0.3.1
         version: 0.3.1
@@ -220,7 +220,7 @@ importers:
         version: 1.2.1(@types/node@26.6.5)
       '@profullstack/footer':
         specifier: latest
-        version: 0.6.20(react@19.3.1)
+        version: 0.7.0(react@19.3.1)
       '@profullstack/form-guard':
         specifier: ^0.2.2
         version: 0.2.2
@@ -1121,7 +1121,7 @@ packages:
 
   '@expo/bunyan@4.0.1':
     resolution: {integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==}
-    engines: {'0': node >=0.10.0}
+    engines: {node: '>=0.10.0'}
 
   '@expo/cli@0.17.13':
     resolution: {integrity: sha512-n13yxOmI3I0JidzMdFCH68tYKGDtK4XlDFk1vysZX7AIRKeDVRsSbHhma5jCla2bDt25RKmJBHA9KtzielwzAA==}
@@ -1642,8 +1642,8 @@ packages:
     resolution: {integrity: sha512-gTOPS+Gm9fJ99EvvppXq6hS3FU/N9V5lPC5z81z+8lhCDahfekKwd0OdRN4WU61FNjgQWPb4wdzrYSWp4jCsjQ==}
     engines: {node: '>=20'}
 
-  '@profullstack/chat-plugins@0.1.0':
-    resolution: {integrity: sha512-V6KwXpevLQFExiGwl3PlvX82s0GWae4VnajVOAeTF7+rl/ODfS+Yawmcf10VtjOdnK+JM45NRy0l95t8kX9jsg==}
+  '@profullstack/chat-plugins@0.2.0':
+    resolution: {integrity: sha512-ewvgaXAqlSTuXmT5+IvVRi36cWtLuTT1QOs9wfRgq1pUINTnUklYFMvXF0y0XWHBF36vLTQpTVrry0yBZFbL4g==}
     engines: {node: '>=20'}
 
   '@profullstack/cli@0.2.0':
@@ -1660,8 +1660,8 @@ packages:
     engines: {node: '>=20.0.0'}
     hasBin: true
 
-  '@profullstack/footer@0.6.20':
-    resolution: {integrity: sha512-JEB1hZCKSKRro6EI95JMUM4lBX39DUKk6i5ukcKpgeCo+jxwBYcUGiHBrDTdd0/n46M1ECOG4IrDHjgFNGmvGQ==}
+  '@profullstack/footer@0.7.0':
+    resolution: {integrity: sha512-Xvisf7+VTTy7VsX7UTY0VijybHr+Cx3hxlnNT0ExOHq6i1sUxQ1yM1wjYQJumP86oan93vgBODR6DQ0uZKINoA==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -8382,7 +8382,7 @@ snapshots:
 
   '@profullstack/browser-fingerprint@0.1.0': {}
 
-  '@profullstack/chat-plugins@0.1.0': {}
+  '@profullstack/chat-plugins@0.2.0': {}
 
   '@profullstack/cli@0.2.0': {}
 
@@ -8401,7 +8401,7 @@ snapshots:
     transitivePeerDependencies:
       - '@types/node'
 
-  '@profullstack/footer@0.6.20(react@19.3.1)':
+  '@profullstack/footer@0.7.0(react@19.3.1)':
     optionalDependencies:
       react: 19.3.1
 
