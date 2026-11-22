@@ -41,8 +41,8 @@ function reservation(over = {}) {
         id: "44444444-4444-4444-8444-444444444444",
         name: "house-lane", operator_name: "Profullstack", target_kind: "node",
         provider_id: NODE, endpoint_url: null, models: [MODEL], start_at: start, hours: 8784,
-        included_tokens: 0, tokens_used: 0, per_key_rps: 5, per_key_concurrency: 4,
-        shared_rps: 5, shared_concurrency: 4, required_minutes_per_hour: 60, status: "scheduled",
+        included_tokens: 0, tokens_used: 0, per_key_rps: 100, per_key_concurrency: 4,
+        shared_rps: 100, shared_concurrency: 4, required_minutes_per_hour: 60, status: "scheduled",
         house_lane: true,
         ...over
     };
@@ -60,6 +60,7 @@ vi.mock("@/lib/data/chat", () => ({ createChatJob: (...a) => createChatJob(...a)
 vi.mock("@/lib/data/chat-stream", () => ({
     streamJobEvents: async function* () {
         yield { type: "token", data: { text: "Your A1c was 6.1%." } };
+        if (state.noEnd) return;
         yield { type: "done", data: {} };
     }
 }));
@@ -83,6 +84,7 @@ function request(headers = {}, body = {}) {
 const houseHeaders = (over = {}) => ({ "x-infernet-client-key": TRUSTED_KEY, "x-infernet-billed-subject": SUB, ...over });
 
 beforeEach(() => {
+    state.noEnd = false;
     state.reservation = reservation();
     state.subjects = { [SUB]: USER };
     state.billing = { mode: "balance", spendable_usd: "1.000000" };
@@ -183,6 +185,13 @@ describe("serveChatCompletion on a house-lane reservation", () => {
         expect(text).toContain('"object":"infernet.house"');
         expect(text.trim().endsWith("data: [DONE]")).toBe(true);
         expect(purgeJobContent).toHaveBeenCalledWith("job-1");
+    });
+
+    it("keeps the prompt for a job the node has not finished (caller left); the sweep purges it later", async () => {
+        state.noEnd = true;
+        const res = await serveChatCompletion(request(houseHeaders(), { stream: true }), RES_KEY);
+        await res.text();
+        expect(purgeJobContent).not.toHaveBeenCalled();
     });
 
     it("fails closed (503) when the house node cannot take it, and tries no other node", async () => {

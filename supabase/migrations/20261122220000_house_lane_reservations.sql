@@ -32,3 +32,7 @@ alter table public.jobs
 create index if not exists jobs_no_retain_unpurged_idx
     on public.jobs (created_at)
     where no_retain and content_purged_at is null;
+
+-- PostgREST caches the schema: reload it so the API sees house_lane (on dev2 a
+-- notify was not enough once; restart infernetprotocol-com-supabase-rest then).
+notify pgrst, 'reload schema';
