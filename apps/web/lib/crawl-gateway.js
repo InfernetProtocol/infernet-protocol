@@ -25,7 +25,7 @@ export const gateway = createGateway({
     // The API (nodes, the CLI, health checks, webhooks), the installer and
     // the crawl manifests are never charged. Invite links (/i/<code>) are never
     // gated either: a shared invite must always reach signup.
-    openPaths: ["/api/", "/i/", "/install.sh", "/robots.txt", "/sitemap.xml", "/llms.txt", "/.well-known/"],
+    openPaths: ["/api/", "/i/", "/r/", "/install.sh", "/robots.txt", "/sitemap.xml", "/llms.txt", "/.well-known/"],
     // Signed-in users (Supabase auth cookie) are never charged.
     exempt: (request) => /(?:^|;\s*)sb-[^=]*-auth-token/.test(request.headers.get("cookie") ?? "")
 });

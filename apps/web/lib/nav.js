@@ -27,6 +27,7 @@ export const NAV_GROUPS = [
             { href: "/getting-started", label: "Run a node", hint: "Install the CLI and start earning" },
             { href: "/docs#earnings", label: "Earnings", hint: "How serving jobs pays you" },
             { href: "/docs#cli-payout", label: "Payouts", hint: "Withdraw to your wallet" },
+            { href: "/refer", label: "Refer a node", hint: "A share of the house fee on nodes you bring in" },
             { href: "/gpu", label: "GPU fleet", hint: "Every GPU model on the network" },
             { href: "/cpu", label: "CPU fleet", hint: "Every CPU class on the network" },
             { href: "/status", label: "Network status", hint: "Live nodes, models and jobs" }
@@ -70,6 +71,7 @@ export const ACCOUNT_GROUP = {
         { href: "/dashboard/earnings", label: "Earnings", hint: "What your nodes earned" },
         { href: "/dashboard/billing", label: "Billing & API keys", hint: "Balance, top-ups and keys" },
         { href: "/invites", label: "Invites", hint: "Invite codes and credits" },
+        { href: "/refer", label: "Refer a node", hint: "Your referral link and commissions" },
         { href: "/settings", label: "Settings", hint: "Your account" }
     ]
 };

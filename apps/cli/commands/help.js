@@ -51,6 +51,7 @@ Payments:
   credits      Your consumer compute credits (not earnings); redeem a code
   redeem       Redeem a credit code: infernet redeem CR-XXXX-XXXX-XXXX-XXXX
   invites      Scarce invites (both sides get credits) and your affiliate link
+  referral     Refer a node: your link, commissions (a share of the house fee), payouts
 
 Paid inference:
   batch        Paid batch inference from a JSONL file: quote, submit, status, results
