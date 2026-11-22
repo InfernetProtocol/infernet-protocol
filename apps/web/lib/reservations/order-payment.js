@@ -1,4 +1,5 @@
 import "server-only";
+import { coinpayFetch } from "../coinpay-ua.js";
 import { buildOffer, paymentRequiredHeader, paymentResponseHeader, decodePayment, expectedFor, verifyAndSettle } from "@profullstack/x402-gateway";
 
 /**
@@ -51,6 +52,7 @@ export async function settleOrderPayment(payment, offer, metadata) {
     const result = await verifyAndSettle(payment, expected, {
         apiKey: env("COINPAY_X402_KEY"),
         baseUrl: coinpayBase(),
+        fetch: coinpayFetch,
         metadata: { property: "infernetprotocol.com", ...metadata }
     });
     return { ...result, nonce: nonceOf(payment) };

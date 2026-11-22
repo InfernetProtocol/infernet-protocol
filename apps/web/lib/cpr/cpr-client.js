@@ -1,4 +1,5 @@
 import "server-only";
+import { COINPAY_UA } from "../coinpay-ua.js";
 
 /**
  * IPIP-0007 phase 2 — HTTP client for CoinPayPortal's CPR API.
@@ -66,7 +67,8 @@ export async function submitReceipt(receipt, opts = {}) {
             headers: {
                 "content-type": "application/json",
                 accept: "application/json",
-                authorization: `Bearer ${apiKey}`
+                authorization: `Bearer ${apiKey}`,
+                "user-agent": COINPAY_UA
             },
             body: JSON.stringify(receipt),
             signal: ctrl.signal

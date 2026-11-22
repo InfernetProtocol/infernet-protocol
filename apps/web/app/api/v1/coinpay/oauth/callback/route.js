@@ -3,6 +3,7 @@ import { saveOpenProfileContact } from "@profullstack/profile";
 import { userProfileStore } from "@/lib/data/user-profile";
 import { revalidatePath } from "next/cache";
 import { finishSignIn, sameState } from "@profullstack/coinpay-onboard/oauth";
+import { coinpayFetch } from "@/lib/coinpay-ua";
 import { getSupabaseAuthClient } from "@/lib/supabase/auth-server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { afterSignIn } from "@/lib/credits/sign-in";
@@ -59,6 +60,7 @@ export async function GET(request) {
             clientSecret: cfg.clientSecret,
             redirectUri: cfg.redirectUri,
             base: cfg.issuer,
+            fetch: coinpayFetch,
         });
         claims = { sub: r.sub, email: r.email ? r.email.slice(0, 320) : null, name: r.name ? r.name.slice(0, 200) : null, ...(typeof r.userinfo?.openprofile_url === "string" ? { openprofile_url: r.userinfo.openprofile_url } : {}) };
     } catch (e) {

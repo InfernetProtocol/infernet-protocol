@@ -122,6 +122,9 @@ export function apiOrigin(base = env("COINPAY_API_URL", "COINPAYPORTAL_API_BASE_
     }
 }
 
+/** Names the app to CoinPay so its logs and throttle can tell the fleet apart (all on one IP). */
+export const COINPAY_UA = "infernetprotocol.com (+https://infernetprotocol.com) @infernetprotocol/payments";
+
 async function raw(path, { method = "GET", body, headers = {}, timeoutMs = 15_000, key = null } = {}) {
     const url = `${apiOrigin()}${path}`;
     const controller = new AbortController();
@@ -133,6 +136,7 @@ async function raw(path, { method = "GET", body, headers = {}, timeoutMs = 15_00
                 authorization: `Bearer ${key ?? apiKey()}`,
                 "content-type": "application/json",
                 accept: "application/json",
+                "user-agent": COINPAY_UA,
                 ...headers
             },
             body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
