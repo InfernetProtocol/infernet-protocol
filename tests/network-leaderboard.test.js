@@ -8,7 +8,7 @@ const PEER = "12D3KooWAbCdEfGhJkLmNpQrStUvWxYz123456789abcdeFGH";
 
 const rows = {
     providers: [
-        { id: "p-c0", node_id: `c0mpute:${PEER}`, public_key: "pk-alice" },
+        { id: "p-c0", node_id: `c0mpute:${PEER}`, public_key: "pk-alice", is_public: false }, // bridge-made: always is_public false
         { id: "p-bob", node_id: "bob-box", public_key: "pk-bob" },
         { id: "p-hidden", node_id: "secret", public_key: "pk-carol", is_public: false },
         { id: "p-arch", node_id: "gone", public_key: "pk-carol", archived_at: ago(5), archived_is_public: false }
