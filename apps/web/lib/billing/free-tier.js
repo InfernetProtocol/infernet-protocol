@@ -197,7 +197,13 @@ export const RUN_A_NODE_URL = "https://infernetprotocol.com/getting-started#oper
  * `opts` is usually the consumeFreeQuery result itself ({ operator,
  * operatorLimit }).
  */
-export function freeLimitMessage(limit, { operator = false, operatorLimit = DEFAULT_OPERATOR_FREE_QUERIES_PER_DAY } = {}) {
+export function freeLimitMessage(limit, { operator = false, operatorLimit = DEFAULT_OPERATOR_FREE_QUERIES_PER_DAY, reason = null } = {}) {
+    // The app's shared daily ceiling (lib/billing/signed-subject.js), not the
+    // person's own ten: say so, or they would be told they used ten they did not.
+    if (reason === "origin_ceiling") {
+        return "this app's free queries for today are used up. "
+            + "Top up a compute balance to keep going: POST /api/v1/billing/topup.";
+    }
     let m = `free daily limit reached (${limit} ${limit === 1 ? "query" : "queries"} a day). `
         + "Top up a compute balance to keep going, or spend what your nodes earned: "
         + "POST /api/v1/billing/topup, or /api/v1/billing/fund-from-earnings.";

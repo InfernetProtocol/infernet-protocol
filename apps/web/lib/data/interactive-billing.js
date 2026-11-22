@@ -429,6 +429,11 @@ export async function resolveBillingCaller(request, { trusted = null } = {}) {
         const { billedSubjectFrom } = await import("@/lib/trusted-clients");
         const sub = billedSubjectFrom(request, trusted);
         if (sub) {
+            // A signed client-minted subject (`c0mpute:<id>`) is a person with
+            // no CoinPay identity, so there is no account to look up: free
+            // tier, metered per person (billedSubjectFrom verified it).
+            const { signedSubjectOrigin } = await import("@/lib/billing/signed-subject");
+            if (signedSubjectOrigin(sub)) return { userId: null, via: `trusted_signed:${trusted.name}`, subject: sub };
             const userId = await userIdForCoinpaySubject(sub);
             if (userId) return { userId, via: `trusted:${trusted.name}` };
             // The client named someone with no Infernet account yet. Serve them
