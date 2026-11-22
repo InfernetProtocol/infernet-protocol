@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// Same words as @profullstack/chat-plugins MODEL_CAN_BE_WRONG (not imported: that package is server-side).
+const MODEL_CAN_BE_WRONG = "The model can be wrong. You decide: nothing here runs until you approve it.";
+
 export { describePlugins, parsePluginCommand } from "@/lib/plugins/commands";
 
 /*
@@ -124,12 +127,25 @@ export function usePlugins() {
     }
   }, [refresh]);
 
+  // Brokerage plugins: paper (default) or live. Live is only ever the person's own choice.
+  const setMode = useCallback(async (slug, mode) => {
+    setError(null);
+    try {
+      const r = await api(`/api/v1/plugins/${encodeURIComponent(slug)}/mode`, { method: "POST", body: JSON.stringify(mode === "live" ? { mode, confirm: true } : { mode }) });
+      await refresh();
+      return r;
+    } catch (e) {
+      setError(e.message);
+      throw e;
+    }
+  }, [refresh]);
+
   const enabled = plugins.filter((p) => p.enabled && !p.needs_sign_in);
-  return { plugins, catalog, signedIn, error, setError, busy, refresh, add, remove, toggle, openSignIn, enabledCount: enabled.length };
+  return { plugins, catalog, signedIn, error, setError, busy, refresh, add, remove, toggle, setMode, openSignIn, enabledCount: enabled.length };
 }
 
 export function PluginsPanel({ state, onClose }) {
-  const { plugins, catalog, signedIn, error, busy, add, remove, toggle, openSignIn, setError } = state;
+  const { plugins, catalog, signedIn, error, busy, add, remove, toggle, setMode, openSignIn, setError } = state;
   const [url, setUrl] = useState("");
   const installed = new Set(plugins.map((p) => p.url.replace(/\/+$/, "")));
 
@@ -164,9 +180,28 @@ export function PluginsPanel({ state, onClose }) {
                   <div className="min-w-0">
                     <p className="truncate text-sm text-white">{p.name} <span className="text-xs text-[var(--muted)]">/{p.slug}</span></p>
                     <p className="truncate text-xs text-[var(--muted)]" title={p.url}>
-                      {p.needs_sign_in ? "Sign in to use it" : `${p.tools.length} tool${p.tools.length === 1 ? "" : "s"}`}
+                      {p.needs_sign_in ? (p.kind ? "On, not connected: sign in with your own account to use it" : "Sign in to use it") : `${p.tools.length} tool${p.tools.length === 1 ? "" : "s"}`}
                       {p.last_error ? ` · ${p.last_error}` : ""}
                     </p>
+                    {p.kind === "trading" ? (
+                      <p className="text-xs">
+                        <span className={p.trading_mode === "live" ? "text-[var(--warn)]" : "text-[var(--muted)]"}>
+                          {p.trading_mode === "live" ? "LIVE account: orders use real money" : "Paper trading (simulated)"}
+                        </span>{" "}
+                        <button
+                          type="button"
+                          className="underline text-[var(--muted)] hover:text-white"
+                          onClick={() =>
+                            p.trading_mode === "live"
+                              ? setMode(p.slug, "paper").catch(() => {})
+                              : window.confirm(`Switch ${p.slug} to your LIVE account? Orders will use real money. Every order still asks you first.\n\n${MODEL_CAN_BE_WRONG}`) && setMode(p.slug, "live").catch(() => {})
+                          }
+                        >
+                          {p.trading_mode === "live" ? "back to paper" : "switch to live"}
+                        </button>
+                        <span className="block text-[var(--muted)]">{MODEL_CAN_BE_WRONG}</span>
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
                     {p.can_sign_in ? (
@@ -262,7 +297,7 @@ export function ToolCallCard({ call }) {
 }
 
 export function ApprovalCard({ approval, onDecide }) {
-  const { call, answered } = approval;
+  const { call, answered, summary } = approval;
   const args = prettyArgs(call.arguments);
   return (
     <div className="my-2 rounded-xl border border-[var(--warn)]/50 bg-[var(--warn)]/10 px-3 py-3 text-xs">
@@ -270,7 +305,32 @@ export function ApprovalCard({ approval, onDecide }) {
         Allow <strong>{call.pluginName || call.plugin}</strong> to run <strong>{call.title || call.tool}</strong>?
       </p>
       <p className="mt-1 text-[var(--muted)]">This tool can change or delete things on {call.pluginName || call.plugin}.</p>
-      {args ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 font-mono">{args}</pre> : null}
+      {summary ? (
+        <div className="mt-2">
+          <p className="text-sm text-white">{summary.title}</p>
+          <table className="mt-1">
+            <tbody>
+              {summary.lines.map((l, i) => (
+                <tr key={i}>
+                  <td className="pr-3 align-top text-[var(--muted)] whitespace-nowrap">{l.label}</td>
+                  <td className={`break-all ${l.label === "Account" && summary.account === "live" ? "text-[var(--warn)]" : "text-white"}`}>{l.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {summary.note ? <p className="mt-1 text-[var(--muted)]">{summary.note}</p> : null}
+        </div>
+      ) : null}
+      {args ? (
+        summary ? (
+          <details className="mt-2">
+            <summary className="cursor-pointer text-[var(--muted)]">Exact arguments</summary>
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 font-mono">{args}</pre>
+          </details>
+        ) : (
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 font-mono">{args}</pre>
+        )
+      ) : null}
       {answered ? (
         <p className="mt-2 text-[var(--muted)]">{answered === "allow" ? "Allowed." : "Declined."}</p>
       ) : (

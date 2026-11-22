@@ -1,5 +1,5 @@
 import "server-only";
-import { runToolLoop } from "@profullstack/chat-plugins";
+import { describeAction, policyFor, redactLog, runToolLoop } from "@profullstack/chat-plugins";
 import { createChatJob, liveModelNames } from "@/lib/data/chat";
 import { streamJobEvents } from "@/lib/data/chat-stream";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
@@ -167,15 +167,19 @@ export function pluginChatResponse({ request, payload, userId, billing, payer, i
                 if (result.status === "pending" && result.pending) {
                     const approvalId = await saveApproval(userId, result.pending, modelName);
                     const c = result.pending.call;
+                    // Money plugins: the exact action in words (amount, currency, from, to, memo; or the order and paper/live).
+                    const url = plugins.find((p) => p.slug === c.plugin)?.url ?? "";
+                    const summary = describeAction(policyFor(url), c.tool, c.arguments ?? {});
                     send({
                         type: "approval_needed",
                         approvalId,
-                        call: { id: c.id, name: c.name, plugin: c.plugin, pluginName: c.pluginName, tool: c.tool, title: c.title, arguments: c.arguments }
+                        call: { id: c.id, name: c.name, plugin: c.plugin, pluginName: c.pluginName, tool: c.tool, title: c.title, arguments: c.arguments },
+                        ...(summary ? { summary } : {})
                     });
                 }
                 send({ type: "done", status: result.status, steps: result.steps, ...(result.exhausted ? { exhausted: true } : {}) });
             } catch (e) {
-                if (!(e?.status >= 400 && e.status < 500)) console.error("[chat/plugins]", e?.message ?? e);
+                if (!(e?.status >= 400 && e.status < 500)) console.error("[chat/plugins]", redactLog(e));
                 send({ type: "error", message: e?.message ?? String(e), status: e?.status ?? 500 });
             } finally {
                 clearInterval(keepalive);

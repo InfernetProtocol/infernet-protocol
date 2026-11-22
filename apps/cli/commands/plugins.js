@@ -14,13 +14,18 @@ export const PLUGINS_HELP = `infernet plugins — tools the model can use in cha
 
 Usage:
   infernet plugins                      Your plugins and the catalog
-  infernet plugins add <url|name>       Add by URL (https://.../mcp) or catalog name (c0mpute, threatcrush).
+  infernet plugins add <url|name>       Add by URL (https://.../mcp) or catalog name (mercury, coinpay, moomoo, threatcrush).
                                         If it wants sign-in, a browser opens on its own page; on a
                                         headless box the one-time link is printed instead.
   infernet plugins rm <slug>            Remove a plugin and its tokens
   infernet plugins on <slug>            Turn on
   infernet plugins off <slug>           Turn off
   infernet plugins connect <slug>       Sign in (again)
+  infernet plugins paper <slug>         Brokerage plugins (moomoo): paper trading, the default
+  infernet plugins live <slug> --confirm  Brokerage plugins: your live account (each order still asks)
+
+Mercury (banking) and CoinPay (crypto payments) are on for every account; sign in to your own
+account to use them. Anything that moves money or places an order asks you first, even with --yes.
 
 Options: --json, --url <base>, --token <bearer>, --no-browser
 Signed-in account required (\`infernet login\`). \`infernet chat\` uses enabled plugins automatically.
@@ -31,7 +36,7 @@ function out(args, data, text) {
 }
 
 function line(p) {
-    const state = p.needs_sign_in ? 'needs sign-in' : p.enabled ? 'on' : 'off';
+    const state = (p.needs_sign_in ? 'needs sign-in' : p.enabled ? 'on' : 'off') + (p.trading_mode ? ` ${p.trading_mode}` : '');
     return `  ${p.slug.padEnd(16)} ${state.padEnd(14)} ${String(p.tools.length).padStart(3)} tools  ${p.name}  ${p.url}`;
 }
 
@@ -92,6 +97,16 @@ export default async function plugins(args) {
             const on = sub === 'on' || sub === 'enable';
             const p = await c.toggle(arg, on);
             out(args, p, `${p.slug} is ${p.enabled ? 'on' : 'off'}.`);
+            return 0;
+        }
+        if (sub === 'paper' || sub === 'live') {
+            if (!arg) { process.stderr.write(`Usage: infernet plugins ${sub} <slug>\n`); return 2; }
+            if (sub === 'live' && !args.has('confirm')) {
+                process.stderr.write(`Live trading uses real money. Every order still asks you first, and the model can be wrong; you decide.\nRun again with --confirm to switch ${arg} to your live account.\n`);
+                return 2;
+            }
+            const p = await c.mode(arg, sub);
+            out(args, p, `${p.slug}: ${p.trading_mode === 'live' ? 'LIVE account (real money; every order asks first)' : 'paper trading'}.`);
             return 0;
         }
         process.stderr.write(`Unknown subcommand: ${sub}\n\n${PLUGINS_HELP}`);

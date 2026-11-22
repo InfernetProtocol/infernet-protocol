@@ -14,6 +14,7 @@ export function parsePluginCommand(text) {
   if (s === "on" || s === "enable") return { action: "on", arg };
   if (s === "off" || s === "disable") return { action: "off", arg };
   if (s === "connect" || s === "login" || s === "signin") return { action: "connect", arg };
+  if (s === "paper" || s === "live") return { action: s, arg };
   // "/plugin https://..." or "/plugin c0mpute" = add
   return { action: "add", arg: [sub, ...rest].join(" ") };
 }
@@ -21,7 +22,7 @@ export function parsePluginCommand(text) {
 export function describePlugins(plugins) {
   if (!plugins.length) return "No plugins yet. Try `/plugin add c0mpute` or `/plugin add https://example.com/mcp`, or open the Plugins panel.";
   return plugins.map((p) => {
-    const state = p.needs_sign_in ? "needs sign-in" : p.enabled ? "on" : "off";
+    const state = (p.needs_sign_in ? "needs sign-in" : p.enabled ? "on" : "off") + (p.trading_mode ? `, ${p.trading_mode === "live" ? "LIVE trading" : "paper trading"}` : "");
     return `- **${p.name}** (\`${p.slug}\`): ${state}, ${p.tools.length} tool${p.tools.length === 1 ? "" : "s"}`;
   }).join("\n");
 }
