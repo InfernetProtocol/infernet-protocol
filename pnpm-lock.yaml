@@ -220,10 +220,13 @@ importers:
         version: 1.2.1(@types/node@26.6.5)
       '@profullstack/footer':
         specifier: latest
-        version: 0.6.19(react@19.3.1)
+        version: 0.6.20(react@19.3.1)
       '@profullstack/form-guard':
         specifier: ^0.2.2
         version: 0.2.2
+      '@profullstack/modern-css':
+        specifier: 0.2.0
+        version: 0.2.0
       '@profullstack/profile':
         specifier: 0.1.8
         version: 0.1.8(react@19.3.1)
@@ -1118,7 +1121,7 @@ packages:
 
   '@expo/bunyan@4.0.1':
     resolution: {integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==}
-    engines: {'0': node >=0.10.0}
+    engines: {node: '>=0.10.0'}
 
   '@expo/cli@0.17.13':
     resolution: {integrity: sha512-n13yxOmI3I0JidzMdFCH68tYKGDtK4XlDFk1vysZX7AIRKeDVRsSbHhma5jCla2bDt25RKmJBHA9KtzielwzAA==}
@@ -1657,8 +1660,8 @@ packages:
     engines: {node: '>=20.0.0'}
     hasBin: true
 
-  '@profullstack/footer@0.6.19':
-    resolution: {integrity: sha512-DAS2jHDJFnH1w6lDtYbEnvuV2n4NY2vrRwnUKeQPC+Nwfg1f2Me9ClZ6KlXs6Dv0pgJSg2ATLSX0hV+Mq7co3w==}
+  '@profullstack/footer@0.6.20':
+    resolution: {integrity: sha512-JEB1hZCKSKRro6EI95JMUM4lBX39DUKk6i5ukcKpgeCo+jxwBYcUGiHBrDTdd0/n46M1ECOG4IrDHjgFNGmvGQ==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -1674,6 +1677,10 @@ packages:
   '@profullstack/keys@0.1.0':
     resolution: {integrity: sha512-Vys47LvS5ivhdZu4SYOxh9Le3DEmWhjP0+CtrU45RhXAbY0ZFG/2Dk9V1bIIUGDp8UWMJqctvUD21JrNjfh04w==}
     engines: {node: '>=20.11'}
+
+  '@profullstack/modern-css@0.2.0':
+    resolution: {integrity: sha512-cp67ad4kHyIKjmI68hC5zTycIevSsVI47zBFKPO5DItE1kxl8qTSlrOZ+VYcrUef71JKbzdpcK7bK9xcuiGegg==}
+    engines: {node: '>=18'}
 
   '@profullstack/openprofile@0.2.0':
     resolution: {integrity: sha512-cdFsBbfRXurvy5KqHDNcKXxurK2s/YlfVgnILFRpVl2hq3860rExqDee8IfsFGxw5cPdqGv2fxUxtek1Xy2U5Q==}
@@ -8394,13 +8401,15 @@ snapshots:
     transitivePeerDependencies:
       - '@types/node'
 
-  '@profullstack/footer@0.6.19(react@19.3.1)':
+  '@profullstack/footer@0.6.20(react@19.3.1)':
     optionalDependencies:
       react: 19.3.1
 
   '@profullstack/form-guard@0.2.2': {}
 
   '@profullstack/keys@0.1.0': {}
+
+  '@profullstack/modern-css@0.2.0': {}
 
   '@profullstack/openprofile@0.2.0': {}
 

@@ -17,6 +17,7 @@ const ROUTES = [
     { path: "/docs/house-models", priority: 0.7, changeFrequency: "monthly" },
     { path: "/book", priority: 0.7, changeFrequency: "weekly" },
     { path: "/chat", priority: 0.8, changeFrequency: "weekly" },
+    { path: "/gallery", priority: 0.8, changeFrequency: "daily" },
     { path: "/deploy", priority: 0.7, changeFrequency: "weekly" },
     { path: "/order", priority: 0.7, changeFrequency: "daily" },
     { path: "/status", priority: 0.6, changeFrequency: "hourly" },

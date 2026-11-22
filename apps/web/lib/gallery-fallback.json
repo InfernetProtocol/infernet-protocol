@@ -1,0 +1,15 @@
+{
+  "entries": [
+    {
+      "slug": "board-as-a-service",
+      "name": "Board as a Service",
+      "tagline": "Five AI advisors and a chair debate your decision and write the minutes; meetings run on Infernet/c0mpute models; $9 per meeting via CoinPay",
+      "url": "https://board.saas.pit.world",
+      "c0mpute_url": "https://gateway.c0mpute.com/s/d28960255346f386e99c/",
+      "category": "Apps",
+      "built_with": ["Infernet chat", "c0mpute hosting", "CoinPay"],
+      "image": null,
+      "added_at": "2026-11-22T00:00:00Z"
+    }
+  ]
+}

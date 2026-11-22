@@ -1,90 +1,149 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase/auth-server";
+import { FEATURED, navGroups } from "@/lib/nav";
+import SiteNavEnhancer from "@/components/site-nav-enhancer";
 
-const PUBLIC_NAV = [
-    { href: "/getting-started", label: "Get started" },
-    { href: "/pricing", label: "Pricing" },
-    { href: "/protocol", label: "Protocol" },
-    { href: "/docs", label: "Docs" },
-    { href: "/book", label: "Book" },
-    { href: "/chat", label: "Chat" },
-    { href: "/deploy", label: "Deploy" },
-    { href: "/order", label: "Order" },
-    { href: "/status", label: "Status" }
-];
+// Grouped header. Desktop (lg+): a featured Gallery link plus one <details>
+// dropdown per group. Phones and tablets: one <details> "Menu" that opens a
+// full-screen panel listing every group. Both are plain <details>/<summary>, so
+// every link works without JavaScript; SiteNavEnhancer only adds closing on
+// Escape / outside click / navigation and one-panel-at-a-time.
 
-const SIGNED_IN_NAV = [
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/pricing", label: "Pricing" },
-    { href: "/deploy", label: "Deploy" },
-    { href: "/order", label: "Order" },
-    { href: "/chat", label: "Chat" },
-    { href: "/book", label: "Book" },
-    { href: "/status", label: "Status" },
-    { href: "/invites", label: "Invites" },
-    { href: "/settings", label: "Settings" }
-];
+function NavLink({ item, className, children }) {
+    if (item.external) {
+        return (
+            <a href={item.href} target="_blank" rel="noreferrer" className={className}>
+                {children}
+            </a>
+        );
+    }
+    return (
+        <Link href={item.href} className={className} data-nav-link="">
+            {children}
+        </Link>
+    );
+}
+
+function Chevron() {
+    return (
+        <svg className="site-nav__chevron" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    );
+}
+
+function GroupItems({ group }) {
+    return (
+        <ul className="site-nav__items">
+            {group.items.map((item) => (
+                <li key={`${group.id}:${item.href}:${item.label}`}>
+                    <NavLink item={item} className="site-nav__item">
+                        <span className="site-nav__item-label">
+                            {item.label}
+                            {item.external ? <span aria-hidden="true"> ↗</span> : null}
+                        </span>
+                        {item.hint ? <span className="site-nav__item-hint">{item.hint}</span> : null}
+                    </NavLink>
+                </li>
+            ))}
+        </ul>
+    );
+}
 
 export default async function SiteHeader() {
     const user = await getCurrentUser().catch(() => null);
-    const nav = user ? SIGNED_IN_NAV : PUBLIC_NAV;
+    const groups = navGroups(user);
 
     return (
-        <header className="border-b border-white/10 bg-[var(--bg)]/80 backdrop-blur">
-            <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-6 px-6 py-4 lg:px-10">
-                <Link href="/" aria-label="Infernet Protocol home" className="inline-flex">
-                    <img src="/logo.svg" alt="Infernet Protocol" className="h-14 w-auto" />
-                </Link>
-                <nav className="hidden items-center gap-x-6 text-sm text-[var(--muted)] sm:flex">
-                    {nav.map((item) => (
-                        <Link key={item.href} href={item.href} className="hover:text-white">
-                            {item.label}
-                        </Link>
-                    ))}
-                    {!user && (
-                        <Link
-                            href="https://github.com/infernetprotocol/infernet-protocol"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="hover:text-white"
-                        >
-                            GitHub
-                        </Link>
-                    )}
-                </nav>
-                <div className="flex items-center gap-2">
-                    {user ? (
-                        <>
-                            <span className="hidden text-xs text-[var(--muted)] sm:inline">
-                                {user.email}
-                            </span>
-                            <form action="/api/auth/logout" method="post">
-                                <button
-                                    type="submit"
-                                    className="whitespace-nowrap rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
-                                >
-                                    Sign out
-                                </button>
-                            </form>
-                        </>
-                    ) : (
-                        <>
-                            <Link
-                                href="/auth/login"
-                                className="hidden rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10 sm:inline-flex"
-                            >
-                                Sign in
-                            </Link>
-                            <Link
-                                href="/auth/signup"
-                                className="rounded-full bg-[var(--accent-strong)] px-4 py-2 text-sm font-semibold text-[var(--bg)] transition hover:bg-[var(--accent)]"
-                            >
-                                Sign up
-                            </Link>
-                        </>
-                    )}
+        <header className="site-header stuck-header">
+            <div className="site-header__bar stuck-header-bar">
+                <div className="site-header__inner">
+                    <Link href="/" aria-label="Infernet Protocol home" className="site-header__logo">
+                        <img src="/logo.svg" alt="Infernet Protocol" />
+                    </Link>
+
+                    <nav className="site-nav" aria-label="Main">
+                        <ul className="site-nav__bar">
+                            <li>
+                                <Link href={FEATURED.href} className="site-nav__featured" data-nav-link="">
+                                    {FEATURED.label}
+                                </Link>
+                            </li>
+                            {groups.map((group, i) => (
+                                <li key={group.id}>
+                                    <details className="site-nav__group" data-nav-group="">
+                                        <summary className="site-nav__trigger">
+                                            {group.label}
+                                            <Chevron />
+                                        </summary>
+                                        <div
+                                            className={`site-nav__panel squircle${group.items.length > 6 ? " site-nav__panel--wide" : ""}`}
+                                            data-align={i >= groups.length - 2 ? "end" : "start"}
+                                        >
+                                            <GroupItems group={group} />
+                                        </div>
+                                    </details>
+                                </li>
+                            ))}
+                        </ul>
+                    </nav>
+
+                    <div className="site-header__actions">
+                        {user ? (
+                            <>
+                                <span className="site-header__email">{user.email}</span>
+                                <form action="/api/auth/logout" method="post">
+                                    <button type="submit" className="site-btn site-btn--ghost">
+                                        Sign out
+                                    </button>
+                                </form>
+                            </>
+                        ) : (
+                            <>
+                                <Link href="/auth/login" className="site-btn site-btn--ghost site-btn--wide-only">
+                                    Sign in
+                                </Link>
+                                <Link href="/auth/signup" className="site-btn site-btn--primary">
+                                    Sign up
+                                </Link>
+                            </>
+                        )}
+
+                        <details className="site-menu" data-nav-menu="">
+                            <summary className="site-menu__toggle">
+                                <span className="site-menu__open-label">Menu</span>
+                                <span className="site-menu__close-label">Close</span>
+                            </summary>
+                            <div className="site-menu__panel">
+                                <nav aria-label="Main" className="site-menu__nav">
+                                    <Link href={FEATURED.href} className="site-menu__featured" data-nav-link="">
+                                        <span className="site-nav__item-label">{FEATURED.label}</span>
+                                        <span className="site-nav__item-hint">{FEATURED.hint}</span>
+                                    </Link>
+                                    <div className="site-menu__groups">
+                                        {groups.map((group) => (
+                                            <section key={group.id} aria-labelledby={`menu-${group.id}`}>
+                                                <h2 id={`menu-${group.id}`} className="site-menu__heading">
+                                                    {group.label}
+                                                </h2>
+                                                <GroupItems group={group} />
+                                            </section>
+                                        ))}
+                                    </div>
+                                    {!user ? (
+                                        <p className="site-menu__auth">
+                                            <Link href="/auth/login" className="site-btn site-btn--ghost">
+                                                Sign in
+                                            </Link>
+                                        </p>
+                                    ) : null}
+                                </nav>
+                            </div>
+                        </details>
+                    </div>
                 </div>
             </div>
+            <SiteNavEnhancer />
         </header>
     );
 }

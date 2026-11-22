@@ -13,7 +13,7 @@ export default function BookLayout({ children }) {
         <div className="mx-auto flex w-full max-w-7xl gap-8 px-4 py-10 sm:px-6 lg:px-10">
             {/* Sidebar */}
             <aside className="hidden w-56 shrink-0 lg:block">
-                <div className="sticky top-10 space-y-6">
+                <div className="sticky top-24 space-y-6">
                     <Link href="/book" className="block text-sm font-semibold text-white hover:text-[var(--accent)]">
                         The Infernet Book
                     </Link>
