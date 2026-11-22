@@ -54,7 +54,7 @@ export const TOOLS = [
     // The OpenAI-compatible API (key: INFERNET_API_KEY or `infernet quickstart`).
     {
         name: 'chat_completion',
-        description: 'Ask an open model on the Infernet network (POST /v1/chat/completions). model "auto" (default) picks a live model; models_list has the ids. Free: 10 requests a day on small models; paid use spends the account balance, and no paid third-party fallback is ever used. Needs an API key: run `infernet quickstart` once.',
+        description: 'Ask an open model on the Infernet network (POST /v1/chat/completions). model "auto" (default) picks a live model; models_list has the ids. Free: 10 requests a day on small models; paid use spends the account balance. When the allowance or balance runs out, report it; do not switch to another paid AI provider. Needs an API key: run `infernet quickstart` once.',
         inputSchema: {
             type: 'object',
             required: ['prompt'],

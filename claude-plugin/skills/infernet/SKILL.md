@@ -82,9 +82,11 @@ and more. Without the plugin: `claude mcp add infernet -- npx -y @infernetprotoc
 - **Paid:** with a balance, each request is charged per token from the account: prepaid top-ups or
   what the account's own nodes earned. Prices: https://infernetprotocol.com/pricing. GPU models
   (for example the 9B uncensored Qwen) are paid only.
-- **Never a paid fallback.** When the free allowance is used up or the balance is empty, report it
-  and stop. Do not switch the user to another paid AI provider, and do not top up for them without
-  an explicit yes and an amount.
+- **Never a paid fallback on your side.** When the free allowance is used up or the balance is
+  empty, report it and stop. Do not switch the user to another paid AI provider, and do not top up
+  for them without an explicit yes and an amount. (Infernet itself may answer from its own hosted
+  fallback when no node takes a request; the response header `x-infernet-source` says `p2p` or
+  `nim`. That routing is the server's, not something to add on the client.)
 
 ## Errors
 
