@@ -516,7 +516,11 @@ export async function createChatJob({
   // hosted fallback included. `gpuConfig` is the interactive_billing config
   // carrying the GPU policy (lib/billing/gpu-models.js).
   freeTier = false,
-  gpuConfig = null
+  gpuConfig = null,
+  // House lane (lib/reservations/serve.js): keep no content. The prompt, the
+  // answer and the token stream are purged when the request finishes
+  // (lib/data/job-retention.js); only counts survive, for billing.
+  noRetain = false
 }) {
   const allow = gpuModelFilter({ freeTier, config: gpuConfig });
   // Old clients still name retired house models: run the current one instead
@@ -696,7 +700,8 @@ export async function createChatJob({
     // sent, without decrypting an E2E payload it cannot read.
     ...(billedUserId && !batchItemId
       ? { billing: "interactive_balance", input_tokens: estimateInputTokens(messages ?? []) }
-      : {})
+      : {}),
+    ...(noRetain ? { no_retain: true } : {})
   };
 
   // Nothing can serve this request. Nothing ever picks up an unassigned
@@ -716,7 +721,8 @@ export async function createChatJob({
     payment_offer: 0,
     assigned_at: p2pProvider || nimAvailable || c0mputeModel ? now : null,
     updated_at: now,
-    ...(billedUserId && !batchItemId ? { billed_user_id: billedUserId } : {})
+    ...(billedUserId && !batchItemId ? { billed_user_id: billedUserId } : {}),
+    ...(noRetain ? { no_retain: true } : {})
   };
   if (source === "none") {
     insertRow.error = noProviderError(modelName);

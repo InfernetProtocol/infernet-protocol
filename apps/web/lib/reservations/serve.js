@@ -8,6 +8,12 @@ import { deniedModel } from "@/lib/moderation/blocklists";
 import { forwardToEndpoint } from "@/lib/data/reservation-upstream";
 import { createChatJob } from "@/lib/data/chat";
 import { streamJobEvents } from "@/lib/data/chat-stream";
+import { trustedClientFor, billedSubjectFrom } from "@/lib/trusted-clients";
+import { authorizeInteractive, userIdForCoinpaySubject } from "@/lib/data/interactive-billing";
+import { purgeJobContent } from "@/lib/data/job-retention";
+import { houseLaneBillingOk, houseLaneBalanceError } from "@/lib/reservations/house-lane";
+import { chargeIdemKey } from "@/lib/billing/interactive";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
  * /v1/chat/completions and /v1/models for reservation keys (ifr_res_...).
@@ -73,6 +79,15 @@ export async function serveChatCompletion(request, rawKey) {
         return err(403, `model "${model}" is not available on Infernet`, "model_denied");
     }
 
+    // House lane: confidential, paid per request by the person a trusted
+    // client names, on the pinned house node only, with nothing kept.
+    let house = null;
+    if (res.house_lane) {
+        const auth = await authorizeHouseLane(request, model);
+        if (auth.error) return auth.error;
+        house = auth;
+    }
+
     const base = { reservation_id: res.id, key_id: key.id, model };
 
     if (res.included_tokens > 0 && tokenAllowanceLeft(res) <= 0) {
@@ -114,15 +129,79 @@ export async function serveChatCompletion(request, rawKey) {
         else if (prompt + completion > 0) await addTokens(res.id, prompt + completion);
     };
     const headers = { ...slot.headers, "X-Infernet-Reservation": res.id, "X-Infernet-Operator": res.operator_name };
+    if (house) headers["X-Infernet-Lane"] = "house";
 
     try {
         return res.target_kind === "endpoint"
             ? await viaEndpoint(res, body, headers, finish)
-            : await viaNode(res, body, headers, finish);
+            : await viaNode(res, body, headers, finish, house);
     } catch (e) {
         await finish({ outcome: "upstream_error", status: 502 });
         return err(502, `pinned endpoint failed: ${e?.message ?? e}`, "upstream_error", headers);
     }
+}
+
+// ---- house lane --------------------------------------------------------------
+
+/**
+ * Who pays for a house-lane request, or the refusal. The lane is paid only and
+ * serves only our trusted clients: the trusted key is a header of its own
+ * (the bearer is the reservation key), and the subject it names must have a
+ * balance. A free, unlinked or unreadable caller is refused, never served.
+ */
+async function authorizeHouseLane(request, model) {
+    const trusted = trustedClientFor(request.headers.get("x-infernet-client-key")?.trim() ?? null);
+    if (!trusted) {
+        return { error: err(403, "a house-lane reservation serves only a trusted client (X-Infernet-Client-Key)", "house_lane_client_required") };
+    }
+    const sub = billedSubjectFrom(request, trusted);
+    if (!sub) {
+        return { error: err(403, "a house-lane request must name who pays (X-Infernet-Billed-Subject)", "house_lane_subject_required") };
+    }
+    const userId = await userIdForCoinpaySubject(sub);
+    const billing = userId
+        ? await authorizeInteractive({ userId, model })
+        : { mode: "free", reason: "unlinked", spendable_usd: "0.000000" };
+    if (!houseLaneBillingOk(billing)) {
+        const e = houseLaneBalanceError(billing);
+        return { error: err(e.status, e.message, e.code, {}, e.extra) };
+    }
+    return { userId, mode: billing.mode };
+}
+
+/**
+ * What the person was charged for a finished house-lane job. The charge is
+ * written when the node reports completion, which can land a moment after the
+ * last token, so wait briefly for it. Null when it has not landed (the caller
+ * is still charged; it just is not in this response).
+ */
+async function houseCharge(jobId, { waitMs = 4000 } = {}) {
+    try {
+        const supabase = getSupabaseServerClient();
+        const until = Date.now() + waitMs;
+        for (;;) {
+            const { data } = await supabase
+                .from("billing_ledger")
+                .select("amount_micro")
+                .eq("idem_key", chargeIdemKey(jobId))
+                .maybeSingle();
+            if (data) return { charged_micro: Number(data.amount_micro), charged_usd: (Number(data.amount_micro) / 1e6).toFixed(6) };
+            if (Date.now() >= until) return null;
+            await new Promise((r) => setTimeout(r, 500));
+        }
+    } catch {
+        return null;
+    }
+}
+
+function houseReceipt(res, model, charge) {
+    return {
+        lane: "house",
+        operator: res.operator_name,
+        model,
+        billed: true,
+        ...(charge ? { charged_usd: charge.charged_usd, charged_micro: charge.charged_micro } : { charge_pending: true })
+    };
 }
 
 // ---- endpoint target: proxy to the operator's OpenAI-compatible URL --------
@@ -211,7 +290,7 @@ function chunk(id, model, delta, finish = null) {
     return { id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta, finish_reason: finish }] };
 }
 
-async function viaNode(res, body, headers, finish) {
+async function viaNode(res, body, headers, finish, house = null) {
     const { messages, model } = body;
     const bundle = await createChatJob({
         messages,
@@ -220,12 +299,22 @@ async function viaNode(res, body, headers, finish) {
         pinned: true,
         reservationId: res.id,
         maxTokens: Number.isFinite(body.max_tokens) ? body.max_tokens : undefined,
-        temperature: Number.isFinite(body.temperature) ? body.temperature : undefined
+        temperature: Number.isFinite(body.temperature) ? body.temperature : undefined,
+        // House lane: charged to the caller's balance on completion, and no
+        // content kept once the request is over.
+        ...(house ? { billedUserId: house.userId, noRetain: true } : {})
     });
     if (bundle.source !== "p2p" || bundle.job?.provider_id !== res.provider_id) {
         await finish({ outcome: "upstream_error", status: 503 });
+        // A job row recorded as failed still carries the prompt until purged.
+        if (house && bundle.job?.id) await purgeJobContent(bundle.job.id);
         return err(503, "the pinned operator node is not available right now", "pinned_node_unavailable", headers);
     }
+    // House lane: the content goes as soon as the answer is out, whatever happened.
+    const done = async (args) => {
+        await finish(args);
+        if (house) await purgeJobContent(bundle.job.id);
+    };
     const id = `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 24)}`;
     const prompt = estimateTokens(JSON.stringify(messages));
 
@@ -245,9 +334,15 @@ async function viaNode(res, body, headers, finish) {
                         else if (ev.type === "error") { push({ id, object: "chat.completion.chunk", error: { message: ev.data?.message ?? "engine error" } }); break; }
                     }
                     if (ok) push(chunk(id, model, {}, "stop"));
+                    if (ok && house) {
+                        // The receipt rides one extra chunk OpenAI clients ignore (no choices).
+                        const charge = await houseCharge(bundle.job.id);
+                        push({ id, object: "infernet.house", x_infernet: houseReceipt(res, model, charge),
+                            usage: { prompt_tokens: prompt, completion_tokens: estimateTokens(text), estimated: true } });
+                    }
                     push("[DONE]");
                 } finally {
-                    await finish({ outcome: ok ? "ok" : "upstream_error", status: ok ? 200 : 502, prompt, completion: estimateTokens(text), estimated: true });
+                    await done({ outcome: ok ? "ok" : "upstream_error", status: ok ? 200 : 502, prompt, completion: estimateTokens(text), estimated: true });
                     try { ctl.close(); } catch { /* closed */ }
                 }
             }
@@ -265,11 +360,13 @@ async function viaNode(res, body, headers, finish) {
         } else if (ev.type === "error") { failure = ev.data?.message ?? "engine error"; break; }
     }
     const completion = estimateTokens(text);
-    await finish({ outcome: ok ? "ok" : "upstream_error", status: ok ? 200 : 502, prompt, completion, estimated: true });
+    const charge = ok && house ? await houseCharge(bundle.job.id) : null;
+    await done({ outcome: ok ? "ok" : "upstream_error", status: ok ? 200 : 502, prompt, completion, estimated: true });
     if (!ok) return err(502, failure ?? "stream ended without a response", "upstream_error", headers);
     return NextResponse.json({
         id, object: "chat.completion", created: Math.floor(Date.now() / 1000), model,
         choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
-        usage: { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion, estimated: true }
+        usage: { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion, estimated: true },
+        ...(house ? { x_infernet: houseReceipt(res, model, charge) } : {})
     }, { headers });
 }

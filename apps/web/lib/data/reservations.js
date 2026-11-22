@@ -13,7 +13,7 @@ import {
  * key or the buyer's buyer token (checked by the route handlers).
  */
 
-const COLUMNS = "id, name, buyer, operator_name, target_kind, provider_id, endpoint_url, endpoint_secret, models, start_at, hours, included_tokens, per_key_rps, per_key_concurrency, shared_rps, shared_concurrency, required_minutes_per_hour, probe_completion, currency, price_per_hour, gpu_class, setup_fee, status, buyer_token_hash, tokens_used, created_by, notes, created_at, updated_at";
+const COLUMNS = "id, name, buyer, operator_name, target_kind, provider_id, endpoint_url, endpoint_secret, models, start_at, hours, included_tokens, per_key_rps, per_key_concurrency, shared_rps, shared_concurrency, required_minutes_per_hour, probe_completion, currency, price_per_hour, gpu_class, setup_fee, status, buyer_token_hash, tokens_used, created_by, notes, house_lane, created_at, updated_at";
 
 function db() {
     return getSupabaseServerClient();
@@ -69,6 +69,7 @@ export async function createReservation(value, { createdBy, buyerTokenHash = nul
         gpu_class: value.gpu_class ?? null,
         setup_fee: value.setup_fee ?? null,
         notes: value.notes,
+        house_lane: value.house_lane === true,
         buyer_token_hash: report.hash,
         created_by: createdBy ?? null
     };

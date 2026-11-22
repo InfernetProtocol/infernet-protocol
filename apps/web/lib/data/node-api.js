@@ -394,7 +394,16 @@ export async function completeJobForNode({ pubkey, jobId, body }) {
         updated_at: completedAt,
         completed_at: completedAt
     };
-    if (!failed && body.result !== undefined) patch.result = encryptJSON(body.result);
+    // A no-retain (house-lane) job keeps no answer: billing reads the result
+    // from this request body below, never from the row.
+    let noRetain = false;
+    try {
+        const { data: nr } = await supabase.from("jobs").select("no_retain").eq("id", job.id).maybeSingle();
+        noRetain = nr?.no_retain === true;
+    } catch { /* before the migration: every job is retained */ }
+    if (!failed && body.result !== undefined) {
+        patch.result = encryptJSON(noRetain ? { redacted: true } : body.result);
+    }
     if (failed && typeof body.error === "string") patch.error = body.error.slice(0, 1024);
 
     // Only a job still in flight can be completed. Daemons retry this call

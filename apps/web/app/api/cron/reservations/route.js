@@ -4,6 +4,7 @@ import { probe } from "@/lib/data/reservation-upstream";
 import { rentalOrdersToTend, setRentalRef, setRentalState } from "@/lib/data/reservation-orders";
 import { provisionRental, startRental, serveRental, deleteRental } from "@/lib/data/rental";
 import { rentalAction } from "@/lib/reservations/rental";
+import { sweepUnretainedJobs } from "@/lib/data/job-retention";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,6 +97,9 @@ export async function POST(request) {
     const now = new Date();
     try {
         const rentals = await tendRentals(now);
+        // House-lane jobs keep no content: purge any a crash or a dropped
+        // connection left holding a prompt or an answer.
+        const retention = await sweepUnretainedJobs({ now: now.getTime() }).catch((e) => ({ error: e?.message ?? String(e) }));
         const list = await activeReservations(now);
         const results = await Promise.all(list.map(async (res) => {
             const verdict = await probe(res, now.getTime());
@@ -104,7 +108,7 @@ export async function POST(request) {
         }));
         const failed = results.filter((r) => !r.ok);
         if (failed.length) console.warn(`[reservations] ${failed.length}/${results.length} probes failed`, failed);
-        return NextResponse.json({ data: { minute: now.toISOString(), probed: results.length, results, rentals } });
+        return NextResponse.json({ data: { minute: now.toISOString(), probed: results.length, results, rentals, retention } });
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("[reservations cron]", message);
