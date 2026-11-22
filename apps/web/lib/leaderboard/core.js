@@ -61,14 +61,20 @@ export function summariseLeaderboard(rows, { key, now = Date.now(), adminIds = [
     for (const l of links) if (l?.role === "provider" && l.pubkey && l.user_id) ownerByPubkey.set(l.pubkey, l.user_id);
 
     // Providers an operator hid (is_public false, or archived as private) never appear.
+    // Exception: the provider Infernet opens for a c0mpute node (node_id
+    // `c0mpute:<peer>`) is created is_public false by the bridge itself
+    // (lib/data/chat-c0mpute.js), to keep it off Infernet's own provider list;
+    // nobody chose that. The node is public on c0mpute.com/nodes, and c0mpute
+    // applies its operator's own leaderboard opt-out, so it stays in.
     const providerInfo = new Map();
     for (const p of providers) {
         if (!p?.id) continue;
-        const hidden = p.is_public === false || (p.archived_at && p.archived_is_public === false);
+        const c0mputeNode = c0mputeNodeOf(p.node_id);
+        const hidden = (p.is_public === false && !c0mputeNode) || (p.archived_at && p.archived_is_public === false);
         const owner = p.public_key ? ownerByPubkey.get(p.public_key) : null;
         providerInfo.set(p.id, {
             hidden,
-            c0mpute_node: c0mputeNodeOf(p.node_id),
+            c0mpute_node: c0mputeNode,
             owner: owner ? personToken(owner) : null,
             provider: leaderboardToken(key, `provider:${p.id}`)
         });
