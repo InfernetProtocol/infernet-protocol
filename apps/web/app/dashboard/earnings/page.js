@@ -5,6 +5,7 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getUserProviders } from "@/lib/data/dashboard";
 import { getEarningsForProviders } from "@/lib/data/earnings";
 import { EARNING_STATUS_LABELS, fmtUsdPrecise } from "@/lib/earnings/core";
+import { usageKindLabel } from "@/lib/billing/usage";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "All node earnings — Infernet" };
@@ -155,7 +156,7 @@ export default async function EarningsDetailsPage({ searchParams }) {
                                         ? "Playground subsidy"
                                         : job.kinds.has("reservation")
                                             ? "Reservation"
-                                            : "Paid inference";
+                                            : usageKindLabel(record?.title) ?? "Paid inference";
                                 const statuses = [...job.statuses]
                                     .map((status) => EARNING_STATUS_LABELS[status] ?? status);
                                 return (

@@ -210,7 +210,8 @@ export async function creditProvidersFromCharge({
     shares = null,
     feePct,
     price = null,
-    source = "interactive"
+    source = "interactive",
+    extra = null
 }) {
     try {
         const { providerSplitMicro, microToUsd: toUsd } = await import("@/lib/billing/core");
@@ -245,6 +246,9 @@ export async function creditProvidersFromCharge({
                     house_fee_pct: Number(feePct) || 0,
                     charge_micro: shareMicro,
                     billed_user_id: job.billed_user_id ?? null,
+                    // What a non-inference charge was for (usage_kind), so
+                    // views can label the row.
+                    ...(extra && typeof extra === "object" ? extra : {}),
                     ...(price
                         ? {
                             price_source: price.source,
