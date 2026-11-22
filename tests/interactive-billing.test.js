@@ -61,6 +61,9 @@ describe("spendableMicro", () => {
 
 describe("interactiveModeFor", () => {
     const model = "qwen2.5:7b";
+    // The free tier serves only CPU-sized models since 2026-11-22: a 7B is
+    // GPU-class and is never free (tests/gpu-models.test.js).
+    const cpuModel = "qwen2.5:0.5b";
 
     it("leaves everyone free while metering is off", () => {
         expect(interactiveModeFor({ model, pricing, config: off, funding: funding(0) }).mode).toBe("free");
@@ -68,7 +71,8 @@ describe("interactiveModeFor", () => {
     });
 
     it("never bills an anonymous caller", () => {
-        expect(interactiveModeFor({ model, pricing, config: on, funding: funding(500), signedIn: false }).mode).toBe("free");
+        expect(interactiveModeFor({ model: cpuModel, pricing, config: on, funding: funding(500), signedIn: false }).mode).toBe("free");
+        expect(interactiveModeFor({ model, pricing, config: on, funding: funding(500), signedIn: false }).mode).toBe("insufficient");
     });
 
     it("charges a caller with a prepaid balance", () => {
@@ -82,7 +86,8 @@ describe("interactiveModeFor", () => {
     });
 
     it("falls back to the free tier on an empty balance", () => {
-        expect(interactiveModeFor({ model, pricing, config: on, funding: funding(0) }).mode).toBe("free");
+        expect(interactiveModeFor({ model: cpuModel, pricing, config: on, funding: funding(0) }).mode).toBe("free");
+        expect(interactiveModeFor({ model, pricing, config: on, funding: funding(0) }).mode).toBe("insufficient");
     });
 
     it("402s on empty only once the free tier is switched off", () => {
@@ -91,7 +96,7 @@ describe("interactiveModeFor", () => {
     });
 
     it("serves an unpriced model free rather than refusing it", () => {
-        const d = interactiveModeFor({ model: "some-new-model:70b", pricing, config: on, funding: funding(5000) });
+        const d = interactiveModeFor({ model: "some-new-model:2b", pricing, config: on, funding: funding(5000) });
         expect(d.mode).toBe("free");
         expect(d.reason).toBe("unpriced_model");
     });

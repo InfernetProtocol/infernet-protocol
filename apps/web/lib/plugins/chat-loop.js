@@ -105,7 +105,9 @@ export function pluginChatResponse({ request, payload, userId, billing, payer, i
                     modelName,
                     maxTokens,
                     temperature: 0.4,
-                    billedUserId: billing.mode === "balance" ? payer.userId : null
+                    billedUserId: billing.mode === "balance" ? payer.userId : null,
+                    freeTier: billing.mode === "free",
+                    gpuConfig: billing.config ?? null
                 });
                 if (source === "none") {
                     const live = await liveModelNames();

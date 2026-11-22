@@ -37,7 +37,7 @@ vi.mock("@/lib/supabase/server", () => ({ getSupabaseServerClient: () => fakeCli
 vi.mock("@/lib/encrypt", () => ({ encryptJSON: (v) => v, decryptJSON: (v) => v }));
 
 const c0 = await import("@/lib/chat/c0mpute-inference");
-const { createChatJob, c0mputeModelFor, listChatModels, c0mputeEligible, C0MPUTE_ROUTE } = await import("@/lib/data/chat");
+const { createChatJob, c0mputeModelFor, gpuModelFilter, listChatModels, c0mputeEligible, C0MPUTE_ROUTE } = await import("@/lib/data/chat");
 const { assignC0mputeJob, routeC0mputeMiss, settleC0mputeJob, c0mputeNodeId, isPeerId } = await import("@/lib/data/chat-c0mpute");
 const { llmProvidersCard } = await import("@/lib/data/network-nodes");
 
@@ -376,6 +376,39 @@ describe("c0mputeModelFor", () => {
         expect(c0mputeModelFor(["hf.co/x/agent:latest", "huihui_ai/qwen3.5-abliterated:4b", "qwen3:4b", "mistral:7b"], undefined)).toBe("mistral:7b");
         expect(c0mputeModelFor(["hf.co/x/agent:latest", "qwen3:4b"], "auto")).toBeNull();
         expect(c0mputeModelFor([], undefined)).toBeNull();
+    });
+
+    // Anthony 2026-11-22: charge for anything that needs a GPU. A free caller
+    // is routed only to CPU-sized models (lib/billing/gpu-models.js).
+    describe("free tier (gpuModelFilter)", () => {
+        const free = gpuModelFilter({ freeTier: true, config: {} });
+        const withHouse9b = [...served, "eriktonon/qwen3.8-uncensored:9b"];
+
+        it("skips the house 9B and other GPU models for an alias", () => {
+            expect(c0mputeModelFor(withHouse9b, undefined, free)).toBe("qwen2.5:0.5b");
+            expect(c0mputeModelFor(withHouse9b, "auto", free)).toBe("qwen2.5:0.5b");
+        });
+        it("refuses a named GPU model", () => {
+            expect(c0mputeModelFor(withHouse9b, "eriktonon/qwen3.8-uncensored:9b", free)).toBeNull();
+        });
+        it("falls back to a CPU reasoning model, never an unnamed uncensored one", () => {
+            expect(c0mputeModelFor(["eriktonon/qwen3.8-uncensored:9b", "huihui_ai/qwen3.5-abliterated:4b", "qwen3:4b"], undefined, free)).toBe("qwen3:4b");
+            expect(c0mputeModelFor(["eriktonon/qwen3.8-uncensored:9b", "huihui_ai/qwen3.5-abliterated:4b"], undefined, free)).toBeNull();
+        });
+        it("paid callers are unchanged", () => {
+            expect(c0mputeModelFor(withHouse9b, undefined, gpuModelFilter({ freeTier: false }))).toBe("eriktonon/qwen3.8-uncensored:9b");
+        });
+    });
+});
+
+describe("createChatJob free tier never runs a GPU model", () => {
+    it("routes a free alias chat past a 9B-only node to a CPU node", async () => {
+        state.providers = [
+            { id: "gpu", reputation: 90, specs: { served_models: ["eriktonon/qwen3.8-uncensored:9b"] } },
+            { id: "cpu", reputation: 10, specs: { served_models: ["qwen2.5:0.5b"] } }
+        ];
+        const { job } = await createChatJob({ messages, freeTier: true, gpuConfig: {} });
+        expect(job.model_name).toBe("qwen2.5:0.5b");
     });
 });
 
