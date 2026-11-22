@@ -161,12 +161,20 @@ async function runApi({ baseUrl, apiKey, messages, model, temperature, maxTokens
     }
 }
 
-async function askApproval(call) {
+/** The approval card for a money plugin (summary from the server): every line, nothing truncated. */
+export function formatSummary(summary) {
+    if (!summary) return "";
+    const w = Math.max(...summary.lines.map((l) => l.label.length), 0);
+    return [`  ${summary.title}`, ...summary.lines.map((l) => `  ${l.label.padEnd(w)}  ${l.value}`), ...(summary.note ? [`  ${summary.note}`] : [])].join("\n");
+}
+
+async function askApproval(call, summary) {
     if (!process.stdin.isTTY || !process.stderr.isTTY) return "deny";
     const rl = createInterface({ input: process.stdin, output: process.stderr });
     try {
         const args = JSON.stringify(call.arguments ?? {});
-        const a = await rl.question(`\n[plugin] allow ${call.pluginName || call.plugin} to run ${call.title || call.tool} ${args}? [y/N] `);
+        if (summary) process.stderr.write(`\n[plugin] ${call.pluginName || call.plugin} wants to:\n${formatSummary(summary)}\n  exact arguments: ${args}\n`);
+        const a = await rl.question(summary ? `[plugin] approve this? [y/N] ` : `\n[plugin] allow ${call.pluginName || call.plugin} to run ${call.title || call.tool} ${args}? [y/N] `);
         return /^y(es)?$/i.test(a.trim()) ? "allow" : "deny";
     } finally {
         rl.close();
@@ -223,7 +231,8 @@ async function runPluginChat({ baseUrl, token, messages, model, maxTokens, jsonM
         }
         if (failed) return 1;
         if (!pending) return 0;
-        const decision = autoYes ? "allow" : await askApproval(pending.call);
+        // --yes never approves money: a payment, transfer or order needs the person's own "y".
+        const decision = autoYes && !pending.summary ? "allow" : await askApproval(pending.call, pending.summary);
         body = { plugins: true, resume: { approvalId: pending.approvalId, decision }, ...(model ? { modelName: model } : {}) };
     }
     return 0;

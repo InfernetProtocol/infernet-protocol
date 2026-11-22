@@ -1,6 +1,7 @@
 import "server-only";
 import { fail } from "@/lib/reservations/http";
 import { requestUser } from "@/lib/auth/request-user";
+import { redactLog } from "@profullstack/chat-plugins";
 
 export async function signedIn(request) {
     const user = await requestUser(request);
@@ -9,6 +10,6 @@ export async function signedIn(request) {
 
 export function failFrom(e) {
     const status = Number.isInteger(e?.status) ? e.status : 500;
-    if (status >= 500) console.error("[plugins]", e?.message ?? e);
+    if (status >= 500) console.error("[plugins]", redactLog(e));
     return fail(status, e?.message ?? String(e));
 }

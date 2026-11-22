@@ -969,6 +969,13 @@ export default function ChatView({ initialModels = [] }) {
         if (!cmd.arg) return addLocalTurn(text, `Usage: \`/plugin ${cmd.action} <slug>\`.`);
         await pluginState.toggle(cmd.arg, cmd.action === "on");
         addLocalTurn(text, `\`${cmd.arg}\` is ${cmd.action}.`);
+      } else if (cmd.action === "paper" || cmd.action === "live") {
+        if (!cmd.arg) return addLocalTurn(text, `Usage: \`/plugin ${cmd.action} <slug>\` (brokerage plugins, e.g. moomoo).`);
+        if (cmd.action === "live" && !window.confirm(`Switch ${cmd.arg} to your LIVE account? Orders will use real money. Every order still asks you first. The model can be wrong; you decide.`)) {
+          return addLocalTurn(text, `\`${cmd.arg}\` stays on paper trading.`);
+        }
+        const p = await pluginState.setMode(cmd.arg, cmd.action);
+        addLocalTurn(text, `\`${p.slug}\`: ${p.trading_mode === "live" ? "LIVE account (real money; every order asks first)" : "paper trading"}.`);
       } else if (cmd.action === "connect") {
         pluginState.openSignIn(cmd.arg);
         addLocalTurn(text, `Opened sign-in for \`${cmd.arg}\`.`);
@@ -1026,7 +1033,7 @@ export default function ChatView({ initialModels = [] }) {
           upd((m) => ({
             ...m,
             status: null,
-            approval: { approvalId: ev.approvalId, call: ev.call, answered: null },
+            approval: { approvalId: ev.approvalId, call: ev.call, summary: ev.summary ?? null, answered: null },
             toolCalls: (m.toolCalls ?? []).filter((c) => c.id !== ev.call.id)
           }));
         } else if (ev.type === "plugins_skipped") {

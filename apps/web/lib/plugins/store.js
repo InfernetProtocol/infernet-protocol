@@ -1,19 +1,22 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
-    CATALOG,
+    FINANCE_CATALOG,
     discover,
     ensureFresh,
     finishAuth,
     listTools,
     needsApproval,
     openToken,
+    policyFor,
+    redactLog,
     resolvePluginInput,
     sealToken,
     startAuth,
     uniqueSlug
 } from "@profullstack/chat-plugins";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { defaultsToSeed, gatedTools, moneyCatalog, withPolicyScopes } from "./money.js";
 import { appUrl } from "@/lib/auth/app-url";
 
 /*
@@ -60,7 +63,7 @@ export function redirectUri() {
 }
 
 export function catalog() {
-    return CATALOG;
+    return moneyCatalog();
 }
 
 const db = () => getSupabaseServerClient();
@@ -86,8 +89,11 @@ function toolView(t) {
     };
 }
 
-function publicPlugin(row) {
+function publicPlugin(row, prefs = new Map()) {
     const connected = !!row.tokens_sealed;
+    const policy = policyFor(row.url);
+    const mode = prefs.get(`${row.slug}|trading_mode`) === "live" ? "live" : "paper";
+    const entry = FINANCE_CATALOG.find((e) => e.url === row.url);
     return {
         slug: row.slug,
         name: row.name,
@@ -97,13 +103,50 @@ function publicPlugin(row) {
         connected,
         needs_sign_in: row.auth === "oauth" && !connected,
         can_sign_in: row.auth !== "none" && !connected,
-        tools: (Array.isArray(row.tools) ? row.tools : []).map(toolView),
+        kind: policy?.kind ?? null,
+        icon: entry?.icon ?? null,
+        ...(policy?.kind === "trading" ? { trading_mode: mode } : {}),
+        tools: gatedTools(row, row.tools, mode).map(toolView),
         last_error: row.last_error ?? null,
         created_at: row.created_at
     };
 }
 
+async function prefsFor(userId) {
+    const { data, error } = await db().from("chat_plugin_prefs").select("slug,key,value").eq("user_id", userId);
+    if (error) throw withStatus(error.message, 500);
+    return new Map((data ?? []).map((r) => [`${r.slug}|${r.key}`, r.value]));
+}
+
+async function setPref(userId, slug, key, value) {
+    const { error } = await db().from("chat_plugin_prefs").upsert({ user_id: userId, slug, key, value, updated_at: new Date().toISOString() });
+    if (error) throw withStatus(error.message, 500);
+}
+
+/**
+ * Default plugins, once per account: a row that is on and needs sign-in, with
+ * no token (each person signs in to their own account; startConnect discovers
+ * the server then). Marked "seeded" so removing one keeps it gone. Skipped if
+ * the account already has that server or is at the limit.
+ */
+const seededHere = new Set();
+async function seedDefaults(userId) {
+    if (seededHere.has(userId)) return;
+    const prefs = await prefsFor(userId);
+    const { data: rows, error } = await db().from("chat_plugins").select("slug,url").eq("user_id", userId);
+    if (error) throw withStatus(error.message, 500);
+    const { insert, mark } = defaultsToSeed(prefs, rows ?? [], MAX_PLUGINS_PER_USER);
+    for (const r of insert) {
+        const { error: e2 } = await db().from("chat_plugins").insert({ user_id: userId, ...r });
+        if (e2 && !/duplicate|unique/i.test(e2.message)) throw withStatus(e2.message, 500);
+    }
+    for (const slug of mark) await setPref(userId, slug, "seeded", "1");
+    seededHere.add(userId);
+    if (seededHere.size > 50_000) seededHere.clear();
+}
+
 async function rowsFor(userId) {
+    await seedDefaults(userId);
     const { data, error } = await db().from("chat_plugins").select("*").eq("user_id", userId).order("created_at", { ascending: true });
     if (error) throw withStatus(error.message, 500);
     return data ?? [];
@@ -117,7 +160,18 @@ async function rowFor(userId, slug) {
 }
 
 export async function listPlugins(user) {
-    return (await rowsFor(user.id)).map(publicPlugin);
+    const rows = await rowsFor(user.id);
+    const prefs = await prefsFor(user.id);
+    return rows.map((r) => publicPlugin(r, prefs));
+}
+
+/** Brokerage plugins: "paper" (default, and every new connection) or "live" (the person's own switch). */
+export async function setTradingMode(user, slug, mode) {
+    const row = await rowFor(user.id, slug);
+    if (policyFor(row.url)?.kind !== "trading") throw withStatus(`${row.name} is not a brokerage plugin.`, 400);
+    if (mode !== "paper" && mode !== "live") throw withStatus('mode must be "paper" or "live".', 400);
+    await setPref(user.id, row.slug, "trading_mode", mode);
+    return publicPlugin(row, await prefsFor(user.id));
 }
 
 // ---- one-time connect links (so a CLI or MCP client can open sign-in in any browser)
@@ -183,7 +237,7 @@ export async function addPlugin(user, input) {
         try {
             tools = await listTools({ url: server.url }, netOptions());
         } catch (e) {
-            lastError = String(e?.message ?? e).slice(0, 300);
+            lastError = redactLog(e).slice(0, 300);
         }
     }
     const slug = uniqueSlug(resolved.slug, [...rows.map((r) => r.slug), ...RESERVED_SLUGS]);
@@ -209,6 +263,8 @@ export async function removePlugin(user, slug) {
     const row = await rowFor(user.id, slug);
     const { error } = await db().from("chat_plugins").delete().eq("id", row.id);
     if (error) throw withStatus(error.message, 500);
+    // Settings go with it (a re-add starts on paper); "seeded" stays so a default does not come back.
+    await db().from("chat_plugin_prefs").delete().eq("user_id", user.id).eq("slug", row.slug).neq("key", "seeded");
     return { removed: row.slug };
 }
 
@@ -235,7 +291,7 @@ export async function startConnect(userId, slug, { returnTo } = {}) {
     }
     if (server.auth === "none") throw withStatus(`${row.name} no longer asks for sign-in.`, 400);
     const { authorizeUrl, pending } = await startAuth({
-        server,
+        server: withPolicyScopes(server),
         redirectUri: redirectUri(),
         clientName: "Infernet chat",
         clientUri: appUrl(),
@@ -271,7 +327,7 @@ export async function finishConnect({ state, code }) {
     try {
         tools = await listTools({ url: row.url, token: tokens.access_token }, netOptions());
     } catch (e) {
-        lastError = String(e?.message ?? e).slice(0, 300);
+        lastError = redactLog(e).slice(0, 300);
     }
     const { error } = await db().from("chat_plugins").update({
         tokens_sealed: await sealToken(tokens, sealKey()),
@@ -282,6 +338,8 @@ export async function finishConnect({ state, code }) {
         updated_at: new Date().toISOString()
     }).eq("id", row.id);
     if (error) throw withStatus(error.message, 500);
+    // Every new brokerage connection starts on paper trading.
+    if (policyFor(row.url)?.kind === "trading") await setPref(p.user_id, row.slug, "trading_mode", "paper");
     return { slug: row.slug, name: row.name, userId: p.user_id, returnTo: p.return_to, tools: tools.length };
 }
 
@@ -293,6 +351,7 @@ export async function finishConnect({ state, code }) {
  */
 export async function loadLoopPlugins(userId) {
     const rows = (await rowsFor(userId)).filter((r) => r.enabled);
+    const prefs = rows.some((r) => policyFor(r.url)?.kind === "trading") ? await prefsFor(userId) : new Map();
     const skipped = [];
     const plugins = await Promise.all(rows.map(async (row) => {
         let tokens = null;
@@ -335,12 +394,16 @@ export async function loadLoopPlugins(userId) {
                 }
             }
         }
-        return { slug: row.slug, name: row.name, url: row.url, token: tokens?.access_token, tools, enabled: true };
+        // The confirmation gate for money plugins, in the tool-call layer (not the prompt).
+        const gated = gatedTools(row, tools, prefs.get(`${row.slug}|trading_mode`));
+        if (!gated.length) return null;
+        return { slug: row.slug, name: row.name, url: row.url, token: tokens?.access_token, tools: gated, enabled: true };
     }));
     return { plugins: plugins.filter(Boolean), skipped };
 }
 
 export async function hasEnabledPlugins(userId) {
+    await seedDefaults(userId).catch(() => {});
     const { count } = await db().from("chat_plugins").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("enabled", true);
     return (count ?? 0) > 0;
 }

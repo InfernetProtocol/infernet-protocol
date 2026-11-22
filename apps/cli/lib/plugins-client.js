@@ -40,6 +40,7 @@ export function createPluginsClient({ baseUrl, token, fetchImpl = fetch }) {
         add: (url) => call('POST', '/api/v1/plugins', { url }),
         remove: (slug) => call('DELETE', `/api/v1/plugins/${enc(slug)}`),
         toggle: (slug, enabled) => call('POST', `/api/v1/plugins/${enc(slug)}/toggle`, typeof enabled === 'boolean' ? { enabled } : {}),
+        mode: (slug, mode) => call('POST', `/api/v1/plugins/${enc(slug)}/mode`, mode === 'live' ? { mode, confirm: true } : { mode }),
         connectUrl: (slug) => `${baseUrl}/api/v1/plugins/${enc(slug)}/connect`
     };
 }
