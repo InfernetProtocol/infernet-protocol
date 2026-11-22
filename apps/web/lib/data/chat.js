@@ -7,6 +7,7 @@ import { getModelDenylist } from "@/lib/data/blocklists";
 import { deniedModel } from "@/lib/moderation/blocklists";
 import { smartPick, isSaturated, isOverloaded, countInflight } from "@/lib/routing/smart-pick";
 import { estimateInputTokens } from "@/lib/billing/core";
+import { freeTierAllows } from "@/lib/billing/gpu-models";
 import { c0mputeJobsBridge, c0mputeChatModels, c0mputeVirtualProvider } from "@/lib/chat/c0mpute-inference";
 
 /**
@@ -373,6 +374,20 @@ const ALIAS_PREFERENCE = [
 ];
 const REASONING_MODEL_RE = /^(?:qwen3|deepseek-r1|qwq|phi4-reasoning|magistral)|think/i;
 
+// Model filter for the router: everything, unless the caller is on the free
+// tier, where GPU models are skipped (gpuModelFilter).
+const ALLOW_ANY = () => true;
+
+/**
+ * The router's model filter for one request. A free-tier caller may not land
+ * on a GPU model (Anthony 2026-11-22: charge for anything that needs a GPU);
+ * everyone else may run anything.
+ */
+export function gpuModelFilter({ freeTier = false, config = null } = {}) {
+  if (!freeTier) return ALLOW_ANY;
+  return (m) => freeTierAllows(m, config ?? {});
+}
+
 function servedModelsOf(provider) {
   return Array.isArray(provider?.specs?.served_models)
     ? provider.specs.served_models.filter((m) => typeof m === "string" && m)
@@ -389,20 +404,27 @@ const NOT_A_DEFAULT_RE = /^hf\.co\/|abliterated|uncensored/i;
  * A named model must be served there (under any of its names); no model or an
  * alias gets the best general chat model, ranked like provider models.
  */
-export function c0mputeModelFor(served, modelName) {
+export function c0mputeModelFor(served, modelName, allow = ALLOW_ANY) {
   if (!Array.isArray(served) || served.length === 0) return null;
   if (typeof modelName === "string" && modelName && !isModelAlias(modelName)) {
-    return matchServedModel(served, modelName);
+    const hit = matchServedModel(served, modelName);
+    return hit && allow(hit) ? hit : null;
   }
+  served = served.filter(allow);
+  if (served.length === 0) return null;
   for (const m of ALIAS_PREFERENCE) {
     const hit = matchServedModel(served, m);
     if (hit) return hit;
   }
-  return served.find((m) => !REASONING_MODEL_RE.test(m) && !NOT_A_DEFAULT_RE.test(m)) ?? null;
+  const general = served.find((m) => !REASONING_MODEL_RE.test(m) && !NOT_A_DEFAULT_RE.test(m));
+  if (general || allow === ALLOW_ANY) return general ?? null;
+  // Free caller with the GPU models filtered out: a CPU reasoning model
+  // (qwen3:4b) beats no answer. Uncensored still only when named.
+  return served.find((m) => !NOT_A_DEFAULT_RE.test(m)) ?? null;
 }
 
-export function aliasTargetFor(provider) {
-  const served = servedModelsOf(provider);
+export function aliasTargetFor(provider, allow = ALLOW_ANY) {
+  const served = servedModelsOf(provider).filter(allow);
   if (served.length === 0) return null;
   for (const m of ALIAS_PREFERENCE) if (served.includes(m)) return m;
   return served.find((m) => !REASONING_MODEL_RE.test(m)) ?? served[0];
@@ -489,8 +511,14 @@ export async function createChatJob({
   billedUserId = null,
   // Providers this request must not land on: nodes that already failed it
   // (app/v1/chat/completions fails over before the first token).
-  excludeProviderIds = []
+  excludeProviderIds = [],
+  // Free-tier caller (billing mode "free"): never routed to a GPU model,
+  // hosted fallback included. `gpuConfig` is the interactive_billing config
+  // carrying the GPU policy (lib/billing/gpu-models.js).
+  freeTier = false,
+  gpuConfig = null
 }) {
+  const allow = gpuModelFilter({ freeTier, config: gpuConfig });
   // Old clients still name retired house models: run the current one instead
   // of failing (a pinned reservation keeps the exact name it asked for).
   if (!pinned) modelName = currentModelName(modelName);
@@ -544,7 +572,7 @@ export async function createChatJob({
   let c0mputeModel = null;
   if (c0mputeEligible({ providerId, e2e, pinned, distributed, reservationId, batchItemId, minTrustTier, messages, excludeProviderIds })
       && c0mputeJobsBridge()) {
-    c0mputeModel = c0mputeModelFor(await c0mputeChatModels(), modelName);
+    c0mputeModel = c0mputeModelFor(await c0mputeChatModels(), modelName, allow);
     if (c0mputeModel) {
       if (modelName && modelName !== c0mputeModel) requestedModel = modelName;
       servedModel = c0mputeModel;
@@ -557,6 +585,7 @@ export async function createChatJob({
     // qwen2.5:0.5b, which parroted history and called itself Alibaba's
     // model while qwen2.5:7b sat idle on another node (2026-11-11).
     for (const preferred of ALIAS_PREFERENCE) {
+      if (!allow(preferred)) continue;
       p2pProvider = await pickChatProvider({ modelName: preferred, minTrustTier, excludeProviderIds, reserve: true });
       if (p2pProvider) {
         servedModel = matchServedModel(p2pProvider.specs?.served_models, preferred) ?? preferred;
@@ -576,7 +605,7 @@ export async function createChatJob({
     }
     if (!p2pProvider && isModelAlias(modelName)) {
       const anyProvider = await pickChatProvider({ minTrustTier, excludeProviderIds, reserve: true });
-      const target = aliasTargetFor(anyProvider);
+      const target = aliasTargetFor(anyProvider, allow);
       if (anyProvider && target) {
         p2pProvider = anyProvider;
         servedModel = target;
@@ -587,8 +616,10 @@ export async function createChatJob({
     // null the daemon fell back to its configured default, which it may not
     // have pulled ("ollama HTTP 404: model 'qwen2.5:0.5b' not found").
     if (p2pProvider && !servedModel) {
-      const target = aliasTargetFor(p2pProvider);
+      const target = aliasTargetFor(p2pProvider, allow);
       if (target) servedModel = target;
+      // A free caller on a node that serves only GPU models: not this node.
+      else if (freeTier) p2pProvider = null;
     }
   }
 
@@ -619,7 +650,7 @@ export async function createChatJob({
   }
 
   const nimEligible = !p2pProvider && !providerId && !e2e && !pinned && !noFallback
-    && isNimConfigured() && (await hostedFallbackUnderDailyCap());
+    && isNimConfigured() && allow(nimVirtualProvider().model) && (await hostedFallbackUnderDailyCap());
   const nimAvailable = nimEligible && !c0mputeModel;
   // route: where the job runs. source: what callers have always been told,
   // and c0mpute workers are peer nodes, so they are "p2p" like a daemon.
@@ -634,6 +665,12 @@ export async function createChatJob({
     const fallbackModel = nimVirtualProvider().model;
     if (modelName && modelName !== fallbackModel) requestedModel = modelName;
     servedModel = fallbackModel;
+  }
+
+  // Last guard: whatever the routing above resolved, a free caller never runs
+  // a GPU model. authorizeInteractive already refused one asked for by name.
+  if (freeTier && servedModel && !allow(servedModel)) {
+    throw withStatus(`"${servedModel}" needs a GPU and is paid only: top up with POST /api/v1/billing/topup`, 402);
   }
 
   // The name the job really runs under (alias or fallback model) counts too.

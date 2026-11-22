@@ -76,7 +76,15 @@ export async function authorizeInteractive({ userId, model, signedIn = Boolean(u
         // unmetered only when it cannot (see adminFallback).
         const isAdmin = Boolean(userId) && isAdminUser({ id: userId });
         if (!config.enabled || !userId) {
-            return adminFallback({ isAdmin, decision: { ...free(config.enabled ? "anonymous" : "metering_off"), config } });
+            // Still through interactiveModeFor: a GPU model is never free,
+            // anonymous or not (lib/billing/gpu-models.js).
+            const decision = interactiveModeFor({ model, config, signedIn: Boolean(userId) && signedIn });
+            return adminFallback({
+                isAdmin,
+                decision: decision.mode === "free"
+                    ? { ...free(decision.reason), config }
+                    : { ...decision, spendable_usd: "0.000000", config }
+            });
         }
 
         const { getInferencePricing, fundingPreview } = await import("@/lib/data/billing");

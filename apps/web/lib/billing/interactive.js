@@ -26,6 +26,7 @@ import {
     costMicro,
     microToUsd
 } from "./core.js";
+import { freeTierAllows, resolveGpuPolicy } from "./gpu-models.js";
 
 /** Settings row that switches interactive metering on and shapes the free tier. */
 export const INTERACTIVE_SETTINGS_KEY = "interactive_billing";
@@ -77,7 +78,19 @@ export const DEFAULT_INTERACTIVE_CONFIG = Object.freeze({
      * for a short chat. The node keeps its share of the floored charge.
      * Free-tier jobs bill nobody and stay free. 0 turns the floor off.
      */
-    min_charge_usd: 0.001
+    min_charge_usd: 0.001,
+    /**
+     * A model that needs a GPU is never served free: not to an anonymous
+     * caller, not on an empty balance, not when unpriced (Anthony 2026-11-22:
+     * "we need to charge for anything that requires a gpu"). GPU-class is
+     * decided in lib/billing/gpu-models.js: above free_max_params_b billion
+     * parameters, a hosted @cf/ model, or listed in gpu_models; free_models
+     * overrides. Admins are unaffected (adminFallback).
+     */
+    gpu_requires_balance: true,
+    free_max_params_b: 4,
+    gpu_models: [],
+    free_models: []
 });
 
 function pct(v, fallback) {
@@ -109,7 +122,13 @@ export function resolveInteractiveConfig({ env = {}, settings = null } = {}) {
         free_tier_when_empty: bool(s.free_tier_when_empty, fromEnv.free_tier_when_empty),
         spend_earned: bool(s.spend_earned, fromEnv.spend_earned),
         free_when_unpriced: bool(s.free_when_unpriced, fromEnv.free_when_unpriced),
-        min_charge_usd: usdAmount(s.min_charge_usd, fromEnv.min_charge_usd)
+        min_charge_usd: usdAmount(s.min_charge_usd, fromEnv.min_charge_usd),
+        ...resolveGpuPolicy({
+            gpu_requires_balance: bool(s.gpu_requires_balance, bool(env.INFERNET_GPU_REQUIRES_BALANCE, d.gpu_requires_balance)),
+            free_max_params_b: s.free_max_params_b ?? env.INFERNET_FREE_MAX_PARAMS_B ?? d.free_max_params_b,
+            gpu_models: s.gpu_models ?? d.gpu_models,
+            free_models: s.free_models ?? d.free_models
+        })
     };
 }
 
@@ -150,9 +169,16 @@ export function spendableMicro({ funding, config }) {
  *   insufficient empty balance with the free tier switched off → 402
  */
 export function interactiveModeFor({ model, pricing, config, funding, defaults = null, signedIn = true }) {
-    if (!config?.enabled) return { mode: "free", reason: "metering_off" };
-    if (!signedIn) return { mode: "free", reason: "anonymous" };
-    if (pricing?.enabled === false) return { mode: "free", reason: "pricing_disabled" };
+    // GPU models are never free: whenever this would answer "free", a GPU
+    // model gets "insufficient" (402, top up) instead. A caller that named no
+    // model stays free and the router keeps it on a CPU model (createChatJob
+    // gpuOk:false).
+    const free = (reason) => (model && config && !freeTierAllows(model, config)
+        ? { mode: "insufficient", reason: "gpu_requires_balance", free_reason: reason, spendable_micro: 0 }
+        : { mode: "free", reason });
+    if (!config?.enabled) return { mode: "free", reason: "metering_off" }; // nothing can be charged
+    if (!signedIn) return free("anonymous");
+    if (pricing?.enabled === false) return { mode: "free", reason: "pricing_disabled" }; // nothing can be charged
 
     // Pre-flight does not know which node will serve this yet, so it cannot
     // apply an operator price. It only needs to know a price EXISTS, and with
@@ -162,14 +188,14 @@ export function interactiveModeFor({ model, pricing, config, funding, defaults =
     const price = modelPriceMicro(pricing, model) ?? (defaults?.default_model_price ? { default: true } : null);
     if (!price) {
         return config.free_when_unpriced
-            ? { mode: "free", reason: "unpriced_model" }
+            ? free("unpriced_model")
             : { mode: "insufficient", reason: "unpriced_model" };
     }
 
     const spendable = spendableMicro({ funding, config });
     if (spendable > 0) return { mode: "balance", reason: "balance", spendable_micro: spendable, price };
     return config.free_tier_when_empty
-        ? { mode: "free", reason: "empty_balance" }
+        ? free("empty_balance")
         : { mode: "insufficient", reason: "empty_balance", spendable_micro: 0 };
 }
 

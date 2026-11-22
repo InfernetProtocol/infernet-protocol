@@ -91,7 +91,11 @@ export async function POST(request) {
     const billing = await authorizeInteractive({ userId: payer.userId, model });
 
     if (billing.mode === "insufficient") {
-        return err(402, "out of compute balance", {
+        const gpu = billing.reason === "gpu_requires_balance";
+        return err(402, gpu
+            ? `"${model}" runs on a GPU and is paid only: top up your compute balance, or use a model of ${billing.config?.free_max_params_b ?? 4}B or under`
+            : "out of compute balance", {
+            reason: billing.reason,
             spendable_usd: billing.spendable_usd,
             top_up: "POST /api/v1/billing/topup, or POST /api/v1/billing/fund-from-earnings"
         });
@@ -147,7 +151,10 @@ export async function POST(request) {
         billedUserId: billing.mode === "balance" || billing.mode === "admin" ? payer.userId : null,
         temperature: Number.isFinite(temperature) ? temperature : undefined,
         minTrustTier,
-        noFallback: wantsP2pOnly(body)
+        noFallback: wantsP2pOnly(body),
+        // Free tier: the router keeps it off GPU models (lib/billing/gpu-models.js).
+        freeTier: billing.mode === "free",
+        gpuConfig: billing.config ?? null
     };
     let jobBundle;
     try {
