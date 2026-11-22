@@ -19,6 +19,7 @@ import { resolveCreditsOptions, createCreditsClient } from '../lib/credits-clien
 import { resolveBatchOptions, createBatchClient } from '../lib/batch-client.js';
 import { resolvePluginsOptions, createPluginsClient } from '../lib/plugins-client.js';
 import { resolveApiOptions, createApiClient } from '../lib/api-client.js';
+import { resolveReferralOptions, createReferralsClient } from '../lib/referrals-client.js';
 import { CURRENT_VERSION } from '../lib/version.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -185,6 +186,21 @@ export const TOOLS = [
         inputSchema: { type: 'object', properties: { note: { type: 'string' } } },
         run: (c, a) => c.credits.createInvite(a.note)
     },
+    // Node referrals for the `infernet login` account: a share of the house
+    // fee (never the operator's earnings) on paid jobs referred nodes serve.
+    {
+        name: 'referral_link',
+        description: 'Your node referral link and the install commands that carry your code (created once; the commission term is set then). Commission = a percent of the house fee on paid jobs your referred nodes serve.',
+        inputSchema: { type: 'object', properties: {} },
+        run: (c) => c.referrals.link()
+    },
+    {
+        name: 'referral_stats',
+        description: 'Your node referrals: referred nodes, active nodes, commissions pending / confirmed / available / paid, payout address and recent commissions.',
+        inputSchema: { type: 'object', properties: {} },
+        annotations: { readOnlyHint: true },
+        run: (c) => c.referrals.stats()
+    },
     // Paid batch inference (INFERNET_API_KEY or the login bearer). Only
     // batch_submit can spend, and only up to the max_cost_usd you pass.
     {
@@ -285,6 +301,7 @@ export default async function mcp(args) {
     client.batch = createBatchClient(await resolveBatchOptions({ url: args.get('url'), key: args.get('key'), token: args.get('token') }));
     client.plugins = createPluginsClient(await resolvePluginsOptions({ url: args.get('url'), token: args.get('token') }));
     client.api = createApiClient(await resolveApiOptions({ url: args.get('url'), key: args.get('key') }));
+    client.referrals = createReferralsClient(await resolveReferralOptions({ url: args.get('url'), token: args.get('token') }));
     const rl = createInterface({ input: process.stdin });
     for await (const line of rl) {
         if (!line.trim()) continue;

@@ -676,3 +676,68 @@ export function ownPayerIds(userId, { isAdmin = false, adminIds = [] } = {}) {
     if (isAdmin) for (const a of adminIds) if (a) ids.add(String(a).toLowerCase());
     return [...ids];
 }
+
+/** Rolling windows reported by summariseNetworkEarnings, in ms. */
+export const NETWORK_EARNING_WINDOWS = Object.freeze({
+    "24h": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+    "30d": 30 * 24 * 60 * 60 * 1000
+});
+
+/**
+ * Public, network-wide proof that running a node earns money: what nodes
+ * earned, what the house kept, and what referrers earned, all time and over
+ * rolling windows. Same rules as summariseNetworkMoney (subsidy and void rows
+ * left out, fees from confirmed platform_fee rows). No node or account is
+ * named: per-node totals only feed the best/median figures.
+ *
+ * `earnings` rows need created_at; `commissions` are referral_commissions rows
+ * (amount_usd, status, referrer_user_id, earned_at).
+ */
+export function summariseNetworkEarnings(earnings = [], payouts = [], commissions = [], now = Date.now()) {
+    const at = (r) => Date.parse(r.earned_at ?? r.created_at ?? "") || 0;
+    const live = (c) => c.status !== "void" && c.status !== "pending_approval";
+    const sumUsd = (rows) => roundUsd(rows.reduce((a, r) => a + (Number(r.amount_usd) || 0), 0));
+    const block = (rows, coms) => {
+        const m = summariseNetworkMoney(rows, []);
+        const liveComs = coms.filter(live);
+        const perNode = new Map();
+        for (const e of rows) {
+            if (e.status === "void" || NOT_JOB_KINDS.includes(e.kind) || e.kind === "subsidy" || !e.provider_id) continue;
+            perNode.set(e.provider_id, (perNode.get(e.provider_id) ?? 0) + (Number(e.amount_usd) || 0));
+        }
+        const totals = [...perNode.values()].filter((v) => v > 0).sort((a, b) => a - b);
+        const n = totals.length;
+        const median = n === 0 ? 0 : n % 2 ? totals[(n - 1) / 2] : (totals[n / 2 - 1] + totals[n / 2]) / 2;
+        return {
+            earned_usd: m.earned_usd,
+            earning_nodes: n,
+            jobs: m.credits,
+            best_node_usd: roundUsd(totals[n - 1] ?? 0),
+            median_node_usd: roundUsd(median),
+            house_fee_usd: m.fees_usd,
+            house_fee_pct: m.fee_pct,
+            billed_usd: m.fee_gross_usd,
+            commissions_usd: sumUsd(liveComs),
+            earning_referrers: new Set(liveComs.map((c) => c.referrer_user_id).filter(Boolean)).size
+        };
+    };
+    const windows = {};
+    for (const [key, ms] of Object.entries(NETWORK_EARNING_WINDOWS)) {
+        const since = now - ms;
+        windows[key] = block(earnings.filter((e) => at(e) >= since), commissions.filter((c) => at(c) >= since));
+    }
+    const money = summariseNetworkMoney(earnings, payouts);
+    return {
+        generated_at: new Date(now).toISOString(),
+        currency: "USD",
+        all_time: {
+            ...block(earnings, commissions),
+            earned_confirmed_usd: money.earned_confirmed_usd,
+            earned_pending_usd: money.earned_pending_usd,
+            paid_out_usd: money.paid_out_usd,
+            commissions_confirmed_usd: sumUsd(commissions.filter((c) => c.status === "confirmed"))
+        },
+        windows
+    };
+}

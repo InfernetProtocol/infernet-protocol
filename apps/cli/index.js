@@ -58,6 +58,7 @@ import batch, { billing, keys } from './commands/batch.js';
 import price from './commands/price.js';
 import plugins from './commands/plugins.js';
 import quickstart, { models } from './commands/quickstart.js';
+import referral from './commands/referral.js';
 
 function parseArgs(argv) {
     const positional = [];
@@ -123,11 +124,12 @@ const COMMANDS = {
     price, prices: price,
     plugins, plugin: plugins,
     quickstart, models,
+    referral, referrals: referral, refer: referral,
     'house-models': houseModels, house: houseModels
 };
 
 // Commands that can run without a loaded config.
-const NO_CONFIG = new Set(['init', 'login', 'help', 'stats', 'logs', 'stop', 'restart', 'gpu', 'firewall', 'chat', 'setup', 'model', 'train', 'publish', 'inference', 'rpc', 'uncensored', 'reservation', 'reservations', 'order', 'orders', 'mcp', 'credits', 'invites', 'redeem', 'batch', 'batches', 'billing', 'keys', 'tui', 'doctor', 'service', 'pubkey', 'debug', 'deploy', 'console', 'upgrade', 'update', 'remove', 'uninstall', 'house-models', 'house', 'price', 'prices', 'plugins', 'plugin', 'quickstart', 'models']);
+const NO_CONFIG = new Set(['init', 'login', 'help', 'stats', 'logs', 'stop', 'restart', 'gpu', 'firewall', 'chat', 'setup', 'model', 'train', 'publish', 'inference', 'rpc', 'uncensored', 'reservation', 'reservations', 'order', 'orders', 'mcp', 'credits', 'invites', 'redeem', 'batch', 'batches', 'billing', 'keys', 'tui', 'doctor', 'service', 'pubkey', 'debug', 'deploy', 'console', 'upgrade', 'update', 'remove', 'uninstall', 'house-models', 'house', 'price', 'prices', 'plugins', 'plugin', 'quickstart', 'models', 'referral', 'referrals', 'refer']);
 // Commands that need a config but not a control-plane client (none today
 // — kept as a future escape hatch).
 const NO_CLIENT = new Set();

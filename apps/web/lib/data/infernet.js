@@ -2,7 +2,7 @@ import "server-only";
 import { getEnv } from "@/lib/env";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { formatGeo } from "@/lib/geo";
-import { summariseNetworkMoney, fmtUsdPrecise } from "@/lib/earnings/core";
+import { summariseNetworkMoney, summariseNetworkEarnings, fmtUsdPrecise } from "@/lib/earnings/core";
 import { c0mputeCard, fetchC0mputeSummary, llmProvidersCard, summarizeProviders } from "@/lib/data/network-nodes";
 import { fetchC0mputeInference } from "@/lib/chat/c0mpute-inference";
 
@@ -581,6 +581,32 @@ export async function getNetworkMoney() {
     return summariseNetworkMoney(earnings, payouts);
   } catch (err) {
     console.warn(`network money stats failed: ${err?.message ?? err}`);
+    return null;
+  }
+}
+
+let networkEarningsCache = { at: 0, value: null };
+
+/**
+ * Network-wide earnings, house fee and referral commissions, all time and
+ * over 24h/7d/30d (summariseNetworkEarnings). Public, so cached 60 s: the
+ * ledger read pages through every row. Null when the ledger can't be read.
+ */
+export async function getNetworkEarnings({ now = Date.now(), maxAgeMs = 60_000 } = {}) {
+  if (networkEarningsCache.value && now - networkEarningsCache.at < maxAgeMs) return networkEarningsCache.value;
+  try {
+    const supabase = getSupabaseServerClient();
+    const [earnings, payouts, commissions] = await Promise.all([
+      selectAll(supabase, "provider_earnings", "id, provider_id, kind, status, amount_usd, fee_usd, gross_usd, created_at"),
+      selectAll(supabase, "payout_requests", "id, status, amount_usd"),
+      // Older databases have no referral program yet: zero commissions, not an error.
+      selectAll(supabase, "referral_commissions", "id, referrer_user_id, status, amount_usd, earned_at").catch(() => [])
+    ]);
+    const value = summariseNetworkEarnings(earnings, payouts, commissions, now);
+    networkEarningsCache = { at: now, value };
+    return value;
+  } catch (err) {
+    console.warn(`network earnings stats failed: ${err?.message ?? err}`);
     return null;
   }
 }
