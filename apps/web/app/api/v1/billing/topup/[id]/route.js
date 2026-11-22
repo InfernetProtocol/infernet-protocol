@@ -1,5 +1,5 @@
 import { ok, fail } from "@/lib/reservations/http";
-import { requireCaller, failFrom } from "@/lib/billing/http";
+import { requireCaller, trustedSubjectCaller, failFrom } from "@/lib/billing/http";
 import { getTopup, settleTopup, publicTopup } from "@/lib/data/billing";
 
 export const runtime = "nodejs";
@@ -10,9 +10,15 @@ export const dynamic = "force-dynamic";
  * While unpaid, each call asks CoinPay whether the full amount was
  * collected and credits the balance exactly once if so. Nothing the caller
  * says about payment is believed.
+ *
+ * A trusted client (Bearer ifc_... + X-Infernet-Billed-Subject) may poll a
+ * top-up of the person it names; it is still only found when it belongs to
+ * that person's account.
  */
 export async function GET(request, { params }) {
-    const { user, error } = await requireCaller(request);
+    const acting = await trustedSubjectCaller(request);
+    if (acting?.error) return acting.error;
+    const { user, error } = acting ?? (await requireCaller(request));
     if (error) return error;
     const { id } = await params;
     try {
