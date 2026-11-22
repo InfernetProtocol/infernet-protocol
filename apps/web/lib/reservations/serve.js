@@ -320,18 +320,30 @@ async function viaNode(res, body, headers, finish, house = null) {
 
     if (body.stream === true) {
         const enc = new TextEncoder();
+        let closed = false;
+        let keepalive = null;
         const sse = new ReadableStream({
             async start(ctl) {
-                const push = (o) => ctl.enqueue(enc.encode(`data: ${typeof o === "string" ? o : JSON.stringify(o)}\n\n`));
-                let text = "", ok = false;
+                const send = (s) => {
+                    if (closed) return;
+                    try { ctl.enqueue(enc.encode(s)); } catch { closed = true; }
+                };
+                const push = (o) => send(`data: ${typeof o === "string" ? o : JSON.stringify(o)}\n\n`);
+                // A CPU node can spend minutes on the prompt before its first
+                // token: a comment line every 15 s keeps proxies from closing
+                // the idle connection (OpenAI clients skip comments).
+                keepalive = setInterval(() => send(": keepalive\n\n"), 15_000);
+                keepalive.unref?.();
+                let text = "", ok = false, ended = false;
                 try {
                     push(chunk(id, model, { role: "assistant", content: "" }));
                     for await (const ev of streamJobEvents(bundle.job.id)) {
+                        if (closed) break;
                         if (ev.type === "token") {
                             const t = ev.data?.text ?? "";
                             if (t) { text += t; push(chunk(id, model, { content: t })); }
-                        } else if (ev.type === "done") { ok = true; break; }
-                        else if (ev.type === "error") { push({ id, object: "chat.completion.chunk", error: { message: ev.data?.message ?? "engine error" } }); break; }
+                        } else if (ev.type === "done") { ok = true; ended = true; break; }
+                        else if (ev.type === "error") { ended = true; push({ id, object: "chat.completion.chunk", error: { message: ev.data?.message ?? "engine error" } }); break; }
                     }
                     if (ok) push(chunk(id, model, {}, "stop"));
                     if (ok && house) {
@@ -342,9 +354,19 @@ async function viaNode(res, body, headers, finish, house = null) {
                     }
                     push("[DONE]");
                 } finally {
-                    await done({ outcome: ok ? "ok" : "upstream_error", status: ok ? 200 : 502, prompt, completion: estimateTokens(text), estimated: true });
+                    clearInterval(keepalive);
+                    const args = { outcome: ok ? "ok" : "upstream_error", status: ok ? 200 : closed ? 499 : 502, prompt, completion: estimateTokens(text), estimated: true };
+                    // The caller left while the node was still working: the node
+                    // still needs the prompt, so the purge waits for the job to
+                    // finish (the reservations cron sweeps it then).
+                    if (ended || !house) await done(args);
+                    else await finish(args);
                     try { ctl.close(); } catch { /* closed */ }
                 }
+            },
+            cancel() {
+                closed = true;
+                clearInterval(keepalive);
             }
         });
         return new Response(sse, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache, no-transform", "x-accel-buffering": "no", ...headers } });
