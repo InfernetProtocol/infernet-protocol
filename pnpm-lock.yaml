@@ -210,8 +210,8 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0
       '@profullstack/chat-plugins':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.2.1
+        version: 0.2.1
       '@profullstack/coinpay-onboard':
         specifier: 0.3.1
         version: 0.3.1
@@ -1642,8 +1642,8 @@ packages:
     resolution: {integrity: sha512-gTOPS+Gm9fJ99EvvppXq6hS3FU/N9V5lPC5z81z+8lhCDahfekKwd0OdRN4WU61FNjgQWPb4wdzrYSWp4jCsjQ==}
     engines: {node: '>=20'}
 
-  '@profullstack/chat-plugins@0.2.0':
-    resolution: {integrity: sha512-ewvgaXAqlSTuXmT5+IvVRi36cWtLuTT1QOs9wfRgq1pUINTnUklYFMvXF0y0XWHBF36vLTQpTVrry0yBZFbL4g==}
+  '@profullstack/chat-plugins@0.2.1':
+    resolution: {integrity: sha512-odcY+P3uQByP3srd9nMoxB6Rn7juaMrjBQfzEUlqCRfi4tYcNAkpaC5zMighE6WDYkodOIBymwXJHCTBDjzjsA==}
     engines: {node: '>=20'}
 
   '@profullstack/cli@0.2.0':
@@ -8382,7 +8382,7 @@ snapshots:
 
   '@profullstack/browser-fingerprint@0.1.0': {}
 
-  '@profullstack/chat-plugins@0.2.0': {}
+  '@profullstack/chat-plugins@0.2.1': {}
 
   '@profullstack/cli@0.2.0': {}
 
