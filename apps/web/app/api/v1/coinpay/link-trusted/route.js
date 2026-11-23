@@ -3,6 +3,7 @@ import { bearerFrom } from "@/lib/reservations/core";
 import { trustedClientFor } from "@/lib/trusted-clients";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCoinpayUser, supabaseCoinpayStore } from "@/lib/auth/coinpay-signin";
+import { linkAttributionAllowed } from "@/lib/referrals/core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,8 +17,9 @@ export const dynamic = "force-dynamic";
  *   → { user_id, action: "login" | "created", referral? }
  *
  * `ref` is the referral code the person arrived with on the calling app
- * (first touch). It is recorded only for a new account that has never been
- * charged (spend referrals, lib/data/referrals.js attributeUser).
+ * (first touch). It is recorded only on the call that CREATES the account
+ * (action "created"), never on a later sign-in (spend referrals,
+ * lib/data/referrals.js attributeUser).
  *
  * Why this exists: c0mpute.com signs people in with CoinPay and sends their
  * inference here under its own trusted key. Billing resolves the person
@@ -60,10 +62,16 @@ export async function POST(request) {
         if (!r.ok) return fail(409, r.error, { code: r.code });
         const ref = typeof body?.ref === "string" && body.ref.length <= 64 ? body.ref : null;
         let referral;
-        if (ref) {
+        if (ref && !linkAttributionAllowed(r.action)) {
+            // Only the sign-in that creates the account carries a referral:
+            // a ref seen on a later sign-in would be a referral added after
+            // the fact (2026-11-23 live test: a minute-old account picked
+            // one up on its second sign-in).
+            referral = { attributed: false, reason: "not_new" };
+        } else if (ref) {
             const { attributeUser } = await import("@/lib/data/referrals");
             const ip = request.headers.get("x-infernet-client-ip");
-            referral = await attributeUser({ userId: r.userId, code: ref, via: "c0mpute-signin", ip: ip && ip.length <= 64 ? ip : null })
+            referral = await attributeUser({ userId: r.userId, code: ref, via: "c0mpute-signin", ip: ip && ip.length <= 64 ? ip : null, maxAccountAgeHours: 1 })
                 .then((x) => ({ attributed: Boolean(x?.attributed), reason: x?.reason ?? null }))
                 .catch((err) => {
                     console.error("[coinpay link-trusted] referral", err?.message ?? err);
