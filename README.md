@@ -445,6 +445,15 @@ in the payout path reads it, and it can never be withdrawn.
   already had 10 bonuses in 30 days. Each side is decided once (`invite_bonuses`).
 - **Affiliate link**: `/?ref=<code>` (shown on `/invites`); first touch is kept in the `referral_code` cookie and
   recorded at sign-in.
+- **Referral commissions** (`/refer`, `infernet referral`, one code per account, also used on c0mpute.com): paid out
+  of the house fee only, never out of an operator's share, and never more than the fee collected on a job.
+  - Nodes: `commission_pct_of_house_fee` (5) percent of the fee on paid jobs a node you referred serves.
+  - People (spend referrals, 2026-11-23): `spend_commission_pct_of_house_fee` (50) percent of the fee collected on
+    what a person who signed up through your link (`/r/<code>` or `?ref=<code>`, first touch, recorded at the
+    account's creation or first sign-in, never added later) spends. At the 5% fee that is 2.5% of their spend.
+    `spend_term_months` (0 = no expiry), `spend_enabled`, `house_user_ids` (accounts that never earn).
+  - All in the settings row `referrals`; ledger `referral_commissions` (`kind` node | spend), filled by a trigger
+    on `provider_earnings`; payouts through `payout_requests` like node earnings.
 - API: `GET /api/v1/credits`, `POST /api/v1/credits/redeem`, `GET|POST /api/v1/invites`,
   `DELETE /api/v1/invites/{id}`, `POST /api/v1/invites/accept`; admin `GET|POST /api/v1/admin/credit-codes`,
   `DELETE /api/v1/admin/credit-codes/{id}`. CLI: `infernet credits|redeem|invites`. MCP: `credits_balance`,

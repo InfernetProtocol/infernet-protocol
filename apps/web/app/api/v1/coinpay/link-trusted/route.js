@@ -12,8 +12,12 @@ export const dynamic = "force-dynamic";
  * an Infernet account, so their compute balance can be billed here.
  *
  *   Authorization: Bearer ifc_...        (a trusted client, lib/trusted-clients.js)
- *   { sub, email?, name? }
- *   → { user_id, action: "login" | "created" }
+ *   { sub, email?, name?, ref? }
+ *   → { user_id, action: "login" | "created", referral? }
+ *
+ * `ref` is the referral code the person arrived with on the calling app
+ * (first touch). It is recorded only for a new account that has never been
+ * charged (spend referrals, lib/data/referrals.js attributeUser).
  *
  * Why this exists: c0mpute.com signs people in with CoinPay and sends their
  * inference here under its own trusted key. Billing resolves the person
@@ -54,7 +58,19 @@ export async function POST(request) {
         const store = supabaseCoinpayStore(getSupabaseServerClient());
         const r = await resolveCoinpayUser({ mode: "login", currentUserId: null, claims: { sub, email, name } }, store);
         if (!r.ok) return fail(409, r.error, { code: r.code });
-        return ok({ user_id: r.userId, action: r.action, client: trusted.name });
+        const ref = typeof body?.ref === "string" && body.ref.length <= 64 ? body.ref : null;
+        let referral;
+        if (ref) {
+            const { attributeUser } = await import("@/lib/data/referrals");
+            const ip = request.headers.get("x-infernet-client-ip");
+            referral = await attributeUser({ userId: r.userId, code: ref, via: "c0mpute-signin", ip: ip && ip.length <= 64 ? ip : null })
+                .then((x) => ({ attributed: Boolean(x?.attributed), reason: x?.reason ?? null }))
+                .catch((err) => {
+                    console.error("[coinpay link-trusted] referral", err?.message ?? err);
+                    return { attributed: false, reason: "error" };
+                });
+        }
+        return ok({ user_id: r.userId, action: r.action, client: trusted.name, ...(referral ? { referral } : {}) });
     } catch (e) {
         console.error("[coinpay link-trusted]", e?.message ?? e);
         return fail(500, "could not link that CoinPay identity");

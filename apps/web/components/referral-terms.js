@@ -12,6 +12,7 @@ export default function ReferralTerms({ terms, site = "Infernet" }) {
     const pct = terms?.commission_pct_of_house_fee ?? 5;
     const fee = terms?.house_fee_pct;
     const eff = terms?.effective_pct_of_node_revenue;
+    const spend = terms?.spend ?? null;
     return (
         <section id="terms" className="rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6 text-sm leading-6 text-[var(--muted)]">
             <h2 className="text-lg font-semibold text-white">Referral terms</h2>
@@ -20,6 +21,15 @@ export default function ReferralTerms({ terms, site = "Infernet" }) {
                     You earn <strong className="text-white">{pct}% of the house fee</strong> {site} earns on each paid job served by a node
                     you referred.{fee != null ? ` With today's ${fee}% house fee that is about ${eff}% of what that node's jobs bring in.` : ""}
                 </li>
+                {spend?.enabled ? (
+                    <li>
+                        People you refer: you earn <strong className="text-white">{spend.commission_pct_of_house_fee}% of the house fee</strong>{" "}
+                        collected on what they spend on paid inference and paid jobs.
+                        {fee != null ? ` With today's ${fee}% house fee that is ${spend.effective_pct_of_spend}% of their spend.` : ""}{" "}
+                        {spend.term_months ? `It runs for ${spend.term_months} months from when they joined.` : "It does not expire."} A person
+                        counts as referred when their account is created through your link (first touch); it cannot be added later.
+                    </li>
+                ) : null}
                 <li>
                     The commission comes out of the house fee. It is never taken from the node operator's earnings, and it is never more
                     than the house earned on that job. Jobs that earn the house no fee (free tier, subsidised or unpaid jobs) earn no
@@ -38,8 +48,9 @@ export default function ReferralTerms({ terms, site = "Infernet" }) {
                     and that cannot be changed later.
                 </li>
                 <li>
-                    No self-referral: nodes you operate, nodes that share your payout wallet or your network, and jobs you pay for yourself
-                    earn no commission. Commissions from self-referral or abuse may be voided.
+                    No self-referral: nodes you operate, nodes that share your payout wallet or your network, your own accounts, accounts
+                    that share your payout wallet, and jobs you pay for yourself earn no commission. House accounts and the house handle
+                    earn nothing. Commissions from self-referral or abuse may be voided.
                 </li>
                 <li>
                     A commission is confirmed when its job's payment is confirmed. Payouts use the same path as node earnings: minimum{" "}

@@ -45,7 +45,10 @@ export async function proxy(request) {
     // Affiliate links (?ref=<code>): keep the FIRST touch for 30 days in the
     // referral_code cookie (@profullstack/referrals' name, read by
     // @profullstack/affiliates' refFromRequest at signup / sign-in).
-    const ref = request.nextUrl.searchParams.get("ref");
+    // /r/<code> (a referral link) counts as the same first touch.
+    const ref = request.nextUrl.searchParams.get("ref")
+        ?? /^\/r\/([A-Za-z0-9]{6,16})\/?$/.exec(request.nextUrl.pathname)?.[1]
+        ?? null;
     if (ref && /^[A-Za-z0-9_-]{4,64}$/.test(ref) && !request.cookies.get("referral_code")) {
         response.cookies.set("referral_code", ref, {
             httpOnly: true,

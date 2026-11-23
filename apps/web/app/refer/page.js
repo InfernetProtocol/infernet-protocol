@@ -11,8 +11,8 @@ import ReferralTerms from "@/components/referral-terms";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-    title: "Refer a node — Infernet",
-    description: "Earn a share of the house fee on the nodes you bring to Infernet and c0mpute.",
+    title: "Refer people and nodes — Infernet",
+    description: "Earn a share of the house fee on the nodes you bring and on what the people you refer spend on Infernet and c0mpute.",
     robots: { index: false }
 };
 
@@ -74,11 +74,15 @@ export default async function ReferPage({ searchParams }) {
     return (
         <main className="mx-auto w-full max-w-3xl px-6 py-12 lg:px-10">
             <header className="mb-8 space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.4em] text-[var(--accent)]">Refer a node</p>
-                <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Bring a node, share the house fee</h1>
+                <p className="text-xs font-semibold uppercase tracking-[0.4em] text-[var(--accent)]">Refer people and nodes</p>
+                <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Share your link, share the house fee</h1>
                 <p className="text-sm leading-6 text-[var(--muted)]">
                     When a node you referred serves paid jobs on Infernet or c0mpute, you get {o?.terms?.commission_pct_of_house_fee ?? 5}% of
-                    the house fee on each one. It comes out of the house's cut, so the operator keeps all of their earnings.
+                    the house fee on each one.
+                    {o?.terms?.spend?.enabled
+                        ? ` When a person who signed up through your link spends on paid inference or jobs, you get ${o.terms.spend.commission_pct_of_house_fee}% of the house fee on what they spend.`
+                        : ""}{" "}
+                    It all comes out of the house's cut, so operators keep all of their earnings and the people you refer pay the normal price.
                 </p>
             </header>
 
@@ -105,6 +109,9 @@ export default async function ReferPage({ searchParams }) {
                         </p>
                         <Command text={links.links.infernet} />
                         <Command text={links.links.c0mpute} />
+                        <p className="mt-2 text-xs text-[var(--muted)]">
+                            A person is credited to you when they create their account after opening your link (first touch).
+                        </p>
                         <h3 className="mt-6 text-sm font-semibold text-white">Install commands that carry your code</h3>
                         <p className="mt-1 text-xs text-[var(--muted)]">
                             A node is credited to you when it registers with your code, before its first paid job. Send operators one of these:
@@ -118,6 +125,10 @@ export default async function ReferPage({ searchParams }) {
                     <section className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
                         <Stat label="Referred nodes" value={o.referred_nodes} />
                         <Stat label="Active (7 days)" value={o.active_nodes_7d} />
+                        <Stat label="Referred people" value={o.referred_people ?? 0} />
+                        <Stat label="People who spent" value={o.spending_people ?? 0} />
+                        <Stat label="Node commissions" value={fmtUsdPrecise((o.balance.by_kind?.node?.confirmed_usd ?? 0) + (o.balance.by_kind?.node?.pending_usd ?? 0))} />
+                        <Stat label="Spend commissions" value={fmtUsdPrecise((o.balance.by_kind?.spend?.confirmed_usd ?? 0) + (o.balance.by_kind?.spend?.pending_usd ?? 0))} />
                         <Stat label="Pending" value={fmtUsdPrecise(o.balance.pending_usd)} />
                         <Stat label="Available" value={fmtUsdPrecise(o.balance.available_usd)} />
                         <Stat label="Confirmed" value={fmtUsdPrecise(o.balance.confirmed_usd)} />
@@ -157,6 +168,19 @@ export default async function ReferPage({ searchParams }) {
                     </section>
 
                     <section className="mb-8 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6">
+                        {o.people?.length ? (
+                            <>
+                                <h2 className="text-lg font-semibold text-white">Referred people</h2>
+                                <ul className="mb-6 mt-3 space-y-1 text-sm text-[var(--muted)]">
+                                    {o.people.map((p) => (
+                                        <li key={p.person}>
+                                            <span className="font-mono text-white">{p.person}</span> · joined {p.joined_at.slice(0, 10)}
+                                            {p.first_spend_at ? ` · first paid use ${p.first_spend_at.slice(0, 10)}` : " · no paid use yet"}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </>
+                        ) : null}
                         <h2 className="text-lg font-semibold text-white">Referred nodes</h2>
                         {o.nodes.length ? (
                             <ul className="mt-3 space-y-1 text-sm text-[var(--muted)]">
@@ -175,13 +199,13 @@ export default async function ReferPage({ searchParams }) {
                                 <h3 className="mt-6 text-sm font-semibold text-white">Recent commissions</h3>
                                 <table className="mt-2 w-full text-left text-xs text-[var(--muted)]">
                                     <thead>
-                                        <tr><th className="py-1">When</th><th>Node</th><th>House fee</th><th>Commission</th><th>Status</th></tr>
+                                        <tr><th className="py-1">When</th><th>From</th><th>House fee</th><th>Commission</th><th>Status</th></tr>
                                     </thead>
                                     <tbody>
                                         {o.recent.map((c) => (
                                             <tr key={c.id}>
                                                 <td className="py-1">{c.earned_at.slice(0, 16).replace("T", " ")}</td>
-                                                <td className="font-mono">{c.node}</td>
+                                                <td className="font-mono">{c.kind === "spend" ? `spend · ${c.person}` : c.node}</td>
                                                 <td>{fmtUsdPrecise(c.fee_usd)}</td>
                                                 <td className="text-white">{fmtUsdPrecise(c.amount_usd)}</td>
                                                 <td>{STATUS[c.status] ?? c.status}</td>

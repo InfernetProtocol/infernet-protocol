@@ -41,15 +41,17 @@ const lower = (v) => String(v ?? "").toLowerCase();
  *   links        pubkey_links: pubkey, user_id, role
  *   identities   coinpay_identities: user_id, coinpay_sub
  *   charges      billing_ledger kind 'charge': user_id, amount_micro, created_at
- *   commissions  referral_commissions: referrer_user_id, status, amount_usd, earned_at
+ *   commissions  referral_commissions: referrer_user_id, kind, status, amount_usd, earned_at
+ *                (node AND spend commissions: both count toward a referrer's total)
  *   attributions referral_attributions: referrer_user_id, attributed_at
+ *   people       referral_user_attributions: referrer_user_id, attributed_at
  * @param {object} opts  key (the caller's bearer), now, adminIds (house accounts: never ranked as customers), limit
  */
 export function summariseLeaderboard(rows, { key, now = Date.now(), adminIds = [], limit = LEADERBOARD_LIMIT } = {}) {
     if (!key) throw new Error("leaderboard needs the caller's key");
     const {
         earnings = [], providers = [], links = [], identities = [],
-        charges = [], commissions = [], attributions = []
+        charges = [], commissions = [], attributions = [], people = []
     } = rows ?? {};
 
     const subByUser = new Map(identities.filter((i) => i?.user_id && i?.coinpay_sub).map((i) => [lower(i.user_id), i.coinpay_sub]));
@@ -121,7 +123,7 @@ export function summariseLeaderboard(rows, { key, now = Date.now(), adminIds = [
         const perReferrer = new Map();
         const ref = (id) => {
             const k = lower(id);
-            if (!perReferrer.has(k)) perReferrer.set(k, { who: personToken(id), commissions_usd: 0, nodes: 0 });
+            if (!perReferrer.has(k)) perReferrer.set(k, { who: personToken(id), commissions_usd: 0, nodes: 0, people: 0 });
             return perReferrer.get(k);
         };
         for (const c of commissions) {
@@ -131,6 +133,10 @@ export function summariseLeaderboard(rows, { key, now = Date.now(), adminIds = [
         for (const a of attributions) {
             if (!a?.referrer_user_id || (Date.parse(a.attributed_at ?? "") || 0) < since) continue;
             ref(a.referrer_user_id).nodes += 1;
+        }
+        for (const p of people) {
+            if (!p?.referrer_user_id || (Date.parse(p.attributed_at ?? "") || 0) < since) continue;
+            ref(p.referrer_user_id).people += 1;
         }
 
         const top = (arr, by) => arr.sort((a, b) => b[by] - a[by]).slice(0, limit);
@@ -151,7 +157,7 @@ export function summariseLeaderboard(rows, { key, now = Date.now(), adminIds = [
             spenders: top(spenders.map((s) => ({ ...s, spent_usd: roundUsd(s.spent_usd) })), "spent_usd"),
             referrers: top(
                 [...perReferrer.values()]
-                    .filter((r) => r.commissions_usd > 0 || r.nodes > 0)
+                    .filter((r) => r.commissions_usd > 0 || r.nodes > 0 || r.people > 0)
                     .map((r) => ({ ...r, commissions_usd: roundUsd(r.commissions_usd) })),
                 "commissions_usd"
             ),
