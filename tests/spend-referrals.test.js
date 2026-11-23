@@ -8,6 +8,7 @@ import {
     spendCommissionRowFor,
     withinSpendWindow,
     userAttributionRefusal,
+    linkAttributionAllowed,
     commissionRowFor,
     summariseCommissions,
     summariseResults,
@@ -207,6 +208,13 @@ describe("attributing a person", () => {
         expect(userAttributionRefusal({ ...base, accountCreatedAt: "2026-01-01T00:00:00Z" })).toBe("not_new");
         expect(userAttributionRefusal({ ...base, accountCreatedAt: null })).toBe("not_new");
         expect(userAttributionRefusal({ ...base, hasCharges: true })).toBe("not_new");
+    });
+    it("a trusted app's link carries a referral only on the call that creates the account", () => {
+        expect(linkAttributionAllowed("created")).toBe(true);
+        expect(linkAttributionAllowed("login")).toBe(false);
+        expect(linkAttributionAllowed(undefined)).toBe(false);
+        // and even then the account must be fresh
+        expect(userAttributionRefusal({ ...base, accountCreatedAt: new Date(Date.now() - 2 * 3600_000).toISOString(), maxAccountAgeHours: 1 })).toBe("not_new");
     });
     it("unknown codes and a switched-off program refuse", () => {
         expect(userAttributionRefusal({ ...base, referrerUserId: null })).toBe("unknown_code");

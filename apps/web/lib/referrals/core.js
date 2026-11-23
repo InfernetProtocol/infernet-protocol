@@ -390,6 +390,11 @@ export function userAttributionRefusal({
     return null;
 }
 
+/** A trusted app's account link carries a referral only when it created the account. */
+export function linkAttributionAllowed(action) {
+    return action === "created";
+}
+
 export const USER_REFERRAL_MESSAGES = Object.freeze({
     disabled: "spend referrals are turned off right now",
     house_handle: "that is the house handle, it carries no commission",

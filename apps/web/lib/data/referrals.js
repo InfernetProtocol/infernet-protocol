@@ -327,7 +327,7 @@ async function walletsOf(userId) {
  *
  *   via  'infernet-signin' | 'c0mpute-signin'
  */
-export async function attributeUser({ userId, code: rawCode, via, ip = null, accountCreatedAt = null }) {
+export async function attributeUser({ userId, code: rawCode, via, ip = null, accountCreatedAt = null, maxAccountAgeHours = 24 }) {
     if (!userId) return { attributed: false, reason: "no_user" };
     const raw = typeof rawCode === "string" ? rawCode.trim().toLowerCase() : "";
     const code = normalizeReferralCode(raw);
@@ -359,7 +359,8 @@ export async function attributeUser({ userId, code: rawCode, via, ip = null, acc
         accountCreatedAt: created,
         hasCharges: (charges ?? 0) > 0,
         referrerWallets,
-        referredWallets
+        referredWallets,
+        maxAccountAgeHours
     });
     if (reason) return { attributed: false, reason, message: USER_REFERRAL_MESSAGES[reason] };
     const { error } = await supabase.from("referral_user_attributions").insert({
