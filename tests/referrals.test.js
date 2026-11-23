@@ -78,7 +78,7 @@ describe("accrual math", () => {
         expect(resolveReferralConfig({ commission_pct_of_house_fee: 7 }).commission_pct_of_house_fee).toBe(7);
         expect(resolveReferralConfig({ commission_pct_of_house_fee: "nope" }).commission_pct_of_house_fee).toBe(5);
         expect(resolveReferralConfig({ commission_pct_of_house_fee: 150 }).commission_pct_of_house_fee).toBe(5);
-        expect(resolveReferralConfig(null)).toEqual({ enabled: true, commission_pct_of_house_fee: 5, term_months_12m: 12 });
+        expect(resolveReferralConfig(null)).toMatchObject({ enabled: true, commission_pct_of_house_fee: 5, term_months_12m: 12 });
     });
     it("free / subsidy / unpaid jobs earn nothing", () => {
         const a = attribution("lifetime");

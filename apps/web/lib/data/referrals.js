@@ -12,7 +12,9 @@ import {
     SELF_REFERRAL_MESSAGES,
     summariseCommissions,
     summariseResults,
-    referralTerms
+    referralTerms,
+    userAttributionRefusal,
+    USER_REFERRAL_MESSAGES
 } from "@/lib/referrals/core";
 
 /**
@@ -113,7 +115,8 @@ export async function getReferralOverview(userId) {
     const supabase = db();
     const [row, config, earnings] = await Promise.all([getCodeRow(userId), getReferralConfig(), getEarningsConfig()]);
     if (!row) return { has_code: false, terms: referralTerms({ config, earnings }) };
-    const [attributions, commissions, payouts] = await Promise.all([
+    const optional = (p) => p.catch(() => []); // before the spend migration
+    const [attributions, commissions, payouts, people] = await Promise.all([
         selectAll(() => supabase
             .from("referral_attributions")
             .select("node_key, via, attributed_at, first_settled_at, provider_id")
@@ -121,15 +124,23 @@ export async function getReferralOverview(userId) {
             .order("attributed_at", { ascending: false })),
         selectAll(() => supabase
             .from("referral_commissions")
-            .select("id, node_key, job_id, fee_usd, commission_pct, amount_usd, status, earned_at")
+            .select("id, kind, node_key, referred_user_id, job_id, fee_usd, commission_pct, amount_usd, status, earned_at")
             .eq("referrer_user_id", userId)
             .order("earned_at", { ascending: false })),
         selectAll(() => supabase
             .from("payout_requests")
             .select("id, amount_usd, coin, network, status, tx_hash, error, created_at, sent_at")
             .eq("referrer_user_id", userId)
-            .order("created_at", { ascending: false }))
+            .order("created_at", { ascending: false })),
+        optional(selectAll(() => supabase
+            .from("referral_user_attributions")
+            .select("referred_user_id, via, attributed_at, first_spend_at")
+            .eq("referrer_user_id", userId)
+            .order("attributed_at", { ascending: false })))
     ]);
+    // A referrer never sees who their people are: each is "person N", in
+    // the order they joined.
+    const personNo = new Map([...people].reverse().map((p, i) => [p.referred_user_id, i + 1]));
     const cutoff = Date.now() - 7 * 86400_000;
     const activeNodes = new Set(commissions.filter((c) => c.status !== "void" && Date.parse(c.earned_at) >= cutoff).map((c) => c.node_key));
     return {
@@ -149,8 +160,23 @@ export async function getReferralOverview(userId) {
         })),
         referred_nodes: attributions.length,
         active_nodes_7d: activeNodes.size,
+        people: people.map((p) => ({
+            person: `person ${personNo.get(p.referred_user_id)}`,
+            via: p.via,
+            joined_at: p.attributed_at,
+            first_spend_at: p.first_spend_at
+        })),
+        referred_people: people.length,
+        spending_people: people.filter((p) => p.first_spend_at).length,
         balance: summariseCommissions(commissions, payouts),
-        recent: commissions.slice(0, 25).map((c) => ({ ...c, node: publicNodeLabel(c.node_key), node_key: undefined })),
+        recent: commissions.slice(0, 25).map((c) => ({
+            ...c,
+            kind: c.kind ?? "node",
+            node: c.node_key ? publicNodeLabel(c.node_key) : null,
+            person: c.referred_user_id ? `person ${personNo.get(c.referred_user_id) ?? "?"}` : null,
+            node_key: undefined,
+            referred_user_id: undefined
+        })),
         payouts: payouts.slice(0, 20)
     };
 }
@@ -281,6 +307,77 @@ export async function attributeNode({ nodeKey, code: rawCode, via, ip = null, ow
     return { attributed: true, reason: null };
 }
 
+// ---- spend referrals: attributing a person ---------------------------------
+
+async function walletsOf(userId) {
+    const supabase = db();
+    const out = [];
+    const { data: code } = await supabase.from("referral_codes").select("payout_address").eq("user_id", userId).maybeSingle();
+    if (code?.payout_address) out.push(code.payout_address);
+    const fp = await referrerFootprint(userId);
+    return out.concat(fp.provider_addresses ?? []);
+}
+
+/**
+ * Record that `userId` was referred by the owner of `code` (spend referrals).
+ * First touch, at signup / first sign-in only: refused once the account is
+ * older than a day or has been charged, when it already has a referrer, for
+ * the house handle or a house account, and on self-referral. Never throws on
+ * a refusal; returns { attributed, reason, message }.
+ *
+ *   via  'infernet-signin' | 'c0mpute-signin'
+ */
+export async function attributeUser({ userId, code: rawCode, via, ip = null, accountCreatedAt = null }) {
+    if (!userId) return { attributed: false, reason: "no_user" };
+    const raw = typeof rawCode === "string" ? rawCode.trim().toLowerCase() : "";
+    const code = normalizeReferralCode(raw);
+    const cfg = await getReferralConfig();
+    const supabase = db();
+    if (!code) {
+        const reason = raw === "profullstack" ? "house_handle" : "unknown_code";
+        return { attributed: false, reason, message: USER_REFERRAL_MESSAGES[reason] };
+    }
+    const [{ data: codeRow }, { data: existing }, { count: charges }, created] = await Promise.all([
+        supabase.from("referral_codes").select("user_id, payout_address").eq("code", code).maybeSingle(),
+        supabase.from("referral_user_attributions").select("referrer_user_id, code").eq("referred_user_id", userId).maybeSingle(),
+        supabase.from("billing_ledger").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("kind", "charge"),
+        accountCreatedAt
+            ? Promise.resolve(accountCreatedAt)
+            : supabase.auth.admin.getUserById(userId).then((r) => r?.data?.user?.created_at ?? null).catch(() => null)
+    ]);
+    if (existing && existing.code === code) return { attributed: true, already: true, reason: null };
+    const referrerUserId = codeRow?.user_id ?? null;
+    const [referrerWallets, referredWallets] = referrerUserId && referrerUserId !== userId
+        ? await Promise.all([walletsOf(referrerUserId), walletsOf(userId)])
+        : [[], []];
+    const reason = userAttributionRefusal({
+        referrerUserId,
+        referredUserId: userId,
+        code,
+        config: cfg,
+        alreadyAttributed: Boolean(existing),
+        accountCreatedAt: created,
+        hasCharges: (charges ?? 0) > 0,
+        referrerWallets,
+        referredWallets
+    });
+    if (reason) return { attributed: false, reason, message: USER_REFERRAL_MESSAGES[reason] };
+    const { error } = await supabase.from("referral_user_attributions").insert({
+        referred_user_id: userId,
+        referrer_user_id: referrerUserId,
+        code,
+        via,
+        ip24: ipPrefixHash(ip)
+    });
+    if (error) {
+        if (/duplicate key|referral_user_attributions_pkey/.test(error.message)) {
+            return { attributed: false, reason: "already_attributed", message: USER_REFERRAL_MESSAGES.already_attributed };
+        }
+        throw withStatus(error.message, 500);
+    }
+    return { attributed: true, reason: null };
+}
+
 // ---- payouts ----------------------------------------------------------------
 
 /**
@@ -341,7 +438,7 @@ export async function getReferralResults({ activeDays = 7 } = {}) {
     const [codes, attributions, commissions, payouts, config, earnings] = await Promise.all([
         selectAll(() => supabase.from("referral_codes").select("user_id, arm, created_at").order("user_id")),
         selectAll(() => supabase.from("referral_attributions").select("node_key, referrer_user_id, arm, provider_id, first_settled_at, attributed_at, via").order("node_key")),
-        selectAll(() => supabase.from("referral_commissions").select("referrer_user_id, arm, amount_usd, status").order("id")),
+        selectAll(() => supabase.from("referral_commissions").select("referrer_user_id, kind, arm, fee_usd, amount_usd, status").order("id")),
         selectAll(() => supabase.from("payout_requests").select("referrer_user_id, amount_usd, status").not("referrer_user_id", "is", null).order("id")),
         getReferralConfig(),
         getEarningsConfig()
@@ -378,8 +475,20 @@ export async function getReferralResults({ activeDays = 7 } = {}) {
                 .order("id")));
         }
     }
+    const people = await selectAll(() => supabase.from("referral_user_attributions")
+        .select("referrer_user_id, first_spend_at").order("referred_user_id")).catch(() => []);
+    const spendRows = commissions.filter((c) => c.kind === "spend" && c.status !== "void");
+    const round = (n) => Math.round(n * 1e8) / 1e8;
     return {
         ...summariseResults({ codes, attributions, credits, commissions, payouts, activeDays }),
+        spend: {
+            referred_people: people.length,
+            spending_people: people.filter((p) => p.first_spend_at).length,
+            referrers_with_people: new Set(people.map((p) => p.referrer_user_id)).size,
+            house_fee_usd: round(spendRows.reduce((a, c) => a + (Number(c.fee_usd) || 0), 0)),
+            commissions_accrued_usd: round(spendRows.reduce((a, c) => a + (Number(c.amount_usd) || 0), 0)),
+            commissions_confirmed_usd: round(spendRows.filter((c) => c.status === "confirmed").reduce((a, c) => a + (Number(c.amount_usd) || 0), 0))
+        },
         config,
         house_fee_pct: earnings.house_fee_pct,
         totals: { codes: codes.length, attributions: attributions.length, commissions: commissions.length }

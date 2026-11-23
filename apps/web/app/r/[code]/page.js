@@ -49,6 +49,20 @@ export default async function ReferralLanding({ params }) {
 
             {found.valid ? (
                 <section className="mb-8 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6">
+                    <h2 className="text-lg font-semibold text-white">Use the network</h2>
+                    <p className="mt-1 text-sm text-[var(--muted)]">
+                        Create an account and use open models in <Link className="underline" href="/chat">chat</Link> or through the API. You
+                        pay the normal price; if you sign up from this link, the person who invited you gets a share of the house fee on what
+                        you spend, out of the house&apos;s cut.
+                    </p>
+                    <p className="mt-3">
+                        <Link className="underline" href="/auth/signup">Create an account</Link>
+                    </p>
+                </section>
+            ) : null}
+
+            {found.valid ? (
+                <section className="mb-8 rounded-[1.5rem] border border-white/10 bg-[var(--panel)] p-6">
                     <h2 className="text-lg font-semibold text-white">Install</h2>
                     <p className="mt-1 text-sm text-[var(--muted)]">Linux or macOS. The code {found.code} is applied when the node registers.</p>
                     <Command text={links.install.infernet} />

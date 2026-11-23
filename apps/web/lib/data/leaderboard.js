@@ -23,7 +23,7 @@ async function pages(build, pageSize = 1000) {
 async function loadRows() {
     const db = getSupabaseServerClient();
     const optional = (p) => p.catch(() => []); // older databases: no referral program yet
-    const [earnings, providers, links, identities, charges, commissions, attributions] = await Promise.all([
+    const [earnings, providers, links, identities, charges, commissions, attributions, people] = await Promise.all([
         pages(() => db.from("provider_earnings")
             .select("id, provider_id, kind, status, amount_usd, output_tokens, model_name, billed:metadata->>billed_user_id, earned_at, created_at")
             .order("id", { ascending: true })),
@@ -31,10 +31,11 @@ async function loadRows() {
         pages(() => db.from("pubkey_links").select("pubkey, user_id, role").eq("role", "provider").order("pubkey", { ascending: true })),
         pages(() => db.from("coinpay_identities").select("user_id, coinpay_sub").order("user_id", { ascending: true })),
         pages(() => db.from("billing_ledger").select("id, user_id, amount_micro, created_at").eq("kind", "charge").order("id", { ascending: true })),
-        optional(pages(() => db.from("referral_commissions").select("id, referrer_user_id, status, amount_usd, earned_at").order("id", { ascending: true }))),
-        optional(pages(() => db.from("referral_attributions").select("node_key, referrer_user_id, attributed_at").order("node_key", { ascending: true })))
+        optional(pages(() => db.from("referral_commissions").select("id, referrer_user_id, kind, status, amount_usd, earned_at").order("id", { ascending: true }))),
+        optional(pages(() => db.from("referral_attributions").select("node_key, referrer_user_id, attributed_at").order("node_key", { ascending: true }))),
+        optional(pages(() => db.from("referral_user_attributions").select("referred_user_id, referrer_user_id, attributed_at").order("referred_user_id", { ascending: true })))
     ]);
-    return { earnings, providers, links, identities, charges, commissions, attributions };
+    return { earnings, providers, links, identities, charges, commissions, attributions, people };
 }
 
 async function rowsCached(now) {

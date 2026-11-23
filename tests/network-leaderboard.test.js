@@ -85,7 +85,7 @@ describe("summariseLeaderboard", () => {
 
     it("referrers: live commissions plus nodes referred", () => {
         const r = s.windows.all.referrers;
-        expect(r[0]).toEqual({ who: leaderboardToken(KEY, "sub:sub-alice"), commissions_usd: 0.002, nodes: 0 });
+        expect(r[0]).toEqual({ who: leaderboardToken(KEY, "sub:sub-alice"), commissions_usd: 0.002, nodes: 0, people: 0 });
         expect(r[1].nodes).toBe(1);
         expect(r[1].commissions_usd).toBe(0);
         expect(s.windows["24h"].referrers.length).toBe(1);

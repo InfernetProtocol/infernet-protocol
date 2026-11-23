@@ -190,13 +190,13 @@ export const TOOLS = [
     // fee (never the operator's earnings) on paid jobs referred nodes serve.
     {
         name: 'referral_link',
-        description: 'Your node referral link and the install commands that carry your code (created once; the commission term is set then). Commission = a percent of the house fee on paid jobs your referred nodes serve.',
+        description: 'Your referral link and the install commands that carry your code (created once; the node commission term is set then). Commission = a percent of the house fee on paid jobs your referred nodes serve, plus a percent of the house fee on what people who signed up through your link spend.',
         inputSchema: { type: 'object', properties: {} },
         run: (c) => c.referrals.link()
     },
     {
         name: 'referral_stats',
-        description: 'Your node referrals: referred nodes, active nodes, commissions pending / confirmed / available / paid, payout address and recent commissions.',
+        description: 'Your referrals: referred nodes and people, commissions from nodes and from people\'s spend (pending / confirmed / available / paid), payout address and recent commissions.',
         inputSchema: { type: 'object', properties: {} },
         annotations: { readOnlyHint: true },
         run: (c) => c.referrals.stats()

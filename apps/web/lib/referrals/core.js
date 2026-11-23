@@ -28,20 +28,41 @@ export const ARM_LABELS = Object.freeze({
 
 export const DEFAULT_REFERRAL_CONFIG = Object.freeze({
     enabled: true,
-    // The single config value: percent of the house fee paid to the referrer.
+    // Node referrals: percent of the house fee paid to whoever referred the node.
     commission_pct_of_house_fee: 5,
-    term_months_12m: 12
+    term_months_12m: 12,
+    // Spend referrals (2026-11-23): percent of the house fee collected on what
+    // a referred PERSON spends. 50% of a 5% fee = 2.5% of their spend.
+    spend_enabled: true,
+    spend_commission_pct_of_house_fee: 50,
+    // 0 = no expiry; otherwise months from the person's attribution.
+    spend_term_months: 0,
+    // Our own accounts: they never earn a commission (the house paying itself).
+    house_user_ids: Object.freeze([])
 });
+
+/** Handles that are ours and never a paid code (the house default on c0mpute links). */
+export const HOUSE_HANDLES = Object.freeze(["profullstack"]);
+
+const pctOr = (v, d) => {
+    const n = Number(v);
+    return v !== null && v !== "" && Number.isFinite(n) && n >= 0 && n <= 100 ? n : d;
+};
+const boolOr = (v, d) => (v === undefined || v === null ? d : v === true || v === "true");
 
 /** Settings row 'referrals' over the defaults; malformed values fall back. */
 export function resolveReferralConfig(settings = null) {
     const s = settings && typeof settings === "object" ? settings : {};
-    const pct = Number(s.commission_pct_of_house_fee);
     const months = Number(s.term_months_12m);
+    const spendMonths = Number(s.spend_term_months);
     return {
-        enabled: s.enabled === undefined ? DEFAULT_REFERRAL_CONFIG.enabled : s.enabled === true || s.enabled === "true",
-        commission_pct_of_house_fee: Number.isFinite(pct) && pct >= 0 && pct <= 100 ? pct : DEFAULT_REFERRAL_CONFIG.commission_pct_of_house_fee,
-        term_months_12m: Number.isInteger(months) && months > 0 && months <= 120 ? months : DEFAULT_REFERRAL_CONFIG.term_months_12m
+        enabled: boolOr(s.enabled, DEFAULT_REFERRAL_CONFIG.enabled),
+        commission_pct_of_house_fee: pctOr(s.commission_pct_of_house_fee, DEFAULT_REFERRAL_CONFIG.commission_pct_of_house_fee),
+        term_months_12m: Number.isInteger(months) && months > 0 && months <= 120 ? months : DEFAULT_REFERRAL_CONFIG.term_months_12m,
+        spend_enabled: boolOr(s.spend_enabled, DEFAULT_REFERRAL_CONFIG.spend_enabled),
+        spend_commission_pct_of_house_fee: pctOr(s.spend_commission_pct_of_house_fee, DEFAULT_REFERRAL_CONFIG.spend_commission_pct_of_house_fee),
+        spend_term_months: Number.isInteger(spendMonths) && spendMonths >= 0 && spendMonths <= 600 ? spendMonths : DEFAULT_REFERRAL_CONFIG.spend_term_months,
+        house_user_ids: Array.isArray(s.house_user_ids) ? s.house_user_ids.filter((x) => typeof x === "string") : []
     };
 }
 
@@ -262,6 +283,124 @@ export function applyCreditsToLedger(ledger, credits, ctx) {
     return { ledger: [...byId.values()], attribution };
 }
 
+// ---- spend referrals (mirrors post_spend_referral_commission) --------------
+
+/**
+ * Who paid for a credit, as the trigger resolves it: the billed person on
+ * interactive / usage / image credits, else the batch owner (batchOwner), else
+ * the job's billed user (jobPayer). Reservation orders have no account.
+ */
+export function payerOf(earning, { batchOwner = null, jobPayer = null } = {}) {
+    const re = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const raw = earning?.metadata?.billed_user_id ?? (earning?.metadata?.batch_id ? batchOwner : null) ?? jobPayer ?? null;
+    return typeof raw === "string" && re.test(raw) ? raw.toLowerCase() : null;
+}
+
+/** Spend commission on one credit: pct of the FEE actually collected, never above what is left of it. */
+export function spendCommissionFor({ feeUsd, pct, otherCommissionsUsd = 0 }) {
+    const fee = Number(feeUsd);
+    const p = Math.min(Math.max(Number(pct) || 0, 0), 100);
+    if (!Number.isFinite(fee) || fee <= 0 || p <= 0) return 0;
+    const room = Math.max(round8(fee - (Number(otherCommissionsUsd) || 0)), 0);
+    return Math.min(round8((fee * p) / 100), fee, room);
+}
+
+/** Whether a spend credit at `earnedAt` is inside the optional window (0 = forever). */
+export function withinSpendWindow({ attributedAt, earnedAt, months = 0 }) {
+    if (!months) return true;
+    return new Date(earnedAt).getTime() < addMonths(new Date(attributedAt), months).getTime();
+}
+
+/**
+ * The spend commission row a credit produces, or null. Same rules, same order,
+ * as the SQL trigger.
+ *   attribution  { referred_user_id, referrer_user_id, attributed_at }
+ *   wallets      { referrer: "0x..", payer: ["0x..", ...] } payout addresses
+ */
+export function spendCommissionRowFor({ earning, attribution, config, payer = null, otherCommissionsUsd = 0, wallets = null }) {
+    const cfg = resolveReferralConfig(config);
+    if (!earning || !attribution || !cfg.enabled || !cfg.spend_enabled) return null;
+    if (!["paid", "reservation"].includes(earning.kind)) return null;
+    const fee = Number(earning.fee_usd) || 0;
+    if (fee <= 0 || earning.status === "void") return null;
+    const who = payer ?? payerOf(earning);
+    if (!who || who !== String(attribution.referred_user_id).toLowerCase()) return null;
+    if (new Date(earning.earned_at) < new Date(attribution.attributed_at)) return null;
+    if (attribution.referrer_user_id === who) return null;
+    if (cfg.house_user_ids.includes(attribution.referrer_user_id)) return null;
+    if (!withinSpendWindow({ attributedAt: attribution.attributed_at, earnedAt: earning.earned_at, months: cfg.spend_term_months })) return null;
+    const rw = wallets?.referrer ? String(wallets.referrer).toLowerCase() : null;
+    if (rw && (wallets.payer ?? []).some((a) => String(a).toLowerCase() === rw)) return null;
+    const pct = cfg.spend_commission_pct_of_house_fee;
+    const amount = spendCommissionFor({ feeUsd: fee, pct, otherCommissionsUsd });
+    if (amount <= 0) return null;
+    return {
+        kind: "spend",
+        source_earning_id: earning.id,
+        referrer_user_id: attribution.referrer_user_id,
+        referred_user_id: who,
+        node_key: null,
+        provider_id: earning.provider_id,
+        job_id: earning.job_id ?? null,
+        reservation_id: earning.reservation_id ?? null,
+        arm: null,
+        fee_usd: fee,
+        commission_pct: pct,
+        amount_usd: amount,
+        status: earning.status,
+        earned_at: earning.earned_at,
+        confirmed_at: earning.confirmed_at ?? null
+    };
+}
+
+/**
+ * Why recording `referredUserId` as referred by the owner of a code is
+ * refused, or null. First touch only: the account must be new
+ * (createdAt within maxAccountAgeHours) and never charged, and it can have no
+ * referrer yet. Self-referral = the same account, or a shared payout wallet
+ * (one CoinPay identity maps to one account, so the same CoinPay DID is the
+ * same account).
+ */
+export function userAttributionRefusal({
+    referrerUserId,
+    referredUserId,
+    code,
+    config,
+    alreadyAttributed = false,
+    accountCreatedAt = null,
+    hasCharges = false,
+    referrerWallets = [],
+    referredWallets = [],
+    now = Date.now(),
+    maxAccountAgeHours = 24
+}) {
+    const cfg = resolveReferralConfig(config);
+    if (!cfg.enabled || !cfg.spend_enabled) return "disabled";
+    if (!code || HOUSE_HANDLES.includes(String(code).toLowerCase())) return "house_handle";
+    if (!referrerUserId) return "unknown_code";
+    if (cfg.house_user_ids.includes(referrerUserId)) return "house_account";
+    if (referrerUserId === referredUserId) return "same_account";
+    if (alreadyAttributed) return "already_attributed";
+    const created = accountCreatedAt ? Date.parse(accountCreatedAt) : NaN;
+    if (!Number.isFinite(created) || now - created > maxAccountAgeHours * 3600_000) return "not_new";
+    if (hasCharges) return "not_new";
+    const lower = (v) => (typeof v === "string" && v.trim() ? v.trim().toLowerCase() : null);
+    const mine = new Set(referrerWallets.map(lower).filter(Boolean));
+    if (referredWallets.map(lower).some((a) => a && mine.has(a))) return "same_payout_wallet";
+    return null;
+}
+
+export const USER_REFERRAL_MESSAGES = Object.freeze({
+    disabled: "spend referrals are turned off right now",
+    house_handle: "that is the house handle, it carries no commission",
+    house_account: "house accounts do not earn referral commissions",
+    unknown_code: "that referral code does not exist",
+    same_account: "you cannot refer yourself",
+    already_attributed: "this account already has a referrer (attribution never changes)",
+    not_new: "a referral can only be recorded when an account is first created",
+    same_payout_wallet: "this account shares a payout wallet with the referrer, so it counts as a self-referral"
+});
+
 // ---- c0mpute node claims -----------------------------------------------------
 
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -353,7 +492,17 @@ export function summariseCommissions(commissions = [], payouts = []) {
         requested_usd: open,
         paid_usd: paid,
         available_usd: roundUsd(Math.max(0, confirmed - open - paid)),
-        commissions: commissions.filter((c) => c.status !== "void").length
+        commissions: commissions.filter((c) => c.status !== "void").length,
+        // Node and spend commissions side by side (rows before 2026-11-23 are all node).
+        by_kind: Object.fromEntries(["node", "spend"].map((k) => {
+            const rows = commissions.filter((c) => (c.kind ?? "node") === k);
+            const of = (s) => rows.filter((c) => c.status === s);
+            return [k, {
+                pending_usd: roundUsd(sum(of("pending")) + sum(of("pending_approval"))),
+                confirmed_usd: sum(of("confirmed")),
+                commissions: rows.filter((c) => c.status !== "void").length
+            }];
+        }))
     };
 }
 
@@ -408,6 +557,8 @@ export function summariseResults({ codes = [], attributions = [], credits = [], 
     }
     for (const arm of ARMS) out[arm].active_nodes = active[arm].size;
     for (const c of commissions) {
+        // The A/B test is on node referrals; spend commissions have no arm.
+        if ((c.kind ?? "node") !== "node") continue;
         const arm = out[c.arm] ? c.arm : armOf.get(c.referrer_user_id);
         if (!out[arm] || c.status === "void") continue;
         out[arm].commissions_accrued_usd += Number(c.amount_usd) || 0;
@@ -436,10 +587,18 @@ export function referralTerms({ config, earnings, arm = null }) {
     const fee = Number(earnings?.house_fee_pct);
     const pct = cfg.commission_pct_of_house_fee;
     const ofRevenue = Number.isFinite(fee) ? Math.round(pct * fee) / 100 : null;
+    const spendPct = cfg.spend_commission_pct_of_house_fee;
     return {
         commission_pct_of_house_fee: pct,
         house_fee_pct: Number.isFinite(fee) ? fee : null,
         effective_pct_of_node_revenue: ofRevenue,
+        // Spend referrals: a share of the fee on what referred people spend.
+        spend: {
+            enabled: cfg.enabled && cfg.spend_enabled,
+            commission_pct_of_house_fee: spendPct,
+            effective_pct_of_spend: Number.isFinite(fee) ? Math.round(spendPct * fee * 100) / 10000 : null,
+            term_months: cfg.spend_term_months || null
+        },
         term: arm ? { arm, label: ARM_LABELS[arm] ?? null, months: arm === "12m" ? cfg.term_months_12m : null } : null,
         min_payout_usd: Number(earnings?.min_payout_usd) || 0,
         auto_approve_max_usd: Number(earnings?.auto_approve_max_usd) || 0,

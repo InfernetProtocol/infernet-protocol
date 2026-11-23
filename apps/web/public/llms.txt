@@ -16,6 +16,7 @@ Fees: a 5% house fee on paid jobs, paid batch inference and metered API usage; t
 - [Deploy](https://infernetprotocol.com/deploy): Deploy providers to cloud GPU platforms.
 - [Order](https://infernetprotocol.com/order): Book a dedicated model endpoint on an online node by the hour. Agents: GET /api/v1/orders/capacity, then POST /api/v1/orders answers 402 with an x402 offer (USDC); pay and get the reservation plus an API key back. People: pay: "checkout" for a CoinPay checkout URL.
 - [Live status](https://infernetprotocol.com/status): Live network state — online nodes, jobs, providers.
+- [Refer](https://infernetprotocol.com/refer): One referral link per account. Earn 5% of our 5% house fee on paid jobs served by nodes you refer, and 50% of our 5% fee on what the people you refer spend (2.5% of their spend). Paid from the house fee, never from operators; no income is promised. API: GET /api/v1/referrals.
 
 ## Reference
 

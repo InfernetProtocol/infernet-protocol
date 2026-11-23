@@ -9,7 +9,7 @@ export const REFERRAL_HELP = `infernet referral — refer a node, share the hous
 
 Usage:
   infernet referral [link]                          Your referral link + install commands (creates it once)
-  infernet referral stats                           Referred nodes, commissions (pending / confirmed / paid)
+  infernet referral stats                           Referred nodes and people, commissions (pending / confirmed / paid)
   infernet referral address <coin> <network> <addr> Where commission payouts go (e.g. USDC polygon 0x...)
   infernet referral payout [usd]                    Withdraw confirmed commissions (default: all available)
   infernet referral admin results                   The commission-term experiment by arm (admin)
@@ -48,7 +48,9 @@ function statsText(d) {
     const b = d.balance ?? {};
     return [
         `Code ${d.code} · ${d.referred_nodes} referred node(s), ${d.active_nodes_7d} active in 7 days`,
+        `${d.referred_people ?? 0} referred people, ${d.spending_people ?? 0} have spent`,
         `Pending ${usd(b.pending_usd)} · confirmed ${usd(b.confirmed_usd)} · available ${usd(b.available_usd)} · requested ${usd(b.requested_usd)} · paid ${usd(b.paid_usd)}`,
+        ...(b.by_kind ? [`  from nodes ${usd(b.by_kind.node.confirmed_usd + b.by_kind.node.pending_usd)} · from people's spend ${usd(b.by_kind.spend.confirmed_usd + b.by_kind.spend.pending_usd)}`] : []),
         d.payout_address ? `Payouts to ${d.payout_address.coin}/${d.payout_address.network} ${d.payout_address.address}` : 'No payout address: infernet referral address <coin> <network> <address>',
         ...(d.nodes ?? []).slice(0, 20).map((n) => `  ${n.node}  joined ${String(n.attributed_at).slice(0, 10)}${n.first_paid_job_at ? `  first paid job ${String(n.first_paid_job_at).slice(0, 10)}` : ''}`)
     ].join('\n');
