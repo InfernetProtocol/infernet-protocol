@@ -160,7 +160,7 @@ describe("validateUsageCharge", () => {
     });
 
     it("rejects an unknown kind", () => {
-        expect(USAGE_KINDS).toEqual(["live.relay"]);
+        expect(USAGE_KINDS).toEqual(["live.relay", "board.meeting"]);
         for (const kind of ["live.transcode", "inference", "", null, undefined, 7]) {
             expect(validateUsageCharge(body({ kind }))).toMatchObject({ ok: false, status: 400 });
         }
@@ -455,5 +455,58 @@ describe("chargeUsage", () => {
         const input = validateUsageCharge(body()).value;
         await expect(chargeUsage({ input, userId: USER, client: "c0mpute", store, feePct: 5 })).rejects.toMatchObject({ status: 503 });
         expect(calls).toEqual([]);
+    });
+});
+
+describe("board.meeting: a house charge no node earns", () => {
+    const boardBody = (over = {}) => ({ idem_key: "board:mtg-1", kind: "board.meeting", cost_usd: 0.84, provider: "house", ...over });
+
+    it("validates: board.meeting must name the house, live.relay must name a node", () => {
+        expect(USAGE_KINDS).toContain("board.meeting");
+        expect(validateUsageCharge(boardBody()).value).toMatchObject({ kind: "board.meeting", provider: "house", peerId: null, costMicro: 840000 });
+        expect(validateUsageCharge(boardBody({ provider: `c0mpute:${PEER}` })).ok).toBe(false);
+        expect(validateUsageCharge(body({ provider: "house" })).ok).toBe(false);
+        expect(usageKindLabel("usage:board.meeting")).toBe("Board meeting");
+    });
+
+    function houseStore(chargeResult) {
+        const calls = [];
+        const jobs = new Map();
+        return {
+            calls,
+            providerId: async () => { calls.push("providerId"); return "should-not-be-used"; },
+            charge: async (a) => { calls.push(["charge", a.costMicro]); return chargeResult(a); },
+            job: async (id) => jobs.get(id) ?? null,
+            ensureJob: async (row) => { calls.push(["ensureJob", row.provider_id, row.model_name]); if (!jobs.has(row.id)) jobs.set(row.id, row); },
+            credit: async () => { calls.push("credit"); },
+            earning: async () => { calls.push("earning"); return null; }
+        };
+    }
+
+    it("charges the balance, records the job with no provider, credits nobody", async () => {
+        const store = houseStore(() => ({ charged: true, charged_micro: 840000, spendable_micro: 9160000 }));
+        const input = validateUsageCharge(boardBody()).value;
+        const out = await chargeUsage({ input, userId: USER, client: "c0mpute", store, feePct: 5 });
+        expect(out).toEqual({ charged: true, cost_usd: 0.84, operator_usd: 0, fee_usd: 0.84, balance_usd: 9.16 });
+        expect(store.calls).toEqual([["charge", 840000], ["ensureJob", null, "board.meeting"]]);
+    });
+
+    it("a short balance moves nothing; a replay of the same key is not a second charge", async () => {
+        const short = houseStore(() => ({ charged: false, spendable_micro: 100000 }));
+        const input = validateUsageCharge(boardBody()).value;
+        expect(await chargeUsage({ input, userId: USER, client: "c0mpute", store: short, feePct: 5 })).toEqual({ charged: false, reason: "insufficient_balance", balance_usd: 0.1 });
+        expect(short.calls).toEqual([["charge", 840000]]);
+
+        let first = true;
+        const store = houseStore(() => {
+            const r = first ? { charged: true, charged_micro: 840000, spendable_micro: 1 } : { charged: false, reason: "already_charged", charged_micro: 840000, user_id: USER, spendable_micro: 1 };
+            first = false;
+            return r;
+        });
+        await chargeUsage({ input, userId: USER, client: "c0mpute", store, feePct: 5 });
+        expect((await chargeUsage({ input, userId: USER, client: "c0mpute", store, feePct: 5 })).charged).toBe(true);
+        const other = validateUsageCharge(boardBody({ cost_usd: 2 })).value;
+        await expect(chargeUsage({ input: other, userId: USER, client: "c0mpute", store, feePct: 5 })).rejects.toMatchObject({ status: 409 });
+        expect(store.calls.filter((c) => c === "credit")).toEqual([]);
     });
 });

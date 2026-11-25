@@ -27,10 +27,26 @@ import { MICRO, numericUsdToMicro } from "./core.js";
 import { chargeIdemKey } from "./interactive.js";
 
 /** What may be billed this way. The kind is the row's label in every view. */
-export const USAGE_KINDS = Object.freeze(["live.relay"]);
+export const USAGE_KINDS = Object.freeze(["live.relay", "board.meeting"]);
 
 export const USAGE_KIND_LABELS = Object.freeze({
-    "live.relay": "live relay"
+    "live.relay": "live relay",
+    "board.meeting": "board meeting"
+});
+
+/**
+ * The provider of a charge no node earns: Board as a Service runs a paid
+ * meeting on its own model account (Claude) and bills the person's compute
+ * balance for it, so the whole charge is house revenue. Nobody is credited,
+ * no provider_earnings row is written, and so no referral commission is paid
+ * on it (the commission comes out of the fee on a node's credit).
+ */
+export const HOUSE_PROVIDER = "house";
+
+/** Which provider each kind must name: a c0mpute node, or the house. */
+const KIND_PROVIDER = Object.freeze({
+    "live.relay": "node",
+    "board.meeting": "house"
 });
 
 /**
@@ -94,8 +110,18 @@ export function validateUsageCharge(body) {
         return bad("cost_usd is under one micro-dollar (0.000001); accumulate usage and charge a larger amount");
     }
 
-    const m = C0MPUTE_PROVIDER.exec(typeof body.provider === "string" ? body.provider : "");
-    if (!m) return bad('provider must be "c0mpute:<peer_id>"');
+    let provider;
+    let peerId;
+    if (KIND_PROVIDER[body.kind] === "house") {
+        if (body.provider !== HOUSE_PROVIDER) return bad(`provider must be "${HOUSE_PROVIDER}" for ${body.kind}`);
+        provider = HOUSE_PROVIDER;
+        peerId = null;
+    } else {
+        const m = C0MPUTE_PROVIDER.exec(typeof body.provider === "string" ? body.provider : "");
+        if (!m) return bad('provider must be "c0mpute:<peer_id>"');
+        provider = m[0];
+        peerId = m[1];
+    }
 
     let meta = null;
     if (body.meta != null) {
@@ -110,7 +136,7 @@ export function validateUsageCharge(body) {
         meta = JSON.parse(text);
     }
 
-    return { ok: true, value: { idemKey, kind: body.kind, costMicro, provider: m[0], peerId: m[1], meta } };
+    return { ok: true, value: { idemKey, kind: body.kind, costMicro, provider, peerId, meta } };
 }
 
 /**
@@ -153,8 +179,9 @@ function withStatus(message, status, extra = {}) {
  */
 export async function chargeUsage({ input, userId, client, store, feePct, allowEarned = true, now = () => new Date() }) {
     const jobId = usageJobId(client, input.idemKey);
-    const providerId = await store.providerId(input.peerId);
-    if (!providerId) throw withStatus("could not open a provider for that node; try again", 503);
+    const house = input.provider === HOUSE_PROVIDER;
+    const providerId = house ? null : await store.providerId(input.peerId);
+    if (!house && !providerId) throw withStatus("could not open a provider for that node; try again", 503);
 
     const out = await store.charge({
         userId,
@@ -176,7 +203,7 @@ export async function chargeUsage({ input, userId, client, store, feePct, allowE
         // person, amount, node or kind is a caller bug, never a new charge.
         const same = String(out.user_id ?? userId) === String(userId)
             && chargedMicro === input.costMicro
-            && (!existing || (existing.provider_id === providerId && existing.model_name === input.kind));
+            && (!existing || ((existing.provider_id ?? null) === providerId && existing.model_name === input.kind));
         if (!same) {
             throw withStatus("idem_key was already used for a different charge", 409, { code: "idem_key_reused" });
         }
@@ -204,6 +231,17 @@ export async function chargeUsage({ input, userId, client, store, feePct, allowE
                 ...(input.meta ? { meta: input.meta } : {})
             }
         });
+    }
+
+    if (house) {
+        // Nobody to credit: the charge itself is the house's revenue.
+        return {
+            charged: true,
+            cost_usd: usd(chargedMicro),
+            operator_usd: 0,
+            fee_usd: usd(chargedMicro),
+            balance_usd: usd(out.spendable_micro)
+        };
     }
 
     // Idempotent on (job, provider): a replay finds the row already there.

@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
  *   Authorization: Bearer ifc_...            a trusted client (lib/trusted-clients.js)
  *   X-Infernet-Billed-Subject: <CoinPay sub> who pays
  *   { idem_key, kind: "live.relay", cost_usd, provider: "c0mpute:<peer_id>", meta? }
+ *   { idem_key, kind: "board.meeting", cost_usd, provider: "house", meta? }   (no node: house revenue)
  *
  *   200 { data: { charged: true, cost_usd, operator_usd, fee_usd, balance_usd } }
  *   200 { data: { charged: false, reason: "insufficient_balance" | "no_account", balance_usd } }
