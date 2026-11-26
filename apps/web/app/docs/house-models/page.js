@@ -68,7 +68,7 @@ export default function HouseModelsPage() {
                             <tr key={m.source}>
                                 <td className="px-4 py-2 align-top"><code className="text-zinc-200">{m.source}</code>{m.uncensored ? " (uncensored)" : ""}</td>
                                 <td className="px-4 py-2 align-top">{gb(m.size_bytes)}</td>
-                                <td className="px-4 py-2 align-top">{m.min_ram_gb} GB{m.min_ollama_version ? `, Ollama ${m.min_ollama_version}+` : ""}</td>
+                                <td className="px-4 py-2 align-top">{m.min_ram_gb} GB{m.min_vram_gb ? `, GPU ${m.min_vram_gb} GB VRAM` : ""}{m.min_ollama_version ? `, Ollama ${m.min_ollama_version}+` : ""}</td>
                                 <td className="px-4 py-2 align-top">{m.description}</td>
                             </tr>
                         ))}
@@ -86,6 +86,7 @@ export default function HouseModelsPage() {
                 <li>after the download at least 10% of the disk stays free (never less than 10 GB, never more than 50 GB required);</li>
                 <li>house models stay under the operator&apos;s disk cap, if one is set;</li>
                 <li>Ollama is at least the model&apos;s <code>min_ollama_version</code>, when it has one (CLI 0.1.114 and later; an unknown version counts as too old, and a model the node pulled is removed if Ollama is downgraded below it);</li>
+                <li>the GPUs hold at least the model&apos;s <code>min_vram_gb</code>, when it has one (a 27B dense model on a CPU node answers too slowly to finish a job);</li>
                 <li>one at a time; a pull waits up to 10 minutes for a running job to finish, then goes ahead (it is download work Ollama does beside inference).</li>
             </ul>
             <P>

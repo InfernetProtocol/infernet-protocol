@@ -27,6 +27,9 @@
  *     on an older engine and answer with garbage, so an unknown version counts
  *     as too old. Such entries live in the manifest's `models_gated` array,
  *     which CLIs before 0.1.114 never read: they cannot check the version.
+ *   - An entry with min_vram_gb is pulled only where the detected GPUs hold
+ *     at least that much VRAM. A 27B dense model on a busy CPU node answers
+ *     at well under 1 token/s, wins bids and then times out every job.
  */
 
 import fs from 'node:fs/promises';
@@ -141,6 +144,8 @@ export function parseManifest(doc) {
         const minDisk = raw?.min_disk_gb === undefined ? 0 : Number(raw.min_disk_gb);
         if (!Number.isFinite(minDisk) || minDisk < 0) why.push('min_disk_gb must be a number');
         if (raw?.digest != null && !DIGEST_RE.test(String(raw.digest))) why.push('digest must be sha256 hex');
+        const minVram = raw?.min_vram_gb == null ? 0 : Number(raw.min_vram_gb);
+        if (!Number.isFinite(minVram) || minVram < 0) why.push('min_vram_gb must be a number');
         const minOllama = raw?.min_ollama_version == null ? null : String(raw.min_ollama_version).trim();
         if (minOllama !== null && !VERSION_RE.test(minOllama)) why.push('min_ollama_version must be a dotted version like 0.40.13');
         const key = normalizeOllamaName(source);
@@ -159,6 +164,7 @@ export function parseManifest(doc) {
             min_ram_gb: minRam,
             min_disk_gb: minDisk,
             min_ollama_version: minOllama,
+            min_vram_gb: minVram,
             uncensored: raw.uncensored === true,
             description: typeof raw.description === 'string' ? raw.description : '',
             license: typeof raw.license === 'string' ? raw.license : null,
@@ -238,7 +244,8 @@ export function diskReserveBytes(totalBytes) {
  *   manifest   parseManifest() output
  *   installed  Ollama /api/tags models: [{ name, digest, size }]
  *   owned      { [ollama_name]: {...} }: models the daemon pulled itself
- *   capacity   { ramGb, diskFreeBytes, diskTotalBytes }
+ *   capacity   { ramGb, vramGb, diskFreeBytes, diskTotalBytes }; vramGb is
+ *              total GPU VRAM (0 or missing = no usable GPU)
  *   settings   resolveSettings() output
  *   failures   { [ollama_name]: { at } }: recent pull/verify failures
  *   ollamaVersion  what Ollama's /api/version reports (null = unknown), for
@@ -278,6 +285,10 @@ export function planSync({ manifest, installed = [], owned = {}, capacity = {}, 
         if (!settings?.enabled) reason = 'house models are turned off on this node';
         else if (m.uncensored && !settings.uncensored) reason = 'uncensored house models are turned off on this node';
         else if (Number.isFinite(ram) && ram > 0 && ram < m.min_ram_gb) reason = `needs ${m.min_ram_gb} GB RAM, this node has ${ram.toFixed(1)} GB`;
+        else if (m.min_vram_gb > 0 && !(Number(capacity.vramGb) >= m.min_vram_gb)) {
+            const v = Number(capacity.vramGb);
+            reason = `needs a GPU with ${m.min_vram_gb} GB VRAM, this node has ${Number.isFinite(v) && v > 0 ? `${v.toFixed(1)} GB` : 'none detected'}`;
+        }
         else if (m.min_ollama_version && !((compareVersions(ollamaVersion, m.min_ollama_version) ?? -1) >= 0)) {
             reason = `needs Ollama ${m.min_ollama_version} or newer, this node has ${ollamaVersion ?? 'an unknown version'} (update Ollama: older engines run it wrong)`;
         }
@@ -395,6 +406,17 @@ export async function writeState(state, p = getStatePath()) {
 export function ollamaHost(env = process.env) {
     const h = env.OLLAMA_HOST || 'http://localhost:11434';
     return /^https?:\/\//.test(h) ? h : `http://${h}`;
+}
+
+/** Total VRAM of the detected GPUs in GB; 0 when none or detection fails. */
+export async function detectVramGb() {
+    try {
+        const { detectCapacity } = await import('./model-fit.js');
+        const c = await detectCapacity();
+        return Number.isFinite(c?.vram_gb) ? c.vram_gb : 0;
+    } catch {
+        return 0;
+    }
 }
 
 /** Ollama's version string from /api/version, or null when it cannot be read. */
@@ -530,8 +552,10 @@ export async function syncHouseModels({
         for (const n of Object.keys(state.owned)) if (!names.has(n)) delete state.owned[n];
 
         const disk = capacity?.disk ?? await diskSpace();
+        const needsVram = man.models.some((m) => m.min_vram_gb > 0);
         const cap = {
             ramGb: capacity?.ramGb ?? ramGb(),
+            vramGb: capacity?.vramGb ?? (needsVram ? await detectVramGb() : 0),
             diskFreeBytes: disk.freeBytes,
             diskTotalBytes: disk.totalBytes
         };

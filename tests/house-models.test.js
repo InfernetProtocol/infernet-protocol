@@ -527,3 +527,38 @@ describe("house-models min_ollama_version", () => {
         }
     });
 });
+
+describe("house-models min_vram_gb", () => {
+    const gpuDoc = { models: [], models_gated: [
+        { name: "bonsai", source: "hf.co/acme/bonsai-GGUF:Q2_0", digest: D("e"), size_bytes: 7.7 * GB, min_ram_gb: 16, min_disk_gb: 10, min_vram_gb: 10, min_ollama_version: "0.40.13" }
+    ] };
+    const gpu = parseManifest(gpuDoc);
+    const plan = (vramGb, ollamaVersion = "0.40.13") => planSync({ manifest: gpu, capacity: { ...bigBox, vramGb }, settings: on, ollamaVersion });
+
+    it("parses the floor and defaults it to 0", () => {
+        expect(gpu.models[0].min_vram_gb).toBe(10);
+        expect(manifest.models[0].min_vram_gb).toBe(0);
+        const bad = parseManifest({ models: [{ ...gpuDoc.models_gated[0], min_vram_gb: "lots" }] });
+        expect(bad.rejected[0].reasons.join()).toMatch(/min_vram_gb/);
+    });
+
+    it("pulls on a 12 GB GPU, skips CPU nodes and small GPUs", () => {
+        expect(plan(12).pull.map((m) => m.name)).toEqual(["bonsai"]);
+        expect(plan(0).skipped[0].reason).toMatch(/needs a GPU with 10 GB VRAM, this node has none detected/);
+        expect(plan(undefined).skipped[0].reason).toMatch(/none detected/);
+        expect(plan(8).skipped[0].reason).toMatch(/this node has 8\.0 GB/);
+    });
+
+    it("needs both gates: a big GPU on old Ollama is still skipped", () => {
+        expect(plan(24, "0.40.2").pull).toEqual([]);
+        expect(plan(24, "0.40.2").skipped[0].reason).toMatch(/Ollama 0\.40\.13/);
+    });
+
+    it("the published Bonsai entry is gated on GPU and Ollama", () => {
+        const pub = parseManifest(JSON.parse(readFileSync(path.join(repoRoot, "apps/web/public/house-models.json"), "utf8")));
+        const b = pub.models.find((m) => m.name === "ternary-bonsai-2.5-27b");
+        expect(b.source).toBe("hf.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF:Ternary-Bonsai-2.5-27B-Q2_0");
+        expect(b.min_vram_gb).toBeGreaterThan(0);
+        expect(b.min_ollama_version).toBe("0.40.13");
+    });
+});
