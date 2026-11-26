@@ -22,6 +22,14 @@
  *     off` or INFERNET_HOUSE_MODELS=0; opt out of uncensored ones only with
  *     `--no-uncensored-models`, `infernet house-models uncensored off` or
  *     INFERNET_UNCENSORED_MODELS=0. Opting out removes what the daemon pulled.
+ *   - An entry with min_ollama_version is pulled only where Ollama reports at
+ *     least that version. Some GGUFs (Ternary Bonsai Q2_0) load without error
+ *     on an older engine and answer with garbage, so an unknown version counts
+ *     as too old. Such entries live in the manifest's `models_gated` array,
+ *     which CLIs before 0.1.114 never read: they cannot check the version.
+ *   - An entry with min_vram_gb is pulled only where the detected GPUs hold
+ *     at least that much VRAM. A 27B dense model on a busy CPU node answers
+ *     at well under 1 token/s, wins bids and then times out every job.
  */
 
 import fs from 'node:fs/promises';
@@ -45,6 +53,27 @@ export const DISK_RESERVE_MAX_BYTES = 50 * 1024 ** 3;
 const GB = 1024 ** 3;
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._\-/:]{0,199}$/;
 const DIGEST_RE = /^(sha256:)?[a-f0-9]{64}$/;
+const VERSION_RE = /^\d+(\.\d+){0,3}$/;
+
+/**
+ * Compare dotted versions numerically: 0.40.13 > 0.40.2. Pre-release and
+ * build suffixes ("0.40.13-rc1", "0.40.13+abc") are ignored. Returns -1/0/1,
+ * or null when either side is not a version.
+ */
+export function compareVersions(a, b) {
+    const parse = (v) => {
+        const m = typeof v === 'string' ? v.trim().replace(/^v/, '').match(/^\d+(\.\d+)*/) : null;
+        return m ? m[0].split('.').map(Number) : null;
+    };
+    const x = parse(a);
+    const y = parse(b);
+    if (!x || !y) return null;
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+        const d = (x[i] ?? 0) - (y[i] ?? 0);
+        if (d !== 0) return d < 0 ? -1 : 1;
+    }
+    return 0;
+}
 
 const isOff = (v) => typeof v === 'string' && ['0', 'false', 'off', 'no'].includes(v.trim().toLowerCase());
 const isOn = (v) => typeof v === 'string' && ['1', 'true', 'on', 'yes'].includes(v.trim().toLowerCase());
@@ -97,10 +126,13 @@ export function parseManifest(doc) {
     if (doc.schema !== undefined && doc.schema !== 1) {
         throw new Error(`house-models manifest: unsupported schema ${doc.schema}`);
     }
+    if (doc.models_gated !== undefined && !Array.isArray(doc.models_gated)) {
+        throw new Error('house-models manifest: "models_gated" must be an array');
+    }
     const models = [];
     const rejected = [];
     const seen = new Set();
-    for (const raw of doc.models) {
+    for (const raw of [...doc.models, ...(doc.models_gated ?? [])]) {
         const why = [];
         const source = typeof raw?.source === 'string' ? raw.source.trim() : '';
         if (!source || !NAME_RE.test(source)) why.push('source missing or not an Ollama/hf.co reference');
@@ -112,6 +144,10 @@ export function parseManifest(doc) {
         const minDisk = raw?.min_disk_gb === undefined ? 0 : Number(raw.min_disk_gb);
         if (!Number.isFinite(minDisk) || minDisk < 0) why.push('min_disk_gb must be a number');
         if (raw?.digest != null && !DIGEST_RE.test(String(raw.digest))) why.push('digest must be sha256 hex');
+        const minVram = raw?.min_vram_gb == null ? 0 : Number(raw.min_vram_gb);
+        if (!Number.isFinite(minVram) || minVram < 0) why.push('min_vram_gb must be a number');
+        const minOllama = raw?.min_ollama_version == null ? null : String(raw.min_ollama_version).trim();
+        if (minOllama !== null && !VERSION_RE.test(minOllama)) why.push('min_ollama_version must be a dotted version like 0.40.13');
         const key = normalizeOllamaName(source);
         if (seen.has(key)) why.push('duplicate source');
         if (why.length > 0) {
@@ -127,6 +163,8 @@ export function parseManifest(doc) {
             size_bytes: size,
             min_ram_gb: minRam,
             min_disk_gb: minDisk,
+            min_ollama_version: minOllama,
+            min_vram_gb: minVram,
             uncensored: raw.uncensored === true,
             description: typeof raw.description === 'string' ? raw.description : '',
             license: typeof raw.license === 'string' ? raw.license : null,
@@ -206,9 +244,12 @@ export function diskReserveBytes(totalBytes) {
  *   manifest   parseManifest() output
  *   installed  Ollama /api/tags models: [{ name, digest, size }]
  *   owned      { [ollama_name]: {...} }: models the daemon pulled itself
- *   capacity   { ramGb, diskFreeBytes, diskTotalBytes }
+ *   capacity   { ramGb, vramGb, diskFreeBytes, diskTotalBytes }; vramGb is
+ *              total GPU VRAM (0 or missing = no usable GPU)
  *   settings   resolveSettings() output
  *   failures   { [ollama_name]: { at } }: recent pull/verify failures
+ *   ollamaVersion  what Ollama's /api/version reports (null = unknown), for
+ *                  entries with min_ollama_version
  *
  * Returns { pull: [entry], update: [entry], remove: [{ name, reason }], keep: [entry], skipped: [{ name, reason }] }.
  *
@@ -218,7 +259,7 @@ export function diskReserveBytes(totalBytes) {
  * already had the old build. A model the operator pulled themselves is never
  * touched; it is reported in `skipped` as outdated instead.
  */
-export function planSync({ manifest, installed = [], owned = {}, capacity = {}, settings, failures = {}, now = Date.now() }) {
+export function planSync({ manifest, installed = [], owned = {}, capacity = {}, settings, failures = {}, ollamaVersion = null, now = Date.now() }) {
     const installedByName = new Map(installed.map((m) => [normalizeOllamaName(m.name ?? m.model), m]));
     const plan = { pull: [], update: [], remove: [], keep: [], skipped: [] };
     const models = manifest?.models ?? [];
@@ -244,6 +285,13 @@ export function planSync({ manifest, installed = [], owned = {}, capacity = {}, 
         if (!settings?.enabled) reason = 'house models are turned off on this node';
         else if (m.uncensored && !settings.uncensored) reason = 'uncensored house models are turned off on this node';
         else if (Number.isFinite(ram) && ram > 0 && ram < m.min_ram_gb) reason = `needs ${m.min_ram_gb} GB RAM, this node has ${ram.toFixed(1)} GB`;
+        else if (m.min_vram_gb > 0 && !(Number(capacity.vramGb) >= m.min_vram_gb)) {
+            const v = Number(capacity.vramGb);
+            reason = `needs a GPU with ${m.min_vram_gb} GB VRAM, this node has ${Number.isFinite(v) && v > 0 ? `${v.toFixed(1)} GB` : 'none detected'}`;
+        }
+        else if (m.min_ollama_version && !((compareVersions(ollamaVersion, m.min_ollama_version) ?? -1) >= 0)) {
+            reason = `needs Ollama ${m.min_ollama_version} or newer, this node has ${ollamaVersion ?? 'an unknown version'} (update Ollama: older engines run it wrong)`;
+        }
         else if (used + m.size_bytes > capBytes) reason = `over the house-models disk cap of ${settings.maxDiskGb} GB`;
 
         if (have) {
@@ -358,6 +406,29 @@ export async function writeState(state, p = getStatePath()) {
 export function ollamaHost(env = process.env) {
     const h = env.OLLAMA_HOST || 'http://localhost:11434';
     return /^https?:\/\//.test(h) ? h : `http://${h}`;
+}
+
+/** Total VRAM of the detected GPUs in GB; 0 when none or detection fails. */
+export async function detectVramGb() {
+    try {
+        const { detectCapacity } = await import('./model-fit.js');
+        const c = await detectCapacity();
+        return Number.isFinite(c?.vram_gb) ? c.vram_gb : 0;
+    } catch {
+        return 0;
+    }
+}
+
+/** Ollama's version string from /api/version, or null when it cannot be read. */
+export async function ollamaVersion({ host = ollamaHost(), fetchImpl = fetch } = {}) {
+    try {
+        const res = await fetchImpl(`${host}/api/version`, { signal: AbortSignal.timeout(10_000) });
+        if (!res.ok) return null;
+        const body = await res.json();
+        return typeof body?.version === 'string' ? body.version : null;
+    } catch {
+        return null;
+    }
 }
 
 export async function ollamaTags({ host = ollamaHost(), fetchImpl = fetch } = {}) {
@@ -481,12 +552,16 @@ export async function syncHouseModels({
         for (const n of Object.keys(state.owned)) if (!names.has(n)) delete state.owned[n];
 
         const disk = capacity?.disk ?? await diskSpace();
+        const needsVram = man.models.some((m) => m.min_vram_gb > 0);
         const cap = {
             ramGb: capacity?.ramGb ?? ramGb(),
+            vramGb: capacity?.vramGb ?? (needsVram ? await detectVramGb() : 0),
             diskFreeBytes: disk.freeBytes,
             diskTotalBytes: disk.totalBytes
         };
-        const plan = planSync({ manifest: man, installed, owned: state.owned, capacity: cap, settings, failures: state.failures });
+        const needsVersion = man.models.some((m) => m.min_ollama_version);
+        const version = needsVersion ? await ollamaVersion({ host, fetchImpl }) : null;
+        const plan = planSync({ manifest: man, installed, owned: state.owned, capacity: cap, settings, failures: state.failures, ollamaVersion: version });
         summary.skipped = plan.skipped;
 
         for (const r of plan.remove) {

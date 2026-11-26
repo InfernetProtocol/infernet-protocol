@@ -15,7 +15,8 @@ import {
     readState,
     formatStatus,
     isOutdated,
-    backupTag
+    backupTag,
+    compareVersions
 } from "../apps/cli/lib/house-models.js";
 import { matchServedModel } from "../apps/web/lib/model-names.js";
 
@@ -446,5 +447,118 @@ describe("house-models updates when the manifest re-pins a build", () => {
             expect(s.skipped[0].reason).toMatch(/outdated vs house manifest/);
             expect(tags).toEqual([{ ...oldBuild }]);
         });
+    });
+});
+
+describe("house-models min_ollama_version", () => {
+    const gatedDoc = {
+        schema: 1,
+        models: [doc.models[0]],
+        models_gated: [
+            { name: "bonsai", source: "hf.co/acme/bonsai-GGUF:Q2_0", digest: D("d"), size_bytes: 7.7 * GB, min_ram_gb: 16, min_disk_gb: 9, min_ollama_version: "0.40.13" }
+        ]
+    };
+    const gated = parseManifest(gatedDoc);
+
+    it("compares versions numerically", () => {
+        expect(compareVersions("0.40.13", "0.40.2")).toBe(1);
+        expect(compareVersions("0.40.2", "0.40.13")).toBe(-1);
+        expect(compareVersions("v0.40.13", "0.40.13")).toBe(0);
+        expect(compareVersions("0.41", "0.40.13")).toBe(1);
+        expect(compareVersions("0.40.13-rc1", "0.40.13")).toBe(0);
+        expect(compareVersions(null, "0.40.13")).toBe(null);
+        expect(compareVersions("garbage", "0.40.13")).toBe(null);
+    });
+
+    it("reads models_gated beside models and keeps the floor", () => {
+        expect(gated.rejected).toEqual([]);
+        expect(gated.models.map((m) => m.name)).toEqual(["small", "bonsai"]);
+        expect(gated.models[1].min_ollama_version).toBe("0.40.13");
+        expect(gated.models[0].min_ollama_version).toBe(null);
+    });
+
+    it("rejects a malformed floor and a non-array models_gated", () => {
+        const bad = parseManifest({ models: [], models_gated: [{ ...gatedDoc.models_gated[0], min_ollama_version: "latest" }] });
+        expect(bad.models).toEqual([]);
+        expect(bad.rejected[0].reasons.join()).toMatch(/min_ollama_version/);
+        expect(() => parseManifest({ models: [], models_gated: {} })).toThrow(/models_gated/);
+    });
+
+    it("pulls only where Ollama is new enough; unknown counts as too old", () => {
+        const plan = (v) => planSync({ manifest: gated, capacity: bigBox, settings: on, ollamaVersion: v });
+        expect(plan("0.40.13").pull.map((m) => m.name)).toEqual(["small", "bonsai"]);
+        expect(plan("0.40.18").pull.map((m) => m.name)).toEqual(["small", "bonsai"]);
+        const old = plan("0.40.2");
+        expect(old.pull.map((m) => m.name)).toEqual(["small"]);
+        expect(old.skipped[0].reason).toMatch(/needs Ollama 0\.40\.13 or newer, this node has 0\.40\.2/);
+        expect(plan(null).skipped[0].reason).toMatch(/unknown version/);
+    });
+
+    it("removes a daemon-pulled gated model after Ollama is downgraded, keeps an operator's", () => {
+        const name = "hf.co/acme/bonsai-GGUF:Q2_0";
+        const installed = [{ name, digest: D("d"), size: 7.7 * GB }];
+        const ours = planSync({ manifest: gated, installed, owned: { [name]: {} }, capacity: bigBox, settings: on, ollamaVersion: "0.40.2" });
+        expect(ours.remove.map((r) => r.name)).toEqual([name]);
+        const theirs = planSync({ manifest: gated, installed, owned: {}, capacity: bigBox, settings: on, ollamaVersion: "0.40.2" });
+        expect(theirs.remove).toEqual([]);
+        expect(theirs.skipped[0].reason).toMatch(/you installed it yourself/);
+    });
+
+    it("sync asks Ollama for its version only when an entry needs it", async () => {
+        const dir = mkdtempSync(path.join(tmpdir(), "hm-ver-"));
+        const calls = [];
+        const fetchImpl = async (url) => {
+            calls.push(String(url));
+            if (String(url).endsWith("/api/version")) return new Response(JSON.stringify({ version: "0.40.2" }));
+            if (String(url).endsWith("/api/tags")) return new Response(JSON.stringify({ models: [] }));
+            throw new Error(`unexpected ${url}`);
+        };
+        try {
+            const summary = await syncHouseModels({
+                settings: { ...on, enabled: true }, manifest: parseManifest({ models: [], models_gated: gatedDoc.models_gated }),
+                fetchImpl, host: "http://ollama.test", statePath: path.join(dir, "s.json"),
+                capacity: { ramGb: 32, disk: { freeBytes: 200 * GB, totalBytes: 500 * GB } }
+            });
+            expect(calls.some((u) => u.endsWith("/api/version"))).toBe(true);
+            expect(summary.pulled).toEqual([]);
+            expect(summary.skipped[0].reason).toMatch(/0\.40\.2/);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("house-models min_vram_gb", () => {
+    const gpuDoc = { models: [], models_gated: [
+        { name: "bonsai", source: "hf.co/acme/bonsai-GGUF:Q2_0", digest: D("e"), size_bytes: 7.7 * GB, min_ram_gb: 16, min_disk_gb: 10, min_vram_gb: 10, min_ollama_version: "0.40.13" }
+    ] };
+    const gpu = parseManifest(gpuDoc);
+    const plan = (vramGb, ollamaVersion = "0.40.13") => planSync({ manifest: gpu, capacity: { ...bigBox, vramGb }, settings: on, ollamaVersion });
+
+    it("parses the floor and defaults it to 0", () => {
+        expect(gpu.models[0].min_vram_gb).toBe(10);
+        expect(manifest.models[0].min_vram_gb).toBe(0);
+        const bad = parseManifest({ models: [{ ...gpuDoc.models_gated[0], min_vram_gb: "lots" }] });
+        expect(bad.rejected[0].reasons.join()).toMatch(/min_vram_gb/);
+    });
+
+    it("pulls on a 12 GB GPU, skips CPU nodes and small GPUs", () => {
+        expect(plan(12).pull.map((m) => m.name)).toEqual(["bonsai"]);
+        expect(plan(0).skipped[0].reason).toMatch(/needs a GPU with 10 GB VRAM, this node has none detected/);
+        expect(plan(undefined).skipped[0].reason).toMatch(/none detected/);
+        expect(plan(8).skipped[0].reason).toMatch(/this node has 8\.0 GB/);
+    });
+
+    it("needs both gates: a big GPU on old Ollama is still skipped", () => {
+        expect(plan(24, "0.40.2").pull).toEqual([]);
+        expect(plan(24, "0.40.2").skipped[0].reason).toMatch(/Ollama 0\.40\.13/);
+    });
+
+    it("the published Bonsai entry is gated on GPU and Ollama", () => {
+        const pub = parseManifest(JSON.parse(readFileSync(path.join(repoRoot, "apps/web/public/house-models.json"), "utf8")));
+        const b = pub.models.find((m) => m.name === "ternary-bonsai-2.5-27b");
+        expect(b.source).toBe("hf.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF:Ternary-Bonsai-2.5-27B-Q2_0");
+        expect(b.min_vram_gb).toBeGreaterThan(0);
+        expect(b.min_ollama_version).toBe("0.40.13");
     });
 });

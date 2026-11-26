@@ -64,11 +64,11 @@ export default function HouseModelsPage() {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5 text-[var(--muted)]">
-                        {manifest.models.map((m) => (
+                        {[...manifest.models, ...(manifest.models_gated ?? [])].map((m) => (
                             <tr key={m.source}>
                                 <td className="px-4 py-2 align-top"><code className="text-zinc-200">{m.source}</code>{m.uncensored ? " (uncensored)" : ""}</td>
                                 <td className="px-4 py-2 align-top">{gb(m.size_bytes)}</td>
-                                <td className="px-4 py-2 align-top">{m.min_ram_gb} GB</td>
+                                <td className="px-4 py-2 align-top">{m.min_ram_gb} GB{m.min_vram_gb ? `, GPU ${m.min_vram_gb} GB VRAM` : ""}{m.min_ollama_version ? `, Ollama ${m.min_ollama_version}+` : ""}</td>
                                 <td className="px-4 py-2 align-top">{m.description}</td>
                             </tr>
                         ))}
@@ -85,6 +85,8 @@ export default function HouseModelsPage() {
                 <li>the machine has at least the model&apos;s <code>min_ram_gb</code> of RAM;</li>
                 <li>after the download at least 10% of the disk stays free (never less than 10 GB, never more than 50 GB required);</li>
                 <li>house models stay under the operator&apos;s disk cap, if one is set;</li>
+                <li>Ollama is at least the model&apos;s <code>min_ollama_version</code>, when it has one (CLI 0.1.114 and later; an unknown version counts as too old, and a model the node pulled is removed if Ollama is downgraded below it);</li>
+                <li>the GPUs hold at least the model&apos;s <code>min_vram_gb</code>, when it has one (a 27B dense model on a CPU node answers too slowly to finish a job);</li>
                 <li>one at a time; a pull waits up to 10 minutes for a running job to finish, then goes ahead (it is download work Ollama does beside inference).</li>
             </ul>
             <P>
@@ -173,6 +175,13 @@ infernet house-models on              # back on`}</Code>
                 <code>https://hf.co/v2/&lt;org&gt;/&lt;repo&gt;/manifests/latest</code> (or{" "}
                 <code>registry.ollama.ai/v2/&lt;ns&gt;/&lt;model&gt;/manifests/&lt;tag&gt;</code>). Nodes pick the change up
                 on their next sync after the site deploys.
+            </P>
+            <P>
+                A model that loads on an older Ollama but answers wrongly there (Ternary Bonsai&apos;s <code>Q2_0</code> needs
+                the Hadamard activation runtime from llama.cpp b11556 and prints garbage without it) gets a{" "}
+                <code>&quot;min_ollama_version&quot;</code> and goes in the <code>models_gated</code> array instead of{" "}
+                <code>models</code>. CLIs before 0.1.114 never read <code>models_gated</code>, since they cannot check the
+                version.
             </P>
 
             <p className="mt-12 text-sm text-[var(--muted)]">
