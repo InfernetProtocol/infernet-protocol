@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "version": 11,
-  "updated": "2026-11-18",
-  "about": "Infernet house models: every provider node pulls and serves the models below that fit it, unless its operator opts out (infernet house-models off; uncensored only: infernet house-models uncensored off). Adding a model is a PR to apps/web/public/house-models.json in InfernetProtocol/infernet-protocol. digest = sha256 of the registry manifest (what `ollama list`/api/tags reports); size_bytes = all layers + config. Docs: https://infernetprotocol.com/docs/house-models",
+  "version": 12,
+  "updated": "2026-11-26",
+  "about": "Infernet house models: every provider node pulls and serves the models below that fit it, unless its operator opts out (infernet house-models off; uncensored only: infernet house-models uncensored off). Adding a model is a PR to apps/web/public/house-models.json in InfernetProtocol/infernet-protocol. digest = sha256 of the registry manifest (what `ollama list`/api/tags reports); size_bytes = all layers + config. Entries in models_gated carry min_ollama_version and are pulled only where Ollama is at least that version (CLI 0.1.114+; older CLIs never read models_gated). Docs: https://infernetprotocol.com/docs/house-models",
   "models": [
     {
       "name": "saas-business-strategist-agent",
@@ -255,6 +255,21 @@
       "license": "apache-2.0",
       "added": "2026-11-18",
       "description": "MiniCPM-V 4.7 35B-A3B by OpenBMB: MoE vision model (~3B active, so usable on CPU nodes), images + video in, text out. Q4_K_M plus vision projector."
+    }
+  ],
+  "models_gated": [
+    {
+      "name": "ternary-bonsai-2.5-27b",
+      "source": "hf.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF:Ternary-Bonsai-2.5-27B-Q2_0",
+      "digest": "sha256:375cda5fea5dffea47a9e98615d8292ea5152c48ce3ce3eea09afd5072909f03",
+      "size_bytes": 8302452627,
+      "min_ram_gb": 16,
+      "min_disk_gb": 10,
+      "min_ollama_version": "0.40.13",
+      "uncensored": false,
+      "license": "apache-2.0",
+      "added": "2026-11-26",
+      "description": "Ternary Bonsai 2.5 27B by PrismML: Qwen3.8-27B in ternary weights (Q2_0, 7.7 GB), built for agentic coding and tool calling (SWE-bench Verified 75.6, FP16-level tool calling). Needs Ollama 0.40.13+: older engines load it and answer with garbage. The tag names the full file because a bare :Q2_0 matches PQ2_0, a packing only PrismML's llama.cpp fork runs."
     }
   ]
 }

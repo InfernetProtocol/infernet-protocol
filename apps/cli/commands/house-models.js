@@ -13,6 +13,7 @@ import {
     formatStatus,
     fetchManifest,
     ollamaTags,
+    ollamaVersion,
     planSync,
     diskSpace,
     ramGb,
@@ -92,7 +93,8 @@ export default async function houseModels(args) {
         const plan = planSync({
             manifest, installed, owned: readState().owned,
             capacity: { ramGb: ramGb(), diskFreeBytes: disk.freeBytes, diskTotalBytes: disk.totalBytes },
-            settings
+            settings,
+            ollamaVersion: await ollamaVersion()
         });
         if (args.has('json')) {
             process.stdout.write(JSON.stringify({ manifest, plan }, null, 2) + '\n');
