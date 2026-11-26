@@ -28,6 +28,12 @@ const MODEL_TAG_PREFIX = `${ROLE_TAG}:model:`;
 export const MAX_MESSAGES = 64;
 // c0mpute >= 0.3.86 takes 256 KiB inference prompts (the 9B serves 32k ctx).
 export const MAX_PROMPT_BYTES = 256 * 1024;
+/**
+ * Old turns are dropped in multiples of this. The fit is worked out afresh on
+ * every request, so dropping one turn at a time moved the start of the prompt
+ * every turn and no worker could reuse its cached prefix.
+ */
+export const DROP_STEP = 8;
 export const MAX_TOKENS = 4096;
 const MODEL_ID_RE = /^[A-Za-z0-9\-_.:/@]{1,128}$/;
 
@@ -217,10 +223,19 @@ export function fitMessages(messages) {
     .map((m) => ({ role: m.role, content: m.content }));
   while (turns.length && turns[turns.length - 1].role === "assistant") turns.pop();
   const bytes = (list) => list.reduce((n, m) => n + Buffer.byteLength(m.content, "utf8"), 0);
-  while (turns.length > 1 && (turns.length > MAX_MESSAGES || bytes(turns) > MAX_PROMPT_BYTES)) {
+  let dropped = 0;
+  const dropOne = () => {
     const drop = turns.findIndex((m, i) => m.role !== "system" && i < turns.length - 1);
-    if (drop < 0) break;
+    if (drop < 0) return false;
     turns.splice(drop, 1);
+    dropped++;
+    return true;
+  };
+  while (turns.length > 1 && (turns.length > MAX_MESSAGES || bytes(turns) > MAX_PROMPT_BYTES)) {
+    if (!dropOne()) break;
+  }
+  while (dropped % DROP_STEP !== 0 && turns.length > 1) {
+    if (!dropOne()) break;
   }
   if (turns.length === 0 || turns.length > MAX_MESSAGES || bytes(turns) > MAX_PROMPT_BYTES) return null;
   return turns;
@@ -296,7 +311,7 @@ export function bridgeProgress(ev, { maxRequeues = 3 } = {}) {
   return null;
 }
 
-export async function runC0mputeChat({ model, messages, maxTokens, temperature, timeoutMs = DEFAULT_TIMEOUT_MS, onProgress = null }, { fetchImpl = bridgeFetch, env } = {}) {
+export async function runC0mputeChat({ model, messages, maxTokens, temperature, timeoutMs = DEFAULT_TIMEOUT_MS, onProgress = null, preferWorker = null }, { fetchImpl = bridgeFetch, env } = {}) {
   const bridge = c0mputeJobsBridge(env);
   if (!bridge) return { ok: false, code: "off", error: "c0mpute chat is not configured" };
   const spec = buildSpec({ model, messages, maxTokens, temperature });
@@ -316,7 +331,9 @@ export async function runC0mputeChat({ model, messages, maxTokens, temperature, 
       // stream: true -> NDJSON progress (queue position, running) then the
       // usual body as a `result` / `error` line. An older bridge ignores it
       // and answers plain JSON, which is handled the same as before.
-      body: JSON.stringify({ workload: WORKLOAD, spec, timeout_ms: timeoutMs, stream: true }),
+      // prefer_peers: rank that worker first when it bids (its prompt cache
+      // holds this conversation). Older bridges ignore the field.
+      body: JSON.stringify({ workload: WORKLOAD, spec, timeout_ms: timeoutMs, stream: true, ...(preferWorker ? { prefer_peers: [preferWorker] } : {}) }),
       signal: AbortSignal.timeout(timeoutMs + 10_000),
       cache: "no-store",
       onLine: (line) => {
@@ -509,6 +526,7 @@ export async function* c0mputeJobEvents(job, {
     let wake = null;
     const pending = run({
       model, messages: input.messages ?? [], maxTokens: input.max_tokens, temperature: input.temperature, timeoutMs,
+      preferWorker: typeof input.prefer_worker === "string" ? input.prefer_worker : null,
       onProgress: (p) => { progress.push(p); if (wake) { const w = wake; wake = null; w(); } }
     }).then((r) => ({ done: r }), (e) => ({ done: { ok: false, code: "unreachable", error: String(e?.message ?? e) } }));
     let settled = null;

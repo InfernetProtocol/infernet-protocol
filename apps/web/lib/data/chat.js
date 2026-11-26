@@ -520,7 +520,9 @@ export async function createChatJob({
   // House lane (lib/reservations/serve.js): keep no content. The prompt, the
   // answer and the token stream are purged when the request finishes
   // (lib/data/job-retention.js); only counts survive, for billing.
-  noRetain = false
+  noRetain = false,
+  // c0mpute worker to rank first (the conversation's last one); a hint only.
+  preferWorker = null
 }) {
   const allow = gpuModelFilter({ freeTier, config: gpuConfig });
   // Old clients still name retired house models: run the current one instead
@@ -694,6 +696,7 @@ export async function createChatJob({
     // hosted fallback was allowed too, so a c0mpute miss (no worker bid) is
     // still answered there before the caller sees anything.
     ...(c0mputeModel ? { fallback: "c0mpute", c0mpute_model: c0mputeModel, ...(nimEligible ? { nim_ok: true } : {}) } : {}),
+    ...(c0mputeModel && typeof preferWorker === "string" && preferWorker ? { prefer_worker: preferWorker } : {}),
     ...(distributed ? { distributed: true } : {}),
     ...(batchItemId ? { billing: "prepaid_batch" } : {}),
     // Stored so the charge at completion prices the same input the caller

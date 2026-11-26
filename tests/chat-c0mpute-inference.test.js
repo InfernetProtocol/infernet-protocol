@@ -148,7 +148,8 @@ describe("buildSpec", () => {
         for (let i = 0; i < 80; i += 1) many.push({ role: i % 2 ? "assistant" : "user", content: `m${i}` });
         many.push({ role: "user", content: "last" });
         const fitted = c0.fitMessages(many);
-        expect(fitted.length).toBe(64);
+        // 18 over the limit, dropped in steps of 8 (DROP_STEP): 24 go.
+        expect(fitted.length).toBe(58);
         expect(fitted[0]).toEqual({ role: "system", content: "sys" });
         expect(fitted.at(-1)).toEqual({ role: "user", content: "last" });
 
@@ -161,7 +162,35 @@ describe("buildSpec", () => {
     });
 });
 
+describe("fitMessages keeps one cut for several turns", () => {
+    it("the start of the prompt changes only every DROP_STEP/2 turns", () => {
+        const convo = [{ role: "system", content: "sys" }];
+        for (let i = 0; i < 70; i += 1) convo.push({ role: i % 2 ? "assistant" : "user", content: `m${i}` });
+        const firsts = [];
+        for (let turn = 0; turn < 4; turn += 1) {
+            const msgs = [...convo];
+            for (let k = 0; k < turn; k += 1) msgs.push({ role: "user", content: `late q${k}` }, { role: "assistant", content: `late a${k}` });
+            msgs.push({ role: "user", content: "now?" });
+            firsts.push(c0.fitMessages(msgs)[1].content);
+        }
+        const changes = firsts.filter((f, i) => i > 0 && f !== firsts[i - 1]).length;
+        expect(changes).toBeLessThanOrEqual(1);
+    });
+});
+
 describe("runC0mputeChat", () => {
+    it("asks the bridge to prefer the conversation's last worker, only when given", async () => {
+        const bodies = [];
+        const fetchImpl = vi.fn(async (_url, init) => {
+            bodies.push(JSON.parse(init.body));
+            return jsonResponse({ job_id: "j1", worker: "12D3KooWorker", result: { v: 1, ok: true, model: "m", text: "ok" } });
+        });
+        await c0.runC0mputeChat({ messages, preferWorker: "12D3KooWorker" }, { fetchImpl });
+        await c0.runC0mputeChat({ messages }, { fetchImpl });
+        expect(bodies[0].prefer_peers).toEqual(["12D3KooWorker"]);
+        expect(bodies[1].prefer_peers).toBeUndefined();
+    });
+
     it("says a prompt is too large instead of 'no user message'", async () => {
         const fetchImpl = vi.fn();
         const r = await c0.runC0mputeChat({ messages: [{ role: "user", content: "z".repeat(300_000) }] }, { fetchImpl });
@@ -413,6 +442,15 @@ describe("createChatJob free tier never runs a GPU model", () => {
 });
 
 describe("createChatJob and c0mpute", () => {
+    it("carries prefer_worker on a c0mpute job", async () => {
+        state.providers = [];
+        const { job, route } = await createChatJob({ messages, modelName: "qwen3:4b", preferWorker: "12D3KooWarm" });
+        expect(route).toBe("c0mpute");
+        expect(job.input_spec.prefer_worker).toBe("12D3KooWarm");
+        const plain = await createChatJob({ messages, modelName: "qwen3:4b" });
+        expect(plain.job.input_spec.prefer_worker).toBeUndefined();
+    });
+
     it("sends a model no Infernet provider serves to c0mpute workers", async () => {
         state.providers = [{ id: "p1", reputation: 50, specs: { served_models: ["qwen2.5:0.5b"] } }];
         const { job, source, route, provider } = await createChatJob({ messages, modelName: "qwen3:4b" });
