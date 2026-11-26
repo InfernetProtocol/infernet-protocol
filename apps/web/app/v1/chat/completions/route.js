@@ -4,6 +4,7 @@ import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { createChatJob, liveModelNames, abandonChatJob } from "@/lib/data/chat";
 import { streamJobEvents } from "@/lib/data/chat-stream";
 import { failoverEvents } from "@/lib/data/chat-failover";
+import { isPeerId } from "@/lib/data/chat-c0mpute";
 import { bearerFrom, isReservationKey } from "@/lib/reservations/core";
 import { serveChatCompletion } from "@/lib/reservations/serve";
 import { checkChatLimit, wantsP2pOnly } from "@/lib/trusted-clients";
@@ -144,8 +145,15 @@ export async function POST(request) {
     }
     const minTrustTier = ALLOWED_TIERS.has(minTrustTierRaw) ? minTrustTierRaw : undefined;
 
+    // prefer_worker: the c0mpute worker (libp2p peer id) that served this
+    // conversation's previous turn. The bridge ranks it first when it bids and
+    // is not overloaded, so its prompt cache is warm; never a filter. Echoed
+    // back as the `: worker` SSE comment / x-infernet-worker header.
+    const preferWorker = isPeerId(body?.prefer_worker) ? body.prefer_worker : null;
+
     const jobArgs = {
         messages,
+        preferWorker,
         modelName: typeof model === "string" ? model : undefined,
         maxTokens: Number.isFinite(max_tokens) ? max_tokens : undefined,
         billedUserId: billing.mode === "balance" || billing.mode === "admin" ? payer.userId : null,
@@ -215,6 +223,9 @@ export async function POST(request) {
                             const text = ev.data?.text ?? "";
                             if (text) push(`data: ${JSON.stringify(chunkFrame({ id: cmplId, model: reportedModel, deltaContent: text }))}\n\n`);
                         } else if (ev.type === "done") {
+                            // Which c0mpute worker answered, so the caller can
+                            // ask for it again next turn (prefer_worker).
+                            if (typeof ev.data?.worker === "string") push(`: worker ${JSON.stringify({ worker: ev.data.worker })}\n\n`);
                             push(`data: ${JSON.stringify(chunkFrame({ id: cmplId, model: reportedModel, finishReason: "stop" }))}\n\n`);
                             push(`data: [DONE]\n\n`);
                             close();
