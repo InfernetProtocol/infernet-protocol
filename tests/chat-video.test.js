@@ -24,6 +24,17 @@ describe("chat video helpers", () => {
     expect(validateVideoRequest(null).ok).toBe(false);
   });
 
+  it("chatrxl-uncensored is a ChatrXL first frame animated by Wan 2.2 5B, SFW only", () => {
+    const r = validateVideoRequest({ prompt: " a fox in the snow ", model: "chatrxl-uncensored", seed: 9 });
+    expect(r).toEqual({
+      ok: true,
+      spec: { model: "wan2.2-ti2v-5b", prompt: "a fox in the snow", seed: 9 },
+      keyframe: { prompt: "a fox in the snow", model: "chatrxl-uncensored", width: 1024, height: 576, steps: 8, seed: 9 }
+    });
+    expect(validateVideoRequest({ prompt: "x", model: "chatrxl-uncensored", adult: true }).ok).toBe(false);
+    expect(validateVideoRequest({ prompt: "x", model: "wan2.2-ti2v-5b" }).keyframe).toBeUndefined();
+  });
+
   it("prices a clip flat, overridable by env", () => {
     expect(videoPriceMicro({})).toBe(DEFAULT_VIDEO_PRICE_MICRO);
     expect(videoPriceMicro({ INFERNET_VIDEO_PRICE_MICRO: "100" })).toBe(100);

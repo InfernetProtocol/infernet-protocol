@@ -7,6 +7,7 @@ import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
 import { adultRefusal, passthroughStatus, validateVideoRequest, videoPriceMicro } from "@/lib/billing/video";
 import { startImageJob } from "@/lib/chat/image-jobs";
+import { imagePriceMicro } from "@/lib/billing/image";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * POST /api/chat/video  { prompt, model?, negative_prompt?, seed?, adult? }
+ * `model: "chatrxl-uncensored"` (SFW only) first draws the opening frame with
+ * ChatrXL on a CPU worker, then animates it with Wan 2.2 5B image-to-video;
+ * it bills one image plus one clip.
  * → 202 { id, poll }. Poll GET /api/chat/video/<id> (JSON status); when done,
  * GET /api/chat/video/<id>/video serves the MP4 (Range supported). The clip
  * waits in the c0mpute gateway's queue for a worker up to 2 h, then renders.
@@ -63,20 +67,46 @@ export async function POST(request) {
 
   const userId = payer.userId;
   const chargeMode = billing.mode;
+  const keyframe = parsed.keyframe ?? null;
   const id = startImageJob(async (job) => {
+    const progress = (prefix) => (p) => {
+      job.meta = {
+        stage: prefix ? `${prefix}: ${p.stage}` : p.stage,
+        detail: typeof p.detail === "string" ? p.detail.slice(0, 200) : undefined,
+        queue_position: Number.isFinite(p.queue_position) ? p.queue_position : undefined,
+        elapsed_s: Number.isFinite(p.elapsed_s) ? p.elapsed_s : undefined,
+        eta_s: Number.isFinite(p.eta_s) ? p.eta_s : undefined
+      };
+    };
+    const header = (res, name) => {
+      const v = res.headers[name];
+      return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+    };
+    const spec = { ...parsed.spec };
+    let keyframeCharge = null;
+    if (keyframe) {
+      // Step 1: the first frame, on a CPU worker that has the model.
+      let still;
+      try {
+        still = await runGatewayJob("/v1/images", keyframe, { requestId: `${job.id}-keyframe`, onProgress: progress(`first frame (${keyframe.model})`) });
+      } catch (error) {
+        throw Object.assign(new Error(`First frame failed: ${error?.message ?? error}`), { status: Number(error?.status) || 502 });
+      }
+      if (still.status !== 200) {
+        throw Object.assign(new Error(gatewayError(still) || "First frame failed"), { status: passthroughStatus(still.status) });
+      }
+      spec.image_base64 = Buffer.from(still.body).toString("base64");
+      const stillJob = header(still, "x-c0mpute-job-id");
+      if (chargeMode === "balance" && UUID.test(stillJob)) {
+        keyframeCharge = await chargeImageJob({ userId, jobId: stillJob, costMicro: imagePriceMicro() });
+      }
+    }
     let response;
     try {
-      response = await runGatewayJob("/v1/videos", parsed.spec, {
+      // Step 2 (or the only step): the clip.
+      response = await runGatewayJob("/v1/videos", spec, {
         requestId: job.id,
-        onProgress: (p) => {
-          job.meta = {
-            stage: p.stage,
-            detail: typeof p.detail === "string" ? p.detail.slice(0, 200) : undefined,
-            queue_position: Number.isFinite(p.queue_position) ? p.queue_position : undefined,
-            elapsed_s: Number.isFinite(p.elapsed_s) ? p.elapsed_s : undefined,
-            eta_s: Number.isFinite(p.eta_s) ? p.eta_s : undefined
-          };
-        }
+        onProgress: progress(keyframe ? "animating" : "")
       });
     } catch (error) {
       throw Object.assign(new Error(`Video generation failed: ${error?.message ?? error}`), { status: Number(error?.status) || 502 });
@@ -86,12 +116,8 @@ export async function POST(request) {
       throw Object.assign(new Error(why || "Video generation failed"), { status: passthroughStatus(response.status) });
     }
     const mp4 = new Uint8Array(response.body);
-    const header = (name) => {
-      const v = response.headers[name];
-      return Array.isArray(v) ? v[0] ?? "" : v ?? "";
-    };
-    const jobId = header("x-c0mpute-job-id");
-    const worker = header("x-c0mpute-worker-peer-id");
+    const jobId = header(response, "x-c0mpute-job-id");
+    const worker = header(response, "x-c0mpute-worker-peer-id");
     let charge = null;
     if (chargeMode === "balance" && UUID.test(jobId)) {
       charge = await chargeImageJob({ userId, jobId, costMicro: videoPriceMicro() });
@@ -100,6 +126,8 @@ export async function POST(request) {
       png: mp4,
       headers: {
         "x-video-model": parsed.spec.model,
+        ...(keyframe ? { "x-keyframe-model": keyframe.model } : {}),
+        ...(keyframeCharge?.charged ? { "x-keyframe-charged-usd": keyframeCharge.charged_usd } : {}),
         ...(parsed.spec.adult ? { "x-adult": "1" } : {}),
         ...(jobId ? { "x-c0mpute-job-id": jobId } : {}),
         ...(worker ? { "x-c0mpute-worker-peer-id": worker } : {}),
