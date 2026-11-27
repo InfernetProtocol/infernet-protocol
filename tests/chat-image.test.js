@@ -31,6 +31,15 @@ describe("chat image helpers", () => {
     expect(validateImageRequest(null).ok).toBe(false);
   });
 
+  it("accepts ChatrXL Uncensored at SDXL sizes and refuses unknown models", () => {
+    expect(validateImageRequest({ prompt: "a lighthouse", model: "chatrxl-uncensored" })).toEqual({
+      ok: true,
+      spec: { prompt: "a lighthouse", model: "chatrxl-uncensored", width: 960, height: 640, steps: 8 }
+    });
+    expect(validateImageRequest({ prompt: "x", model: "chatrxl-uncensored", size: "square" }).spec).toMatchObject({ width: 832, height: 832 });
+    expect(validateImageRequest({ prompt: "x", model: "flux" }).ok).toBe(false);
+  });
+
   it("prices an image flat, overridable by env", () => {
     expect(imagePriceMicro({})).toBe(DEFAULT_IMAGE_PRICE_MICRO);
     expect(imagePriceMicro({ INFERNET_IMAGE_PRICE_MICRO: "500" })).toBe(500);

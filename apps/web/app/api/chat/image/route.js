@@ -5,7 +5,7 @@ import { runGatewayJob, gatewayError, readLimitedBody, speechGateway, errorJson 
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
-import { IMAGE_MODEL, imagePriceMicro, validateImageRequest } from "@/lib/billing/image";
+import { imagePriceMicro, validateImageRequest } from "@/lib/billing/image";
 import { startImageJob } from "@/lib/chat/image-jobs";
 import { adultRefusal, passthroughStatus } from "@/lib/billing/video";
 
@@ -18,9 +18,9 @@ const limit = rateLimit({ windowMs: 60 * 60 * 1000, max: 6 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * POST /api/chat/image  { prompt, size?: "landscape"|"square"|"portrait", seed? }
+ * POST /api/chat/image  { prompt, model?: "z-image-turbo"|"chatrxl-uncensored", size?: "landscape"|"square"|"portrait", seed? }
  * → 202 { id, poll }. Poll GET /api/chat/image/<id> for the image/png, which a
- * c0mpute CPU worker (Z-Image-Turbo) draws through the same gateway as voice. Free callers spend one of their daily free queries;
+ * c0mpute CPU worker (Z-Image-Turbo by default, or ChatrXL Uncensored) draws through the same gateway as voice. Free callers spend one of their daily free queries;
  * signed-in callers with a balance pay a flat per-image price.
  */
 export async function POST(request) {
@@ -42,7 +42,7 @@ export async function POST(request) {
   const ip = getClientIp(request);
   const trusted = trustedClientFor(bearerFrom(request.headers.get("authorization")));
   const payer = await resolveBillingCaller(request, { trusted });
-  const billing = await authorizeInteractive({ userId: payer.userId, model: IMAGE_MODEL });
+  const billing = await authorizeInteractive({ userId: payer.userId, model: parsed.spec.model });
   if (billing.mode === "insufficient") {
     return errorJson("Out of compute balance", 402, `spendable ${billing.spendable_usd} USD`);
   }
@@ -109,7 +109,7 @@ export async function POST(request) {
     return {
       png,
       headers: {
-        "x-image-model": IMAGE_MODEL,
+        "x-image-model": parsed.spec.model,
         ...(jobId ? { "x-c0mpute-job-id": jobId } : {}),
         ...(worker ? { "x-c0mpute-worker-peer-id": worker } : {}),
         ...(charge?.charged ? { "x-charged-usd": charge.charged_usd } : {})

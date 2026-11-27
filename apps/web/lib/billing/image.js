@@ -1,7 +1,10 @@
-// Image generation on c0mpute (diffusion.txt2img, Z-Image-Turbo on CPU workers)
-// for /chat. Pure helpers: request validation and the flat per-image price.
+// Image generation on c0mpute (diffusion.txt2img on CPU workers) for /chat.
+// Two models: Z-Image-Turbo (default) and ChatrXL Uncensored (SDXL/Pony,
+// DMD2 8-step). Pure helpers: request validation and the flat per-image price.
 
 export const IMAGE_MODEL = "z-image-turbo";
+export const CHATRXL_MODEL = "chatrxl-uncensored";
+export const IMAGE_MODELS = Object.freeze([IMAGE_MODEL, CHATRXL_MODEL]);
 export const MAX_IMAGE_PROMPT_CHARS = 2000;
 
 /** Sizes the chat offers. All multiples of 64, which the worker requires. */
@@ -9,6 +12,16 @@ export const IMAGE_SIZES = Object.freeze({
   landscape: { width: 768, height: 512 },
   square: { width: 640, height: 640 },
   portrait: { width: 512, height: 768 }
+});
+
+/**
+ * ChatrXL is SDXL, trained near one megapixel: below ~0.5 MP it smears. These
+ * stay inside the worker's 1024 px cap and a CPU job's time budget.
+ */
+export const CHATRXL_SIZES = Object.freeze({
+  landscape: { width: 960, height: 640 },
+  square: { width: 832, height: 832 },
+  portrait: { width: 640, height: 960 }
 });
 
 /**
@@ -38,12 +51,16 @@ export function validateImageRequest(body) {
   if (!prompt || prompt.length > MAX_IMAGE_PROMPT_CHARS) {
     return { ok: false, error: `Prompt must contain 1 to ${MAX_IMAGE_PROMPT_CHARS} characters` };
   }
+  const model = body?.model ?? IMAGE_MODEL;
+  if (!IMAGE_MODELS.includes(model)) {
+    return { ok: false, error: `Model must be one of: ${IMAGE_MODELS.join(", ")}` };
+  }
   const sizeName = body?.size ?? "landscape";
-  const size = IMAGE_SIZES[sizeName];
+  const size = (model === CHATRXL_MODEL ? CHATRXL_SIZES : IMAGE_SIZES)[sizeName];
   if (!size) {
     return { ok: false, error: `Size must be one of: ${Object.keys(IMAGE_SIZES).join(", ")}` };
   }
-  const spec = { prompt, model: IMAGE_MODEL, width: size.width, height: size.height, steps: 8 };
+  const spec = { prompt, model, width: size.width, height: size.height, steps: 8 };
   if (body?.seed !== undefined && body?.seed !== null) {
     const seed = Number(body.seed);
     if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) {

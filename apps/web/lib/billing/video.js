@@ -7,6 +7,18 @@ export const VIDEO_MODELS = Object.freeze(["wan2.1-t2v-1.3b", "wan2.2-ti2v-5b"])
 export const MAX_VIDEO_PROMPT_CHARS = 2000;
 
 /**
+ * `model: "chatrxl-uncensored"` is a two-step clip: a CPU worker draws the
+ * first frame with ChatrXL (diffusion.txt2img), then Wan 2.2 TI2V 5B animates
+ * it (video.img2vid, GPU). SFW only: adult jobs never take an image input
+ * (the gateway and every worker refuse one), so an adult clip stays text to
+ * video on Wan 2.2.
+ */
+export const KEYFRAME_VIDEO_MODELS = Object.freeze({
+  "chatrxl-uncensored": { animate: "wan2.2-ti2v-5b", keyframe: { width: 1024, height: 576, steps: 8 } }
+});
+export const ALL_VIDEO_MODELS = Object.freeze([...VIDEO_MODELS, ...Object.keys(KEYFRAME_VIDEO_MODELS)]);
+
+/**
  * $0.025 per clip. A CPU clip holds a whole 16-core worker for 20-30 minutes,
  * where an image ($0.002) holds it for ~2. Override with
  * INFERNET_VIDEO_PRICE_MICRO.
@@ -29,11 +41,18 @@ export function validateVideoRequest(body) {
     return { ok: false, error: `Prompt must contain 1 to ${MAX_VIDEO_PROMPT_CHARS} characters` };
   }
   const model = body?.model ?? VIDEO_MODEL;
-  if (!VIDEO_MODELS.includes(model)) return { ok: false, error: `Model must be one of: ${VIDEO_MODELS.join(", ")}` };
+  if (!ALL_VIDEO_MODELS.includes(model)) return { ok: false, error: `Model must be one of: ${ALL_VIDEO_MODELS.join(", ")}` };
   if (body?.image !== undefined || body?.image_base64 !== undefined) {
     return { ok: false, error: "Image-to-video is not offered here; send a text prompt" };
   }
-  const spec = { model, prompt };
+  const chain = KEYFRAME_VIDEO_MODELS[model];
+  if (chain && body?.adult === true) {
+    return {
+      ok: false,
+      error: `${model} video draws a first frame and animates it, and adult mode never takes an image input; in adult mode use the default video model`
+    };
+  }
+  const spec = { model: chain ? chain.animate : model, prompt };
   if (typeof body?.negative_prompt === "string" && body.negative_prompt.trim()) {
     spec.negative_prompt = body.negative_prompt.trim().slice(0, MAX_VIDEO_PROMPT_CHARS);
   }
@@ -43,6 +62,11 @@ export function validateVideoRequest(body) {
       return { ok: false, error: "Seed must be an integer from 0 to 4294967295" };
     }
     spec.seed = seed;
+  }
+  if (chain) {
+    const keyframe = { prompt, model, ...chain.keyframe };
+    if (spec.seed !== undefined) keyframe.seed = spec.seed;
+    return { ok: true, spec, keyframe };
   }
   return { ok: true, spec };
 }
