@@ -5,9 +5,9 @@ import { runGatewayJob, gatewayError, readLimitedBody, speechGateway, errorJson 
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
-import { adultRefusal, passthroughStatus, validateVideoRequest, videoPriceMicro } from "@/lib/billing/video";
+import { adultRefusal, passthroughStatus, validateVideoRequest } from "@/lib/billing/video";
 import { startImageJob } from "@/lib/chat/image-jobs";
-import { imagePriceMicro } from "@/lib/billing/image";
+import { busyMeter, computePriceMicro, estimatePriceMicro } from "@/lib/billing/compute-price";
 import { clipJobs, clipMaxRunning, startClip } from "@/lib/video/clip-run";
 import { hasFfmpeg } from "@/lib/promo/assemble";
 
@@ -59,11 +59,13 @@ export async function POST(request) {
   if (billing.mode === "insufficient") {
     return errorJson("Out of compute balance", 402, `spendable ${billing.spendable_usd} USD`);
   }
-  if (long && billing.mode === "balance" && billing.spendable_micro < long.shots * videoPriceMicro()) {
+  // Up-front check at a typical ~11 min of GPU per Wan 2.2 5B shot (the bill is the measured time).
+  const estimate = long ? long.shots * estimatePriceMicro("video", 660) : 0;
+  if (long && billing.mode === "balance" && billing.spendable_micro < estimate) {
     return errorJson(
       "Out of compute balance",
       402,
-      `a ${long.seconds} s clip is ${long.shots} shots, about ${((long.shots * videoPriceMicro()) / 1e6).toFixed(3)} USD; spendable ${billing.spendable_usd} USD`
+      `a ${long.seconds} s clip is ${long.shots} shots, about ${(estimate / 1e6).toFixed(2)} USD of GPU time; spendable ${billing.spendable_usd} USD`
     );
   }
   const adult = adultRefusal({ adult: body?.adult, trusted, billingMode: billing.mode });
@@ -114,21 +116,25 @@ export async function POST(request) {
     };
     const spec = { ...parsed.spec };
     let keyframeCharge = null;
+    let keyframeSeconds = 0;
+    const clipMeter = busyMeter();
     if (keyframe) {
       // Step 1: the first frame, on a CPU worker that has the model.
       let still;
+      const kfMeter = busyMeter();
       try {
-        still = await runGatewayJob("/v1/images", keyframe, { requestId: `${job.id}-keyframe`, onProgress: progress(`first frame (${keyframe.model})`) });
+        still = await runGatewayJob("/v1/images", keyframe, { requestId: `${job.id}-keyframe`, onProgress: kfMeter.wrap(progress(`first frame (${keyframe.model})`)) });
       } catch (error) {
         throw Object.assign(new Error(`First frame failed: ${error?.message ?? error}`), { status: Number(error?.status) || 502 });
       }
       if (still.status !== 200) {
         throw Object.assign(new Error(gatewayError(still) || "First frame failed"), { status: passthroughStatus(still.status) });
       }
+      keyframeSeconds = kfMeter.seconds();
       spec.image_base64 = Buffer.from(still.body).toString("base64");
       const stillJob = header(still, "x-c0mpute-job-id");
       if (chargeMode === "balance" && UUID.test(stillJob)) {
-        keyframeCharge = await chargeImageJob({ userId, jobId: stillJob, costMicro: imagePriceMicro() });
+        keyframeCharge = await chargeImageJob({ userId, jobId: stillJob, costMicro: computePriceMicro("image", keyframeSeconds) });
       }
     }
     let response;
@@ -136,7 +142,7 @@ export async function POST(request) {
       // Step 2 (or the only step): the clip.
       response = await runGatewayJob("/v1/videos", spec, {
         requestId: job.id,
-        onProgress: progress(keyframe ? "animating" : "")
+        onProgress: clipMeter.wrap(progress(keyframe ? "animating" : ""))
       });
     } catch (error) {
       throw Object.assign(new Error(`Video generation failed: ${error?.message ?? error}`), { status: Number(error?.status) || 502 });
@@ -150,7 +156,7 @@ export async function POST(request) {
     const worker = header(response, "x-c0mpute-worker-peer-id");
     let charge = null;
     if (chargeMode === "balance" && UUID.test(jobId)) {
-      charge = await chargeImageJob({ userId, jobId, costMicro: videoPriceMicro() });
+      charge = await chargeImageJob({ userId, jobId, costMicro: computePriceMicro("video", clipMeter.seconds()) });
     }
     return {
       png: mp4,

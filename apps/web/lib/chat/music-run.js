@@ -5,7 +5,8 @@ import "server-only";
 
 import { runGatewayJob, gatewayError } from "@/lib/chat/speech-service";
 import { chargeImageJob } from "@/lib/data/interactive-billing";
-import { MUSIC_MODEL, coverArtPrompt, musicPriceMicro, toGatewaySpec } from "@/lib/billing/music";
+import { MUSIC_MODEL, coverArtPrompt, toGatewaySpec } from "@/lib/billing/music";
+import { busyMeter, computePriceMicro } from "@/lib/billing/compute-price";
 import { writeMusicSpec } from "@/lib/music-brief-writer";
 import { musicJobs, setMusicCover } from "@/lib/chat/music-jobs";
 import { IMAGE_MODEL, IMAGE_SIZES } from "@/lib/billing/image";
@@ -83,10 +84,11 @@ export function musicRunner(request, billing = {}) {
       });
     }
 
+    const meter = busyMeter();
     const response = await postWithRetries(spec, {
       requestId: job.id,
       resume: Boolean(job.resumed),
-      onProgress: (p) => {
+      onProgress: meter.wrap((p) => {
         job.meta = {
           ...job.meta,
           node: {
@@ -99,7 +101,7 @@ export function musicRunner(request, billing = {}) {
             detail: typeof p.detail === "string" ? p.detail.slice(0, 200) : undefined
           }
         };
-      }
+      })
     });
     if (response.status !== 200) {
       // 503 now means the gateway's whole queue wait ran out with no worker.
@@ -117,9 +119,9 @@ export function musicRunner(request, billing = {}) {
     const worker = header("x-c0mpute-worker-peer-id");
     let charge = null;
     if (billing?.mode === "balance" && billing.userId && UUID.test(jobId)) {
-      // Flat per-job charge on the same idempotent ledger key as images, so
-      // a resumed song is never charged twice.
-      charge = await chargeImageJob({ userId: billing.userId, jobId, costMicro: musicPriceMicro() });
+      // Billed by the compute it used (2x the card's hourly cost), on the same
+      // idempotent ledger key as images, so a resumed song is never charged twice.
+      charge = await chargeImageJob({ userId: billing.userId, jobId, costMicro: computePriceMicro("music", meter.seconds()) });
     }
     return {
       audio: new Uint8Array(response.body),

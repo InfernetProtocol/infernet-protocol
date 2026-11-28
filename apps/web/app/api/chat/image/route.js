@@ -5,7 +5,8 @@ import { runGatewayJob, gatewayError, readLimitedBody, speechGateway, errorJson 
 import { resolveBillingCaller, authorizeInteractive, chargeImageJob } from "@/lib/data/interactive-billing";
 import { consumeFreeQuery } from "@/lib/data/free-tier";
 import { freeLimitMessage } from "@/lib/billing/free-tier";
-import { imagePriceMicro, validateImageRequest } from "@/lib/billing/image";
+import { validateImageRequest } from "@/lib/billing/image";
+import { busyMeter, computePriceMicro } from "@/lib/billing/compute-price";
 import { startImageJob } from "@/lib/chat/image-jobs";
 import { adultRefusal, passthroughStatus } from "@/lib/billing/video";
 
@@ -70,13 +71,14 @@ export async function POST(request) {
   const userId = payer.userId;
   const chargeMode = billing.mode;
   const id = startImageJob(async (job) => {
+    const meter = busyMeter();
     let response;
     try {
       // Waits in the gateway's queue for a worker (up to 2 h) instead of
       // failing when none is free; the poll route shows "queued".
       response = await runGatewayJob("/v1/images", parsed.spec, {
         requestId: job.id,
-        onProgress: (p) => {
+        onProgress: meter.wrap((p) => {
           job.meta = {
             stage: p.stage,
             detail: typeof p.detail === "string" ? p.detail.slice(0, 200) : undefined,
@@ -84,7 +86,7 @@ export async function POST(request) {
             elapsed_s: Number.isFinite(p.elapsed_s) ? p.elapsed_s : undefined,
             eta_s: Number.isFinite(p.eta_s) ? p.eta_s : undefined
           };
-        }
+        })
       });
     } catch (error) {
       throw Object.assign(new Error(`Image generation failed: ${error?.message ?? error}`), { status: Number(error?.status) || 502 });
@@ -104,7 +106,8 @@ export async function POST(request) {
     const worker = header("x-c0mpute-worker-peer-id");
     let charge = null;
     if (chargeMode === "balance" && UUID.test(jobId)) {
-      charge = await chargeImageJob({ userId, jobId, costMicro: imagePriceMicro() });
+      // Billed by the compute it used: 2x the card's hourly cost for the busy seconds.
+      charge = await chargeImageJob({ userId, jobId, costMicro: computePriceMicro("image", meter.seconds()) });
     }
     return {
       png,
