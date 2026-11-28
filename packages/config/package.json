@@ -1,14 +1,15 @@
 {
   "name": "@infernetprotocol/config",
   "version": "0.1.12",
-  "description": "Shared constants for the Infernet Protocol — supported payment coins and platform deposit addresses.",
+  "description": "Shared constants and validators for the Infernet Protocol: payment coins, deposit addresses, training config.",
   "license": "MIT",
   "type": "module",
   "main": "./index.js",
   "exports": {
     ".": "./index.js",
     "./payment-coins": "./payment-coins.js",
-    "./deposit-addresses": "./deposit-addresses.js"
+    "./deposit-addresses": "./deposit-addresses.js",
+    "./training-config": "./training-config.js"
   },
   "files": [
     "*.js",

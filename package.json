@@ -26,6 +26,7 @@
   "devDependencies": {
     "@infernetprotocol/auth": "workspace:*",
     "@infernetprotocol/cli": "workspace:*",
+    "@infernetprotocol/config": "workspace:*",
     "@infernetprotocol/engine": "workspace:^",
     "@infernetprotocol/liquid-agent": "workspace:*",
     "vitest": "^5.0.5"

@@ -8,6 +8,7 @@ import {
     userOwnsPubkey,
     isValidCommand
 } from "@/lib/data/node-commands";
+import { validateTrainingConfig } from "@infernetprotocol/config/training-config";
 
 export const dynamic = "force-dynamic";
 
@@ -98,6 +99,28 @@ export async function POST(request, { params }) {
                 const err = new Error("train_shard requires args.shard_url and args.base_model");
                 err.status = 400;
                 throw err;
+            }
+            // The daemon renders these into a Python script: numbers and
+            // names only (the daemon re-checks before it renders).
+            const checked = validateTrainingConfig({
+                base_model: args.base_model,
+                training: args.training ?? undefined,
+                lora: args.lora ?? undefined
+            });
+            args.base_model = checked.base_model;
+            if (checked.training) args.training = checked.training;
+            if (checked.lora) args.lora = checked.lora;
+            // Owner-only path to the owner's own nodes, so LAN http is fine;
+            // the public market (training-market.js) requires public https.
+            for (const key of ["shard_url", "upload_url"]) {
+                if (args[key] == null) continue;
+                let ok = false;
+                try { ok = ["http:", "https:"].includes(new URL(String(args[key])).protocol); } catch { /* not a URL */ }
+                if (!ok) {
+                    const err = new Error(`train_shard: args.${key} must be an http(s) URL`);
+                    err.status = 400;
+                    throw err;
+                }
             }
         }
 
