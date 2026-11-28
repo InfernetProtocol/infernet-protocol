@@ -8,16 +8,24 @@ import { freeLimitMessage } from "@/lib/billing/free-tier";
 import { adultRefusal, passthroughStatus, validateVideoRequest, videoPriceMicro } from "@/lib/billing/video";
 import { startImageJob } from "@/lib/chat/image-jobs";
 import { imagePriceMicro } from "@/lib/billing/image";
+import { clipJobs, clipMaxRunning, startClip } from "@/lib/video/clip-run";
+import { hasFfmpeg } from "@/lib/promo/assemble";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// A clip holds a whole CPU worker for 20-30 minutes: strangers get two an hour.
+// A clip holds a GPU worker for half an hour: strangers get two an hour.
 const limit = rateLimit({ windowMs: 60 * 60 * 1000, max: 2 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * POST /api/chat/video  { prompt, model?, negative_prompt?, seed?, adult? }
+ * POST /api/chat/video  { prompt, model?, seconds?, vertical?, negative_prompt?, seed?, adult? }
+ * The default is a 30 s clip on Wan 2.2 5B: a chat model plans 5 s shots of
+ * the same subjects, each renders on a c0mpute GPU worker, and this server
+ * cuts them together (lib/video/clip-run.js; durable across deploys).
+ * `seconds` (5-60) or a length in the prompt ("a 15 second video") sets it;
+ * `vertical: true` renders 9:16. Billed one clip price per shot rendered.
+ * `model: "wan2.1-t2v-1.3b"` is a ~2 s CPU draft.
  * `model: "chatrxl-uncensored"` (SFW only) first draws the opening frame with
  * ChatrXL on a CPU worker, then animates it with Wan 2.2 5B image-to-video;
  * it bills one image plus one clip.
@@ -38,6 +46,11 @@ export async function POST(request) {
   }
   const parsed = validateVideoRequest(body);
   if (!parsed.ok) return errorJson(parsed.error, 400);
+  const long = parsed.long ?? null;
+  if (long) {
+    if (!hasFfmpeg()) return errorJson("Long clips are not available on this server (no ffmpeg)", 503);
+    if (clipJobs.running() >= clipMaxRunning()) return errorJson("Every video slot is busy; try again in a few minutes", 503);
+  }
 
   const ip = getClientIp(request);
   const trusted = trustedClientFor(bearerFrom(request.headers.get("authorization")));
@@ -45,6 +58,13 @@ export async function POST(request) {
   const billing = await authorizeInteractive({ userId: payer.userId, model: parsed.spec.model });
   if (billing.mode === "insufficient") {
     return errorJson("Out of compute balance", 402, `spendable ${billing.spendable_usd} USD`);
+  }
+  if (long && billing.mode === "balance" && billing.spendable_micro < long.shots * videoPriceMicro()) {
+    return errorJson(
+      "Out of compute balance",
+      402,
+      `a ${long.seconds} s clip is ${long.shots} shots, about ${((long.shots * videoPriceMicro()) / 1e6).toFixed(3)} USD; spendable ${billing.spendable_usd} USD`
+    );
   }
   const adult = adultRefusal({ adult: body?.adult, trusted, billingMode: billing.mode });
   if (adult) return errorJson(adult.error, adult.status);
@@ -63,6 +83,16 @@ export async function POST(request) {
       userAgent: request.headers.get("user-agent")
     });
     if (!free.ok) return errorJson(freeLimitMessage(free.limit, free), 429);
+  }
+
+  if (long) {
+    if (body?.adult === true) long.adult = true;
+    const billingRecord = { mode: billing.mode, userId: payer.userId ?? null };
+    const id = startClip(long, billingRecord);
+    return Response.json(
+      { id, status: "pending", model: long.model, seconds: long.seconds, shots: long.shots, poll: `/api/chat/video/${id}`, video: `/api/chat/video/${id}/video` },
+      { status: 202, headers: { "cache-control": "no-store" } }
+    );
   }
 
   const userId = payer.userId;
