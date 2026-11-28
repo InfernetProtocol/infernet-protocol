@@ -1,6 +1,7 @@
 import { errorJson } from "@/lib/chat/speech-service";
 import { getImageJob } from "@/lib/chat/image-jobs";
 import { parseRange } from "@/lib/billing/video";
+import { clipBytes, clipJobs } from "@/lib/video/clip-run";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,11 +12,24 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function GET(request, { params }) {
   const { id } = await params;
   if (!UUID.test(String(id))) return errorJson("Unknown video job", 404);
-  const job = getImageJob(id);
-  if (!job) return errorJson("This video job expired or the server restarted — try again", 404);
-  if (job.status === "pending") return errorJson("The video is not ready yet", 409);
-  if (job.status === "failed") return errorJson(job.error, job.httpStatus || 502);
-  const bytes = job.png;
+  let job = getImageJob(id);
+  let bytes = null;
+  let headers = {};
+  if (!job) {
+    const clip = await clipJobs.find(id);
+    if (!clip) return errorJson("This video job expired or the server restarted — try again", 404);
+    if (clip.status === "pending") return errorJson("The video is not ready yet", 409);
+    if (clip.status === "failed") return errorJson(clip.error ?? "Video generation failed", clip.httpStatus || 502);
+    const buf = await clipBytes(clip);
+    if (!buf) return errorJson("This video expired", 404);
+    bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    headers = { "x-video-model": clip.result?.model ?? "", ...(clip.result?.shots ? { "x-video-shots": String(clip.result.shots) } : {}) };
+    job = { headers };
+  } else {
+    if (job.status === "pending") return errorJson("The video is not ready yet", 409);
+    if (job.status === "failed") return errorJson(job.error, job.httpStatus || 502);
+    bytes = job.png;
+  }
   const size = bytes.byteLength;
   const base = { "content-type": "video/mp4", "accept-ranges": "bytes", "cache-control": "private, no-store", ...job.headers };
   const range = parseRange(request.headers.get("range"), size);

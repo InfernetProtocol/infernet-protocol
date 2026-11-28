@@ -10,9 +10,30 @@ import {
 } from "@/lib/billing/video";
 
 describe("chat video helpers", () => {
-  it("defaults to a text-only Wan 2.1 1.3B clip", () => {
-    expect(validateVideoRequest({ prompt: " a lighthouse at dusk " })).toEqual({ ok: true, spec: { model: VIDEO_MODEL, prompt: "a lighthouse at dusk" } });
-    expect(validateVideoRequest({ prompt: "x", seed: 7, negative_prompt: " blurry " }).spec).toMatchObject({ seed: 7, negative_prompt: "blurry" });
+  it("defaults to a 30 s Wan 2.2 5B clip cut from six 5 s shots", () => {
+    expect(VIDEO_MODEL).toBe("wan2.2-ti2v-5b");
+    const r = validateVideoRequest({ prompt: " a lighthouse at dusk " });
+    expect(r.ok).toBe(true);
+    expect(r.long).toEqual({ prompt: "a lighthouse at dusk", subject: "a lighthouse at dusk", model: VIDEO_MODEL, seconds: 30, shots: 6, vertical: false });
+    expect(validateVideoRequest({ prompt: "x", seed: 7, negative_prompt: " blurry " }).long).toMatchObject({ seed: 7, negative_prompt: "blurry" });
+  });
+
+  it("takes the length from the body, else the prompt, clamped to 5-60 s", () => {
+    const p = "make a 30 second video of a cat and a dog (realistic) in heavy combat gear";
+    expect(validateVideoRequest({ prompt: p }).long).toMatchObject({ seconds: 30, shots: 6, subject: "a cat and a dog (realistic) in heavy combat gear" });
+    expect(validateVideoRequest({ prompt: "a 15s clip of rain" }).long).toMatchObject({ seconds: 15, shots: 3 });
+    expect(validateVideoRequest({ prompt: "rain", seconds: 10, vertical: true }).long).toMatchObject({ seconds: 10, shots: 2, vertical: true });
+    expect(validateVideoRequest({ prompt: "rain", seconds: 500 }).long).toMatchObject({ seconds: 60, shots: 12 });
+    expect(validateVideoRequest({ prompt: "rain", seconds: 1 }).long).toMatchObject({ seconds: 5, shots: 1 });
+    expect(validateVideoRequest({ prompt: "rain", seconds: "lots" }).ok).toBe(false);
+  });
+
+  it("the 1.3B draft is one shot with the fidelity rules applied", () => {
+    const r = validateVideoRequest({ prompt: "a cat in armor", model: "wan2.1-t2v-1.3b" });
+    expect(r.long).toBeUndefined();
+    expect(r.spec.model).toBe("wan2.1-t2v-1.3b");
+    expect(r.spec.prompt).toMatch(/^a cat in armor \(real animals, not people\)/);
+    expect(r.spec.negative_prompt).toMatch(/human soldier/);
   });
 
   it("rejects junk, unknown models and image inputs", () => {
