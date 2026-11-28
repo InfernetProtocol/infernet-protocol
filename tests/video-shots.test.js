@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  textOf,
   animalsOnly,
   fallbackPlan,
   parsePlan,
@@ -66,6 +67,14 @@ describe("long /video clips: shots", () => {
     expect(shotPrompt(plan, 1, { subject: "a cat and a dog in combat gear" })).toMatch(/dog leaps a wall/);
     expect(parsePlan("no json here", { shots: 6, subject: "x" })).toBeNull();
     expect(parsePlan('{"subjects":"x y z","shots":["only one shot here"]}', { shots: 6, subject: "x" })).toBeNull();
+  });
+
+  it("reads plans whatever shape the model wrote them in", () => {
+    const objShots = '<think>let me plan {not json}</think>{"subjects":[{"name":"cat","description":"a real orange tabby cat in a tactical vest"},{"name":"dog","description":"a german shepherd in a helmet"}],"shots":[{"shot":1,"description":"the cat sprints across rubble","camera":"tracking"},{"shot":2,"description":"the dog leaps a wall","camera":"low angle"},],}';
+    const plan = parsePlan(objShots, { shots: 2, subject: "a cat and a dog in combat gear" });
+    expect(plan.subjects).toMatch(/orange tabby cat in a tactical vest, dog, a german shepherd/);
+    expect(plan.shots[0]).toBe("the cat sprints across rubble, tracking");
+    expect(plan.shots[1]).toBe("the dog leaps a wall, low angle");
   });
 
   it("falls back to camera-varied shots when the model fails", async () => {
