@@ -35,11 +35,13 @@ export function startImageJob(run, { now = Date.now() } = {}) {
   Promise.resolve()
     .then(() => run(job))
     .then(({ png, headers }) => {
+      if (job.status === "cancelled") return;
       job.status = "done";
       job.png = png;
       job.headers = headers ?? {};
     })
     .catch((err) => {
+      if (job.status === "cancelled") return;
       job.status = "failed";
       job.error = err?.message ?? String(err);
       job.httpStatus = Number(err?.status) || 502;
@@ -50,6 +52,21 @@ export function startImageJob(run, { now = Date.now() } = {}) {
 export function getImageJob(id, { now = Date.now() } = {}) {
   sweep(now);
   return jobs.get(id) ?? null;
+}
+
+/**
+ * Mark a pending job cancelled (the caller stopped it). Its background run
+ * may still settle; that result is dropped. Returns the job, or null.
+ */
+export function cancelImageJob(id) {
+  const job = jobs.get(id);
+  if (!job) return null;
+  if (job.status === "pending") {
+    job.status = "cancelled";
+    job.error = "Cancelled";
+    job.httpStatus = 410;
+  }
+  return job;
 }
 
 /** Hand the bytes out once, then forget them. */
