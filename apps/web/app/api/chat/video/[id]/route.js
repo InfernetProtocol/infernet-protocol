@@ -1,5 +1,5 @@
-import { errorJson } from "@/lib/chat/speech-service";
-import { getImageJob } from "@/lib/chat/image-jobs";
+import { errorJson, fetchSpeechGateway } from "@/lib/chat/speech-service";
+import { cancelImageJob, getImageJob } from "@/lib/chat/image-jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +24,7 @@ export async function GET(_request, { params }) {
       { status: 202, headers: { "cache-control": "no-store" } }
     );
   }
+  if (job.status === "cancelled") return errorJson("Cancelled", 410);
   if (job.status === "failed") return errorJson(job.error, job.httpStatus || 502);
   return Response.json(
     {
@@ -35,6 +36,35 @@ export async function GET(_request, { params }) {
       adult: job.headers["x-adult"] === "1",
       video: `/api/chat/video/${id}/video`
     },
+    { headers: { "cache-control": "no-store" } }
+  );
+}
+
+/**
+ * DELETE /api/chat/video/<id>: stop the clip. Cancels the gateway's request
+ * (and the first-frame request of a keyframe clip) so it leaves the queue at
+ * once instead of waiting up to 2 h in front of later clips; a job a worker
+ * already took is cancelled on that worker. Idempotent; the id is the
+ * capability, as for GET.
+ */
+export async function DELETE(_request, { params }) {
+  const { id } = await params;
+  if (!UUID.test(String(id))) return errorJson("Unknown video job", 404);
+  const job = cancelImageJob(id);
+  if (!job) return errorJson("This video job expired or the server restarted", 404);
+  if (job.status === "done") return errorJson("This video already finished", 409);
+  const results = await Promise.all(
+    [id, `${id}-keyframe`].map((rid) =>
+      fetchSpeechGateway(`/v1/result/${encodeURIComponent(rid)}`, { method: "DELETE", signal: AbortSignal.timeout(10_000) })
+        .then(async (res) => {
+          await res?.body?.cancel().catch(() => {});
+          return res?.status ?? 0;
+        })
+        .catch(() => 0)
+    )
+  );
+  return Response.json(
+    { id, status: "cancelled", gateway: results[0] === 200 ? "cancelled" : results[0] === 404 ? "not_queued" : "unreachable" },
     { headers: { "cache-control": "no-store" } }
   );
 }
