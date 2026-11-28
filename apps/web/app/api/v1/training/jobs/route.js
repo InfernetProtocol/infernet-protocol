@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { handleRoute } from "@/lib/http";
 import { getCurrentUser } from "@/lib/supabase/auth-server";
 import { submitTrainingJob } from "@/lib/data/training-market";
+import { reportAttack } from "@/lib/security/attack-report";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,17 @@ export async function POST(request) {
             minVramGb: body.min_vram_gb ?? 16,
             pricePerShardUsd: body.price_per_shard_usd ?? 0,
             expiresAt: body.expires_at ?? null
+        }).catch(async (err) => {
+            // Code in a config is an attack, not a mistake: report the IP to
+            // ThreatCrush and ban the account, then refuse like any 400.
+            if (err?.name === "TrainingConfigError" && err.attack) {
+                await reportAttack(request, {
+                    category: "app.rce_payload",
+                    reason: `code in training job ${err.field ?? "config"}`,
+                    userId: user.id
+                });
+            }
+            throw err;
         });
         return NextResponse.json({ data: result }, { status: 201 });
     });

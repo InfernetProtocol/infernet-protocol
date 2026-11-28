@@ -1,4 +1,11 @@
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import {
+    validateTrainingConfig,
+    validateModelName,
+    validateTrainingUrl,
+    looksLikeCode,
+    TrainingConfigError
+} from "@infernetprotocol/config/training-config";
 
 /**
  * Training market data layer (IPIP-0030).
@@ -25,6 +32,17 @@ export async function submitTrainingJob({
     if (!Number.isFinite(numShards) || numShards < 1 || numShards > 256) {
         throw httpErr(400, "num_shards must be 1..256");
     }
+    // Operators render config into a Python training script and fetch these
+    // URLs, so both are untrusted input to someone else's machine. Throws a
+    // TrainingConfigError (400, .attack when it carried code).
+    baseModel = validateModelName(baseModel);
+    config = validateTrainingConfig(config);
+    datasetBaseUrl = validateTrainingUrl(datasetBaseUrl, "dataset_base_url");
+    if (uploadBaseUrl) uploadBaseUrl = validateTrainingUrl(uploadBaseUrl, "upload_base_url");
+    if (name != null && (typeof name !== "string" || name.length > 200)) {
+        throw httpErr(400, "name must be a string of at most 200 characters");
+    }
+    if (looksLikeCode(name)) throw new TrainingConfigError("name: contains code", { field: "name", attack: true });
     const supabase = getSupabaseServerClient();
     const budget = pricePerShardUsd * numShards;
 
