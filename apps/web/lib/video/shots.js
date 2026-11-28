@@ -172,32 +172,58 @@ export function fallbackPlan({ subject, shots }) {
   };
 }
 
+/**
+ * Any value a model put in a field, as text: strings as they are, arrays and
+ * objects as their string leaves joined ("a tabby cat, tactical helmet").
+ */
+export function textOf(v, depth = 0) {
+  if (v == null || depth > 3) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (Array.isArray(v)) return v.map((x) => textOf(x, depth + 1)).filter(Boolean).join(", ");
+  if (typeof v === "object") {
+    // Number-ish keys (shot, duration, index) carry no picture.
+    return Object.entries(v)
+      .filter(([k, x]) => !/^(shot|index|n|number|id|duration|seconds|length|time)$/i.test(k) && x != null)
+      .map(([, x]) => textOf(x, depth + 1))
+      .filter(Boolean)
+      .join(", ");
+  }
+  return "";
+}
+
+/** The JSON object in a model reply: drops <think> blocks and code fences, tolerates trailing commas. */
+export function jsonIn(text) {
+  const s = String(text ?? "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/```(?:json)?/gi, "");
+  const a = s.indexOf("{");
+  const b = s.lastIndexOf("}");
+  if (a < 0 || b <= a) return null;
+  const raw = s.slice(a, b + 1);
+  for (const candidate of [raw, raw.replace(/,\s*([}\]])/g, "$1")]) {
+    try {
+      return JSON.parse(candidate);
+    } catch {}
+  }
+  return null;
+}
+
 /** A plan object or a model reply containing one, normalised; null if unusable. */
 export function parsePlan(input, { shots, subject }) {
-  let obj = input;
-  if (typeof input === "string") {
-    const s = input.replace(/```(?:json)?/gi, "");
-    const a = s.indexOf("{");
-    const b = s.lastIndexOf("}");
-    if (a < 0 || b <= a) return null;
-    try {
-      obj = JSON.parse(s.slice(a, b + 1));
-    } catch {
-      return null;
-    }
-  }
-  if (!obj || typeof obj !== "object" || !Array.isArray(obj.shots)) return null;
-  const list = obj.shots
-    .map((x) => oneLine(typeof x === "string" ? x : x?.action ?? x?.visual ?? x?.prompt ?? "", 400))
-    .filter((x) => x.length >= 8);
-  const subjects = oneLine(obj.subjects, 600);
+  const obj = typeof input === "string" ? jsonIn(input) : input;
+  if (!obj || typeof obj !== "object") return null;
+  const rawShots = Array.isArray(obj.shots) ? obj.shots : Array.isArray(obj.scenes) ? obj.scenes : null;
+  if (!rawShots) return null;
+  const list = rawShots.map((x) => oneLine(textOf(x), 400)).filter((x) => x.length >= 8);
+  const subjects = oneLine(textOf(obj.subjects ?? obj.subject ?? obj.characters), 600);
   if (list.length < Math.min(shots, 2) || subjects.length < 3) return null;
   while (list.length < shots) list.push(CAMERA[list.length % CAMERA.length]);
   return {
     subjects: animalsOnly(subject) && !/not (people|humans?)/i.test(subjects) ? `${subjects} (real animals, not people)` : subjects,
-    setting: oneLine(obj.setting, 300),
-    style: oneLine(obj.style, 250),
-    avoid: oneLine(obj.avoid, 300),
+    setting: oneLine(textOf(obj.setting), 300),
+    style: oneLine(textOf(obj.style), 250),
+    avoid: oneLine(textOf(obj.avoid ?? obj.negative), 300),
     shots: list.slice(0, shots)
   };
 }
@@ -224,7 +250,7 @@ export async function writePlan({ subject, shots, vertical }, { stream = null, c
         }
         const plan = parsePlan(text, { shots, subject });
         if (plan) return { plan, writer: "model" };
-        console.warn(`[clip] plan attempt ${attempt}: unusable reply (${text.length} chars)`);
+        console.warn(`[clip] plan attempt ${attempt}: unusable reply (${text.length} chars): ${text.replace(/\s+/g, " ").slice(0, 300)}`);
       } catch (e) {
         console.warn(`[clip] plan attempt ${attempt}:`, e?.message ?? e);
       }
