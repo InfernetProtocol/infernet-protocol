@@ -18,7 +18,8 @@ import { runGatewayJob, gatewayError, fetchSpeechGateway } from "@/lib/chat/spee
 import { chargeImageJob } from "@/lib/data/interactive-billing";
 import { createPromoRegistry } from "@/lib/promo/jobs";
 import { ffmpegBin, run, probeSeconds } from "@/lib/promo/assemble";
-import { passthroughStatus, videoPriceMicro } from "@/lib/billing/video";
+import { passthroughStatus } from "@/lib/billing/video";
+import { busyMeter, computePriceMicro } from "@/lib/billing/compute-price";
 import { SHOT_MODELS, musicCaption, shotNegative, shotPrompt, shotSize, shotSteps, writePlan } from "@/lib/video/shots";
 
 const g = globalThis;
@@ -121,16 +122,17 @@ export function clipRunner(request, billing = {}) {
         const requestId = shotRequestId(job.id, i, a);
         job.currentRequest = requestId;
         set(`shot ${i + 1} of ${total}: queued`);
+        const meter = busyMeter();
         try {
           const r = await runGatewayJob("/v1/videos", spec, {
             requestId,
             resume: Boolean(job.resumed),
-            onProgress: (p) =>
+            onProgress: meter.wrap((p) =>
               set(`shot ${i + 1} of ${total}: ${p.stage}`, {
                 detail: typeof p.detail === "string" ? p.detail.slice(0, 200) : undefined,
                 queue_position: Number.isFinite(p.queue_position) ? p.queue_position : undefined,
                 eta_s: Number.isFinite(p.eta_s) ? p.eta_s + (total - i - 1) * (ck.shotSeconds ?? 360) : undefined
-              })
+              }))
           });
           if (job.cancelRequested) throw cancelled();
           if (r.status !== 200) {
@@ -143,6 +145,7 @@ export function clipRunner(request, billing = {}) {
           await writeFile(file, bytes);
           await job.saveArtifact?.(`shot-${i}.mp4`, bytes);
           ck.done.push(i);
+          (ck.busy ??= {})[i] = Math.round(meter.seconds());
           const took = (Date.now() - (job.shotStarted ?? job.createdAt)) / 1000;
           ck.shotSeconds = Math.round(ck.shotSeconds ? (ck.shotSeconds + took) / 2 : took);
           job.shotStarted = Date.now();
@@ -187,16 +190,18 @@ export function clipRunner(request, billing = {}) {
       if (ck.music && existsSync(musicFile)) music = musicFile;
       else {
         set("writing the soundtrack");
+        const musicMeter = busyMeter();
         try {
           const r = await runGatewayJob(
             "/v1/music",
             { prompt: musicCaption(plan, request.subject), lyrics: "", duration: Math.ceil(duration) + 2, model: "ace-step-1.5", seed: baseSeed % 4294967296 },
-            { requestId: `${job.id}-music`, resume: Boolean(job.resumed), maxWaitS: Number(process.env.CLIP_MUSIC_WAIT_S) || 15 * 60 }
+            { requestId: `${job.id}-music`, resume: Boolean(job.resumed), maxWaitS: Number(process.env.CLIP_MUSIC_WAIT_S) || 15 * 60, onProgress: musicMeter.wrap(null) }
           );
           if (r.status === 200 && r.body?.length) {
             await writeFile(musicFile, Buffer.from(r.body));
             await job.saveArtifact?.("music.audio", Buffer.from(r.body));
             ck.music = true;
+            ck.musicBusy = Math.round(musicMeter.seconds());
             await saveCk();
             music = musicFile;
           } else console.warn(`[clip] job ${job.id} soundtrack: gateway HTTP ${r.status}`);
@@ -217,10 +222,15 @@ export function clipRunner(request, billing = {}) {
     if (!music) await writeFile(out, await readFile(silent));
     const bytes = (await stat(out)).size;
 
-    // 4. Bill what rendered: one clip price per shot, once per job (the ledger is keyed by the job id).
+    // 5. Bill the compute it used: each shot's busy GPU seconds (and the soundtrack's)
+    //    at 2x the card's hourly cost, once per job (the ledger is keyed by the job id).
     let charged = null;
+    const shotIds = [...ck.done];
+    const costMicro =
+      shotIds.reduce((sum, i) => sum + computePriceMicro("video", ck.busy?.[i] ?? ck.shotSeconds ?? 600), 0) +
+      (music ? computePriceMicro("music", ck.musicBusy ?? 120) : 0);
     if (billing?.mode === "balance" && billing.userId) {
-      const charge = await chargeImageJob({ userId: billing.userId, jobId: job.id, costMicro: shots.length * videoPriceMicro() });
+      const charge = await chargeImageJob({ userId: billing.userId, jobId: job.id, costMicro });
       charged = charge?.charged ? charge.charged_usd : null;
     }
     set("done", { charged_usd: charged, missing_shots: failures.length || undefined });
