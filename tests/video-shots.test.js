@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  musicCaption,
   textOf,
   animalsOnly,
   fallbackPlan,
@@ -76,6 +77,13 @@ describe("long /video clips: shots", () => {
     for (const w of ["man", "woman", "men", "women", "old", "adult", "mature"]) expect(neg).not.toMatch(new RegExp(`\\b${w}\\b`, "i"));
     expect(neg).toMatch(/human soldier/);
     expect(neg).toMatch(/humanoid/);
+  });
+
+  it("every clip gets an instrumental soundtrack brief", () => {
+    expect(musicCaption({ music: "dark synthwave, 100 bpm" })).toBe("dark synthwave, 100 bpm, instrumental, no vocals");
+    expect(musicCaption(fallbackPlan({ subject: "two foxes in the snow", shots: 1 }), "two foxes in the snow")).toMatch(/cinematic.*no vocals/);
+    expect(musicCaption(fallbackPlan({ subject: "an anime fox", shots: 1 }), "an anime fox")).toMatch(/playful/);
+    expect(parsePlan('{"subjects":"two red foxes","music":"calm piano","shots":["a","foxes run far","foxes jump high"]}', { shots: 2, subject: "x" }).music).toBe("calm piano");
   });
 
   it("reads plans whatever shape the model wrote them in", () => {

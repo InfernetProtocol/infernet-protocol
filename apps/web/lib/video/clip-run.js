@@ -19,7 +19,7 @@ import { chargeImageJob } from "@/lib/data/interactive-billing";
 import { createPromoRegistry } from "@/lib/promo/jobs";
 import { ffmpegBin, run, probeSeconds } from "@/lib/promo/assemble";
 import { passthroughStatus, videoPriceMicro } from "@/lib/billing/video";
-import { SHOT_MODELS, shotNegative, shotPrompt, shotSize, shotSteps, writePlan } from "@/lib/video/shots";
+import { SHOT_MODELS, musicCaption, shotNegative, shotPrompt, shotSize, shotSteps, writePlan } from "@/lib/video/shots";
 
 const g = globalThis;
 g.__infernetClipDurable ??= createDurableJobs({ kind: "clip", store: () => mediaStore(), ttlMs: ttlFromEnv() });
@@ -47,6 +47,18 @@ export function concatArgs({ shots, out, width, height, fps, threads = 4 }) {
   const cat = `${shots.map((_, i) => `[v${i}]`).join("")}concat=n=${shots.length}:v=1:a=0[out]`;
   args.push("-filter_complex", `${norm};${cat}`, "-map", "[out]", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-threads", String(threads), out);
   return args;
+}
+
+/** Put an audio track under the video: trimmed to the video, faded out over the last 1.5 s, AAC. */
+export function muxArgs({ video, audio, out, duration }) {
+  const d = Math.max(1, Number(duration) || 1);
+  const fadeAt = Math.max(0, d - 1.5).toFixed(2);
+  return [
+    "-y", "-hide_banner", "-loglevel", "error",
+    "-i", video, "-i", audio,
+    "-filter_complex", `[1:a]atrim=0:${d.toFixed(2)},afade=t=in:st=0:d=0.8,afade=t=out:st=${fadeAt}:d=1.5,volume=0.9[a]`,
+    "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", out
+  ];
 }
 
 /**
@@ -162,9 +174,47 @@ export function clipRunner(request, billing = {}) {
 
     // 3. Cut them together.
     set("cutting the shots together");
+    const silent = path.join(job.dir, "clip-silent.mp4");
+    await run(ffmpegBin(), concatArgs({ shots, out: silent, width, height, fps, threads: Number(process.env.PROMO_FFMPEG_THREADS) || 4 }), { timeoutMs: 10 * 60 * 1000 });
+    const duration = (await probeSeconds(silent)) ?? shots.length * ((frames - 1) / fps);
+
+    // 4. A soundtrack (ACE-Step on a c0mpute music worker), mixed in. Optional:
+    //    no music worker in time (CLIP_MUSIC_WAIT_S, default 15 min) = the silent cut.
     const out = path.join(job.dir, "clip.mp4");
-    await run(ffmpegBin(), concatArgs({ shots, out, width, height, fps, threads: Number(process.env.PROMO_FFMPEG_THREADS) || 4 }), { timeoutMs: 10 * 60 * 1000 });
-    const duration = (await probeSeconds(out)) ?? shots.length * ((frames - 1) / fps);
+    let music = null;
+    if (process.env.CLIP_MUSIC !== "0") {
+      const musicFile = path.join(job.dir, "music.audio");
+      if (ck.music && existsSync(musicFile)) music = musicFile;
+      else {
+        set("writing the soundtrack");
+        try {
+          const r = await runGatewayJob(
+            "/v1/music",
+            { prompt: musicCaption(plan, request.subject), lyrics: "", duration: Math.ceil(duration) + 2, model: "ace-step-1.5", seed: baseSeed % 4294967296 },
+            { requestId: `${job.id}-music`, resume: Boolean(job.resumed), maxWaitS: Number(process.env.CLIP_MUSIC_WAIT_S) || 15 * 60 }
+          );
+          if (r.status === 200 && r.body?.length) {
+            await writeFile(musicFile, Buffer.from(r.body));
+            await job.saveArtifact?.("music.audio", Buffer.from(r.body));
+            ck.music = true;
+            await saveCk();
+            music = musicFile;
+          } else console.warn(`[clip] job ${job.id} soundtrack: gateway HTTP ${r.status}`);
+        } catch (e) {
+          console.warn(`[clip] job ${job.id} soundtrack failed: ${e?.message ?? e}`);
+        }
+      }
+    }
+    if (music) {
+      set("mixing the soundtrack");
+      try {
+        await run(ffmpegBin(), muxArgs({ video: silent, audio: music, out, duration }), { timeoutMs: 5 * 60 * 1000 });
+      } catch (e) {
+        console.warn(`[clip] job ${job.id} mix failed: ${e?.message ?? e}`);
+        music = null;
+      }
+    }
+    if (!music) await writeFile(out, await readFile(silent));
     const bytes = (await stat(out)).size;
 
     // 4. Bill what rendered: one clip price per shot, once per job (the ledger is keyed by the job id).
@@ -174,7 +224,7 @@ export function clipRunner(request, billing = {}) {
       charged = charge?.charged ? charge.charged_usd : null;
     }
     set("done", { charged_usd: charged, missing_shots: failures.length || undefined });
-    return { video: out, duration, bytes, shots: shots.length, model: request.model, adult: Boolean(request.adult), width, height };
+    return { video: out, duration, bytes, shots: shots.length, music: Boolean(music), model: request.model, adult: Boolean(request.adult), width, height };
   };
 }
 
@@ -198,6 +248,7 @@ export async function cancelClip(id) {
   if (job.currentRequest) ids.add(job.currentRequest);
   const total = job.request?.shots ?? job.meta?.shots ?? 0;
   for (let i = 0; i < total; i++) for (let a = 0; a < 2; a++) ids.add(shotRequestId(id, i, a));
+  ids.add(`${id}-music`);
   await Promise.all(
     [...ids].map((rid) =>
       fetchSpeechGateway(`/v1/result/${encodeURIComponent(rid)}`, { method: "DELETE", signal: AbortSignal.timeout(10_000) })

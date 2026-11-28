@@ -128,13 +128,14 @@ export function shotCount(seconds, model) {
 export const PLAN_SYSTEM = [
   "You are a film director planning a short video for a text-to-video model (Wan 2.2).",
   "Reply with ONE JSON object and nothing else, in this shape:",
-  '{"subjects": string, "setting": string, "style": string, "avoid": string, "shots": [string, ...]}',
+  '{"subjects": string, "setting": string, "style": string, "avoid": string, "music": string, "shots": [string, ...]}',
   "subjects: who or what is on screen, written as a literal visual description the model cannot misread, reused word for word in every shot.",
   "  Keep exactly the subjects the person asked for, no more and no fewer. If they asked for animals, they are real animals (say the species, size, fur color, that it walks on four legs) wearing or doing what was asked, never people, soldiers or humanoids; e.g. a cat in combat gear is 'a real orange tabby house cat, a small four-legged animal, wearing a tiny tactical helmet and a fitted plate-carrier vest'.",
   "  Give each subject fixed traits (colors, clothing, props) so every shot draws the same characters.",
   "setting: the place, time of day and lighting, one sentence, the same across shots unless the story moves.",
   "style: the look, e.g. 'photorealistic live-action footage, shot on a cinema camera, shallow depth of field, natural motion' when they asked for realistic (that is the default); otherwise the style they asked for.",
   "avoid: comma-separated things the model is likely to draw by mistake for this prompt (e.g. 'human soldier, person, humanoid' for animals in gear). Never name ages or genders here (no man, woman, adult, old). Short.",
+  "music: comma-separated style tags for an instrumental soundtrack that fits the mood (genres, instruments, tempo in BPM). No vocals.",
   "shots: the requested number of shots, in order, each 5 seconds. Each shot is one sentence: the action, motion and camera move (wide establishing, tracking, close-up, slow motion, low angle...). Make it a little story with a beginning, middle and end; vary the camera; keep every shot on the subjects.",
   "Never ask for written words, captions or logos. Plain ASCII punctuation, no em dashes."
 ].join("\n");
@@ -168,6 +169,7 @@ export function fallbackPlan({ subject, shots }) {
     setting: "",
     style: drawn ? "" : "photorealistic live-action footage, cinematic lighting, natural motion, highly detailed",
     avoid: "",
+    music: "",
     shots: Array.from({ length: shots }, (_, i) => CAMERA[i % CAMERA.length])
   };
 }
@@ -224,6 +226,7 @@ export function parsePlan(input, { shots, subject }) {
     setting: oneLine(textOf(obj.setting), 300),
     style: oneLine(textOf(obj.style), 250),
     avoid: oneLine(textOf(obj.avoid ?? obj.negative), 300),
+    music: oneLine(textOf(obj.music ?? obj.soundtrack), 300),
     shots: list.slice(0, shots)
   };
 }
@@ -302,4 +305,12 @@ export function singleShotPrompts(prompt) {
   const plan = fallbackPlan({ subject, shots: 1 });
   plan.shots = ["the camera moves smoothly with the action"];
   return { prompt: shotPrompt(plan, 0, { subject }), negative: shotNegative(plan, { subject }) };
+}
+
+/** Style tags for the clip's instrumental soundtrack (ACE-Step): the plan's, else built from its style. */
+export function musicCaption(plan, subject = "") {
+  const own = oneLine(plan?.music ?? "", 300);
+  if (own) return `${own}, instrumental, no vocals`.slice(0, 400);
+  const drawn = DRAWN.test(`${subject} ${plan?.style ?? ""}`);
+  return drawn ? "playful orchestral, light percussion, warm strings, 110 bpm, instrumental, no vocals" : "cinematic soundtrack, atmospheric synth pads, steady pulse, piano, 90 bpm, instrumental, no vocals";
 }
