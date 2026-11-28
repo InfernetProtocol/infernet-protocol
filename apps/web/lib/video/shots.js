@@ -134,7 +134,7 @@ export const PLAN_SYSTEM = [
   "  Give each subject fixed traits (colors, clothing, props) so every shot draws the same characters.",
   "setting: the place, time of day and lighting, one sentence, the same across shots unless the story moves.",
   "style: the look, e.g. 'photorealistic live-action footage, shot on a cinema camera, shallow depth of field, natural motion' when they asked for realistic (that is the default); otherwise the style they asked for.",
-  "avoid: comma-separated things the model is likely to draw by mistake for this prompt (e.g. 'human soldier, person, man, humanoid' for animals in gear). Short.",
+  "avoid: comma-separated things the model is likely to draw by mistake for this prompt (e.g. 'human soldier, person, humanoid' for animals in gear). Never name ages or genders here (no man, woman, adult, old). Short.",
   "shots: the requested number of shots, in order, each 5 seconds. Each shot is one sentence: the action, motion and camera move (wide establishing, tracking, close-up, slow motion, low angle...). Make it a little story with a beginning, middle and end; vary the camera; keep every shot on the subjects.",
   "Never ask for written words, captions or logos. Plain ASCII punctuation, no em dashes."
 ].join("\n");
@@ -267,14 +267,33 @@ export function shotPrompt(plan, i, { subject = "" } = {}) {
   return oneLine(parts.filter(Boolean).join(". ").replace(/\.\s*\./g, "."), MAX_PROMPT_CHARS);
 }
 
+/**
+ * Words a negative prompt must never carry: the c0mpute content policy reads
+ * excluding adult features ("man", "woman", "old"...) as asking for a younger
+ * subject, and in 18+ mode refuses the whole clip. Same list as the gateway's
+ * terms.json `adult_negative`.
+ */
+export const ADULT_NEGATIVE_WORDS = Object.freeze(["adult", "adults", "mature", "grown", "grownup", "woman", "women", "man", "men", "aged", "old", "older", "elderly", "milf", "wrinkles", "wrinkled"]);
+const ADULT_NEG_RE = new RegExp(`\\b(${ADULT_NEGATIVE_WORDS.join("|")})\\b`, "i");
+
+/** Drop every comma-separated item that names an age or adult feature. */
+export function safeNegative(text) {
+  return String(text ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => x && !ADULT_NEG_RE.test(x))
+    .join(", ");
+}
+
 /** Negative prompt: quality terms, the plan's likely mistakes, people when it is animals only, and the caller's own. */
 export function shotNegative(plan, { subject = "", extra = "" } = {}) {
   const drawn = DRAWN.test(`${subject} ${plan.style}`);
   const parts = [drawn ? BASE_NEGATIVE.replace(PHOTO_NEGATIVE, "") : BASE_NEGATIVE];
-  if (plan.avoid) parts.push(plan.avoid);
-  if (animalsOnly(subject)) parts.push("human, person, people, man, woman, human soldier, humanoid, human face, human hands, anthropomorphic person");
-  if (extra) parts.push(extra);
-  return oneLine(parts.join(", "), MAX_PROMPT_CHARS);
+  if (plan.avoid) parts.push(safeNegative(plan.avoid));
+  if (animalsOnly(subject)) parts.push("human, person, people, human soldier, humanoid, human face, human hands, anthropomorphic person");
+  // The caller's own negative is theirs to word; the policy still checks it.
+  const out = safeNegative(parts.join(", "));
+  return oneLine(extra ? `${out}, ${extra}` : out, MAX_PROMPT_CHARS);
 }
 
 /** The prompt a single (one-shot) clip renders: the same fidelity rules without a plan. */

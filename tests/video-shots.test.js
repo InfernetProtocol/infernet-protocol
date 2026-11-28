@@ -69,6 +69,15 @@ describe("long /video clips: shots", () => {
     expect(parsePlan('{"subjects":"x y z","shots":["only one shot here"]}', { shots: 6, subject: "x" })).toBeNull();
   });
 
+  it("negative prompts never name ages or adult features (18+ mode refuses those as a minor indicator)", () => {
+    const subject = subjectOf(COMBAT);
+    const plan = { ...fallbackPlan({ subject, shots: 1 }), avoid: "human soldier, person, man in uniform, old man, humanoid" };
+    const neg = shotNegative(plan, { subject });
+    for (const w of ["man", "woman", "men", "women", "old", "adult", "mature"]) expect(neg).not.toMatch(new RegExp(`\\b${w}\\b`, "i"));
+    expect(neg).toMatch(/human soldier/);
+    expect(neg).toMatch(/humanoid/);
+  });
+
   it("reads plans whatever shape the model wrote them in", () => {
     const objShots = '<think>let me plan {not json}</think>{"subjects":[{"name":"cat","description":"a real orange tabby cat in a tactical vest"},{"name":"dog","description":"a german shepherd in a helmet"}],"shots":[{"shot":1,"description":"the cat sprints across rubble","camera":"tracking"},{"shot":2,"description":"the dog leaps a wall","camera":"low angle"},],}';
     const plan = parsePlan(objShots, { shots: 2, subject: "a cat and a dog in combat gear" });
